@@ -42,6 +42,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     bool _fixture;
     bool _renaming;
     bool _disposed;
+    bool _capturingScreen;
 
     public WorkspaceFullView()
     {
@@ -82,6 +83,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     void Reload()
     {
         if (_id is not { } id || WorkspaceStore.Find(id) is not { } workspace) return;
+        HeaderError.Visibility = Visibility.Collapsed;
         NameText.Text = workspace.Name;
         RenameBox.Text = workspace.Name;
         const string folderPrefix = "folder:";
@@ -198,16 +200,24 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     {
         if (_disposed || _id is not { } id || !IsVisible) return;
         RefreshLive();
-        if (!HubPreview.Allowed) return;
+        // One capture in flight at a time: a slow Task.Run from an earlier tick must finish (or be
+        // dropped below) before another starts, rather than racing it.
+        if (_capturingScreen || !HubPreview.Allowed) return;
         WorkspaceControl? plane = WorkspaceRuntime.Of(id)?.Plane;
         if (plane is null) return;
-        BitmapSource? frame = await Task.Run(() =>
+        _capturingScreen = true;
+        try
         {
-            try { BitmapSource? shot = plane.Frame(); if (shot is not null && !shot.IsFrozen) shot.Freeze(); return shot; }
-            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or System.ComponentModel.Win32Exception) { return null; }
-        });
-        if (_disposed || id != _id || frame is null) return;
-        ScreenImage.Source = frame;
+            BitmapSource? frame = await Task.Run(() =>
+            {
+                try { BitmapSource? shot = plane.Frame(); if (shot is not null && !shot.IsFrozen) shot.Freeze(); return shot; }
+                catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or System.ComponentModel.Win32Exception) { return null; }
+            });
+            // Drop a result that lands after the view hid or moved on to another workspace.
+            if (_disposed || id != _id || !IsVisible || frame is null) return;
+            ScreenImage.Source = frame;
+        }
+        finally { _capturingScreen = false; }
     }
 
     static BitmapSource? ReadLastFrame(string id)
@@ -240,6 +250,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     void TakeOver_Click(object sender, RoutedEventArgs e)
     {
+        HeaderError.Visibility = Visibility.Collapsed;
         if (_id is not { } id || WorkspaceRuntime.Of(id)?.Plane is not { } plane) return;
         if (plane.Driving == Driver.Owner) { plane.Release(); StopCarryOn(); }
         else { plane.OwnerTakes(); RestartCarryOn(); }
@@ -268,18 +279,27 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     void Folder_Click(object sender, RoutedEventArgs e)
     {
         if (_id is not { } id) return;
+        HeaderError.Visibility = Visibility.Collapsed;
         try
         {
             string folder = WorkspaceStore.FolderOf(id);
-            if (!Directory.Exists(folder)) return;
+            if (!Directory.Exists(folder)) { ShowHeaderError("Couldn't open the folder."); return; }
             Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
         }
-        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException) { }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        { ShowHeaderError("Couldn't open the folder."); }
+    }
+
+    void ShowHeaderError(string message)
+    {
+        HeaderError.Text = message;
+        HeaderError.Visibility = Visibility.Visible;
     }
 
     void More_Click(object sender, RoutedEventArgs e)
     {
         if (_id is not { } id) return;
+        HeaderError.Visibility = Visibility.Collapsed;
         var menu = new ContextMenu { PlacementTarget = MoreButton, Placement = PlacementMode.Bottom };
         void Add(string label, Action action)
         {
@@ -287,12 +307,28 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             item.Click += (_, _) => action();
             menu.Items.Add(item);
         }
+        // An asleep workspace's More menu offers "Start computer" in its place (WAVE1 decisions).
         if (WorkspaceRuntime.Of(id) is not null) Add("Stop computer", () => WorkspaceRuntime.Of(id)?.Dispose());
+        else Add("Start computer", () => StartComputer(id));
         Add("Rename", BeginRename);
         menu.Items.Add(AgentsMenu(id));
         menu.Items.Add(new Separator());
         Add("Delete", () => DeleteWorkspace(id));
+        // Test seam (ui-probe/Scenes.Hub.cs): the gate drives this exact menu instance rather than
+        // rebuilding its own copy of the item list above.
+        LastMoreMenu = menu;
         menu.IsOpen = true;
+    }
+
+    internal ContextMenu? LastMoreMenu;
+
+    void StartComputer(string id)
+    {
+        if (WorkspaceStore.Find(id) is not { } workspace) return;
+        try { WorkspaceRuntime.Start(workspace); }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        { ShowHeaderError("The computer could not start."); }
+        RefreshLive();
     }
 
     MenuItem AgentsMenu(string id)
@@ -325,6 +361,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     void BeginRename()
     {
+        HeaderError.Visibility = Visibility.Collapsed;
         _renaming = true;
         NameText.Visibility = Visibility.Collapsed;
         RenameBox.Visibility = Visibility.Visible;

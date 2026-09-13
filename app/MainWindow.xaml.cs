@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using HiveMind.AgentWorkspaces;
@@ -47,6 +48,7 @@ public partial class MainWindow : Window, IDisposable
         _cardPreviews.Tick += CardPreviews_Tick;
         _savePreferences = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(600) };
         _savePreferences.Tick += (_, _) => { _savePreferences.Stop(); SavePreferences(); };
+        AppSettingsStore.Changed += SettingsChanged;
         ModuleEntry.DashboardOpenRequested += EngineRequestedWorkspace;
         LocationChanged += (_, _) => QueuePreferenceSave();
         Loaded += Window_Loaded;
@@ -111,6 +113,7 @@ public partial class MainWindow : Window, IDisposable
         StackRoot.Visibility = Visibility.Visible;
         (_stackPlacement ?? ShellPlacement.DefaultStack()).Restore(this, 320, 480);
         QueuePreferenceSave();
+        UpdateVisibleWork();
     }
 
     internal void ShowWide(string? select)
@@ -124,6 +127,7 @@ public partial class MainWindow : Window, IDisposable
         string? id = select ?? _selectedId ?? _hub.Working.Concat(_hub.Asleep).Select(entry => entry.Id).FirstOrDefault();
         if (id is not null) SelectWorkspace(id);
         QueuePreferenceSave();
+        UpdateVisibleWork();
     }
 
     internal void SelectWorkspace(string id)
@@ -165,6 +169,7 @@ public partial class MainWindow : Window, IDisposable
         // So Escape reaches its own handler first (it raises BackRequested) rather than this window's.
         view.Focus();
         QueuePreferenceSave();
+        UpdateVisibleWork();
     }
 
     void BackFromSettings()
@@ -236,7 +241,9 @@ public partial class MainWindow : Window, IDisposable
 
     void UpdateVisibleWork()
     {
-        bool shown = IsLoaded && IsVisible && WindowState != WindowState.Minimized;
+        // Settings covers the whole window: none of the working cards or the sidebar's thumbnails
+        // are on screen while it shows, so there is nothing to capture.
+        bool shown = IsLoaded && IsVisible && WindowState != WindowState.Minimized && _mode != "settings";
         ModuleEntry.HubShowing = shown;
         if (shown)
         {
@@ -246,13 +253,26 @@ public partial class MainWindow : Window, IDisposable
                 _cardPreviews.Start();
                 CardPreviews_Tick(null, EventArgs.Empty);
             }
+            _hub.StartAging();
         }
-        else { _cardPreviews.Stop(); _previewGeneration++; }
+        else { _cardPreviews.Stop(); _previewGeneration++; _hub.StopAging(); }
     }
+
+    /// <summary>A live change to Settings > Performance > Smoothness re-times the running loop
+    /// immediately instead of waiting for the next stop/start.</summary>
+    void SettingsChanged(AppSettings settings) => Application.Current?.Dispatcher.BeginInvoke(() =>
+    {
+        if (_disposed || !_cardPreviews.IsEnabled) return;
+        TimeSpan interval = HubPreview.Interval();
+        if (_cardPreviews.Interval != interval) _cardPreviews.Interval = interval;
+    });
 
     async void CardPreviews_Tick(object? sender, EventArgs e)
     {
         if (_capturing || _disposed || !_cardPreviews.IsEnabled || !HubPreview.Allowed) return;
+        // Only the list actually on screen for the current mode has cards worth capturing; Settings
+        // (or the window not showing) already stopped the timer in UpdateVisibleWork.
+        if (CaptureSurface().List is null) return;
         _capturing = true;
         long generation = _previewGeneration;
         try
@@ -260,6 +280,7 @@ public partial class MainWindow : Window, IDisposable
             foreach (HubEntry entry in _hub.Working.ToArray())
             {
                 if (_disposed || generation != _previewGeneration) break;
+                if (!ShouldCapture(entry)) continue;
                 WorkspaceControl? plane = WorkspaceRuntime.Of(entry.Id)?.Plane;
                 if (plane is null) continue;
                 BitmapSource? frame = await Task.Run(() =>
@@ -274,11 +295,59 @@ public partial class MainWindow : Window, IDisposable
         finally { _capturing = false; }
     }
 
+    /// <summary>The list and its scroll viewport that are actually on screen for the current mode
+    /// (null for "settings", where neither the stack nor the sidebar is visible).</summary>
+    (ItemsControl? List, ScrollViewer? Viewport) CaptureSurface() => _mode switch
+    {
+        "wide" => (SidebarWorkingList, SidebarScroll),
+        "stack" => (StackWorkingList, StackScroll),
+        _ => (null, null),
+    };
+
+    /// <summary>True when <paramref name="entry"/>'s card is realized and any part of it falls
+    /// inside the visible scrolled area of the current mode's list; used by the capture loop and,
+    /// through <see cref="ShouldCaptureForTest"/>, by the gate driving this same method.</summary>
+    bool ShouldCapture(HubEntry entry)
+    {
+        (ItemsControl? list, ScrollViewer? viewport) = CaptureSurface();
+        return list is not null && list.ItemContainerGenerator.ContainerFromItem(entry) is FrameworkElement container
+            && IsInViewport(viewport!, container);
+    }
+
+    /// <summary>True when any part of <paramref name="item"/> falls inside the visible scrolled
+    /// area of <paramref name="viewport"/>; a card scrolled off above or below is skipped.</summary>
+    static bool IsInViewport(ScrollViewer viewport, FrameworkElement item)
+    {
+        if (!item.IsVisible || item.ActualWidth <= 0 || item.ActualHeight <= 0) return false;
+        Rect bounds = item.TransformToAncestor(viewport).TransformBounds(new Rect(0, 0, item.ActualWidth, item.ActualHeight));
+        return bounds.IntersectsWith(new Rect(0, 0, viewport.ActualWidth, viewport.ActualHeight));
+    }
+
+    // --- test seams for the gate (Scenes.Hub.cs): drive this window's real state, never a copy ---
+
+    /// <summary>True while the card-preview loop's timer is actually running.</summary>
+    internal bool PreviewLoopRunning => _cardPreviews.IsEnabled;
+    /// <summary>The card-preview loop's current tick interval, live after a Settings change.</summary>
+    internal TimeSpan PreviewLoopInterval => _cardPreviews.Interval;
+    /// <summary>True when the working entry with this id would be captured on the next tick, in
+    /// whichever list (stack or sidebar) is on screen right now: the same test the loop itself runs.</summary>
+    internal bool ShouldCaptureForTest(string id) =>
+        _hub.Working.FirstOrDefault(entry => entry.Id == id) is { } entry && ShouldCapture(entry);
+
     void AspectBorder_Loaded(object sender, RoutedEventArgs e)
     {
-        var border = (FrameworkElement)sender;
+        var border = (Border)sender;
         double ratio = double.Parse((string)border.Tag, System.Globalization.CultureInfo.InvariantCulture);
-        border.SizeChanged += (_, args) => { if (args.WidthChanged) border.Height = Math.Round(border.ActualWidth * ratio); };
+        double radius = border.CornerRadius.TopLeft;
+        void Reclip()
+        {
+            // Border.ClipToBounds clips to the rectangular bounds only, not the rounded corners
+            // themselves, so without this the preview image's square corners cover the radius.
+            if (border.ActualWidth > 0 && border.ActualHeight > 0)
+                border.Clip = new RectangleGeometry(new Rect(0, 0, border.ActualWidth, border.ActualHeight), radius, radius);
+        }
+        border.SizeChanged += (_, args) => { if (args.WidthChanged) border.Height = Math.Round(border.ActualWidth * ratio); Reclip(); };
+        Reclip();
     }
 
     // --- the engine asking for a specific workspace, and the corner window's visibility rule ---
@@ -414,6 +483,7 @@ public partial class MainWindow : Window, IDisposable
         _cardPreviews.Stop();
         _cardPreviews.Tick -= CardPreviews_Tick;
         _savePreferences.Stop();
+        AppSettingsStore.Changed -= SettingsChanged;
         ModuleEntry.DashboardOpenRequested -= EngineRequestedWorkspace;
         _hub.Working.CollectionChanged -= HubChanged;
         _hub.Asleep.CollectionChanged -= HubChanged;

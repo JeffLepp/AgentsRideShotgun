@@ -117,6 +117,10 @@
                     <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
             </ItemsControl>
+            <!-- A launch failure (folder, computer) says so briefly here instead of failing silently. -->
+            <TextBlock x:Name="HeaderError" Grid.Column="3" FontSize="12" Foreground="{DynamicResource DangerInkBrush}"
+                       VerticalAlignment="Center" HorizontalAlignment="Right" Margin="10,0,10,0"
+                       TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
             <Button x:Name="TakeOverButton" Grid.Column="4" Click="TakeOver_Click" Padding="12,6"
                     AutomationProperties.Name="{Binding ElementName=TakeOverLabel, Path=Text}">
                 <StackPanel Orientation="Horizontal">

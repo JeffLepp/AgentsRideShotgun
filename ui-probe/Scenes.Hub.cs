@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using HiveMind.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
@@ -82,6 +83,16 @@ static class HubScenes
             await Task.Delay(300);
             Program.Check(window.DisplayMode == "stack", "The hub opens on the stack");
             Program.Check(window.MinWidth == 320 && window.MinHeight == 480, "The stack has its own minimum size");
+
+            // --- fix list item 9: the relative-age refresh runs only while the window is visible ---
+            Program.Check(window.Hub.AgingActive, "The relative-age refresh timer runs while the hub window is visible");
+            window.Hide();
+            await Task.Delay(100);
+            Program.Check(!window.Hub.AgingActive, "The relative-age refresh timer stops once the hub window is hidden");
+            window.Show();
+            await Task.Delay(300);
+            Program.Check(window.Hub.AgingActive, "The relative-age refresh timer restarts when the hub window is shown again");
+
             StoredWorkspace shop = WorkspaceStore.Create("shop");
             StoredWorkspace asleepOne = WorkspaceStore.Create("asleep-one");
             await Task.Delay(300);
@@ -125,10 +136,98 @@ static class HubScenes
             ModuleEntry.DashboardOpenRequested -= OnOpen;
             Program.Check(raised && window.SelectedWorkspaceId == asleepOne.Id,
                 "The corner window's open-in-hub opens that workspace in the wide window");
+
+            // --- fix list item 7: an asleep workspace's More menu offers "Start computer" ---------
+            WorkspaceFullView moreView = window.OpenWorkspaceView!;
+            Program.Check(WorkspaceRuntime.Of(asleepOne.Id) is null,
+                "The workspace this check opens has no computer running yet (asleep)");
+            moreView.MoreButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(100);
+            MenuItem? startItem = moreView.LastMoreMenu?.Items.OfType<MenuItem>()
+                .FirstOrDefault(item => Equals(item.Header, "Start computer"));
+            Program.Check(startItem is not null,
+                "An asleep workspace's More menu offers \"Start computer\" in place of \"Stop computer\"");
+            startItem?.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await Task.Delay(500);
+            Program.Check(WorkspaceRuntime.Of(asleepOne.Id) is not null,
+                "Clicking \"Start computer\" on the real menu item actually starts that workspace's computer");
+            WorkspaceRuntime.Of(asleepOne.Id)?.Dispose();
+
+            // --- fix list item 6: store/attention events off the UI thread; dispose vs a queued refresh
+            Exception? crossThreadFailure = null;
+            StoredWorkspace? bgWorkspace = null;
+            await Task.Run(() =>
+            {
+                try { bgWorkspace = WorkspaceStore.Create("bg-thread-test"); }
+                catch (Exception ex) { crossThreadFailure = ex; }
+            });
+            await Task.Delay(300);
+            Program.Check(crossThreadFailure is null,
+                "A workspace-store change raised off the UI thread does not throw mutating the hub's collections");
+            Program.Check(bgWorkspace is not null && window.Hub.Asleep.Any(e => e.Id == bgWorkspace.Id),
+                "...and still reaches the hub's Asleep list once dispatched to the UI thread");
+            if (bgWorkspace is not null) WorkspaceStore.Delete(bgWorkspace.Id);
+
+            var raceModel = new HubViewModel();
+            bool raceThrew = false;
+            StoredWorkspace? raceWorkspace = null;
+            try { await Task.Run(() => raceWorkspace = WorkspaceStore.Create("dispose-race-test")); raceModel.Dispose(); }
+            catch { raceThrew = true; }
+            await Task.Delay(300);
+            Program.Check(!raceThrew,
+                "Disposing a hub view model right after a queued store-change refresh does not throw");
+            Program.Check(raceWorkspace is not null && window.Hub.Asleep.Any(e => e.Id == raceWorkspace.Id),
+                "...and the still-live hub window's own view model keeps refreshing normally afterward");
+            if (raceWorkspace is not null) WorkspaceStore.Delete(raceWorkspace.Id);
+
             window.Dispose();
             WorkspaceStore.Delete(shop.Id);
             WorkspaceStore.Delete(asleepOne.Id);
         }
         finally { window.Close(); }
+
+        // --- fix list item 4: preview loop rules, on a fresh window with fixture working cards -----
+        var previewWindow = new MainWindow { ShowActivated = false, Left = SceneContext.OffScreen.X, Top = SceneContext.OffScreen.Y };
+        try
+        {
+            previewWindow.Show();
+            await Task.Delay(200);
+            // Many more cards than any viewport could show at once, so the stack needs to scroll
+            // regardless of the exact per-card height this build renders at.
+            var pvCards = Enumerable.Range(0, 24).Select(i => new HubEntry("pv-" + i) { Name = "pv-" + i, Working = true }).ToList();
+            previewWindow.Hub.LoadFixture(pvCards, []);
+            previewWindow.ShowStack();
+            previewWindow.Width = 340;
+            previewWindow.Height = 480;
+            await Task.Delay(300);
+            Program.Check(previewWindow.PreviewLoopRunning, "The preview loop runs while the stack shows");
+            Program.Check(previewWindow.ShouldCaptureForTest("pv-0"),
+                "A working card inside the visible stack viewport is captured");
+
+            ScrollViewer stackScroll = previewWindow.StackScroll;
+            previewWindow.UpdateLayout();
+            Program.Check(stackScroll.ScrollableHeight > 0, "The fixture has enough working cards to make the stack scroll");
+            stackScroll.ScrollToVerticalOffset(stackScroll.ScrollableHeight);
+            previewWindow.UpdateLayout();
+            await Task.Delay(200);
+            Program.Check(!previewWindow.ShouldCaptureForTest("pv-0"),
+                "A working card scrolled out of the stack viewport is skipped by the capture loop");
+            Program.Check(previewWindow.ShouldCaptureForTest("pv-23"),
+                "...while the card now on screen at the bottom of the same scroll is still captured");
+
+            previewWindow.ShowSettings();
+            await Task.Delay(300);
+            Program.Check(!previewWindow.PreviewLoopRunning, "Opening Settings stops the working-card preview loop");
+            previewWindow.ShowStack();
+            await Task.Delay(300);
+            Program.Check(previewWindow.PreviewLoopRunning, "...and returning from Settings to the stack starts it again");
+
+            AppSettingsStore.Update(s => s with { Smoothness = PreviewSmoothness.Smooth });
+            await Task.Delay(200);
+            Program.Check(previewWindow.PreviewLoopInterval == TimeSpan.FromMilliseconds(500),
+                "A live Preview smoothness change re-times the already-running preview loop");
+            AppSettingsStore.Update(s => s with { Smoothness = PreviewSmoothness.Balanced });
+        }
+        finally { previewWindow.Dispose(); previewWindow.Close(); }
     }
 }

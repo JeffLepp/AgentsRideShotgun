@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using HiveMind.AgentWorkspaces;
 
 namespace Deskweave;
@@ -78,14 +80,40 @@ internal sealed class HubViewModel : IDisposable
     public ObservableCollection<HubEntry> Working { get; } = [];
     public ObservableCollection<HubEntry> Asleep { get; } = [];
     readonly Dictionary<string, HubEntry> _byId = new(StringComparer.OrdinalIgnoreCase);
+    DispatcherTimer? _agingTimer;
     bool _fixture;
     bool _disposed;
 
     public HubViewModel()
     {
-        WorkspaceStore.Changed += Refresh;
-        WorkspaceRuntime.AttentionChanged += Refresh;
+        // Both events can arrive on whatever thread the store or an agent continuation runs on;
+        // Refresh mutates the UI-bound Working/Asleep collections, so it must run on the UI thread.
+        WorkspaceStore.Changed += ScheduleRefresh;
+        WorkspaceRuntime.AttentionChanged += ScheduleRefresh;
     }
+
+    void ScheduleRefresh() => Application.Current?.Dispatcher.BeginInvoke(Refresh);
+
+    /// <summary>Starts the once-a-minute relative-age refresh ("2h" creeping to "3h", and so on).
+    /// Call only while the hub is actually visible; idempotent.</summary>
+    public void StartAging()
+    {
+        if (_agingTimer is not null || _disposed) return;
+        _agingTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMinutes(1) };
+        _agingTimer.Tick += (_, _) => Refresh();
+        _agingTimer.Start();
+    }
+
+    /// <summary>Stops the relative-age refresh; nothing ticks while the hub is hidden.</summary>
+    public void StopAging()
+    {
+        _agingTimer?.Stop();
+        _agingTimer = null;
+    }
+
+    /// <summary>True while the once-a-minute age refresh is running (the gate drives this through
+    /// the real window's visibility rather than waiting out a real minute).</summary>
+    internal bool AgingActive => _agingTimer is not null;
 
     public HubEntry? Find(string id) => _byId.GetValueOrDefault(id);
 
@@ -156,8 +184,9 @@ internal sealed class HubViewModel : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        WorkspaceStore.Changed -= Refresh;
-        WorkspaceRuntime.AttentionChanged -= Refresh;
+        StopAging();
+        WorkspaceStore.Changed -= ScheduleRefresh;
+        WorkspaceRuntime.AttentionChanged -= ScheduleRefresh;
     }
 }
 
