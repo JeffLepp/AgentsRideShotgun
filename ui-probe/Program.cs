@@ -28,6 +28,10 @@ static class Program
         bool mvp = args.Length is 2 or 3 && args[0] == "--mvp";
         _output = Path.GetFullPath(mvp ? args[1] : args.Single());
         Directory.CreateDirectory(_output);
+        // ponytail: one probe at a time on this PC, so parallel worktrees don't fight over the screen,
+        // focus and CPU timings. Never released by hand; closing it at exit hands the turn on.
+        using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
+        try { turn.WaitOne(); } catch (AbandonedMutexException) { }
         ProductContext.Configure("DeskweaveUiProbe");
         using var scope = WorkspaceStore.UseRootForTests(Path.Combine(_output, "workspaces"));
         using var preferences = ShellPreferences.UseFileForTests(Path.Combine(_output, "shell.json"));
@@ -310,6 +314,19 @@ static class Program
         Check(heard == 1 && AppSettingsStore.Current.FadeAfterSeconds == 10
             && File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"FadeAfterSeconds\": 10"),
             "A settings change is saved and announced once");
+        List<int> seen = [];
+        void First(AppSettings s)
+        {
+            seen.Add(s.FadeAfterSeconds);
+            if (s.FadeAfterSeconds == 3) AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 10 });
+        }
+        void Second(AppSettings s) => seen.Add(s.FadeAfterSeconds);
+        AppSettingsStore.Changed += First;
+        AppSettingsStore.Changed += Second;
+        AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 3 });
+        AppSettingsStore.Changed -= First;
+        AppSettingsStore.Changed -= Second;
+        Check(seen is [3, 10, 10], "A listener that changes a setting leaves every listener hearing each state once, in order");
         AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 5 });
     }
 

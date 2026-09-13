@@ -154,6 +154,7 @@ public static class AppSettingsStore
     static readonly object Announcing = new();
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     static AppSettings? _current;
+    static long _version;
     static string? _testFile;
 
     internal static string File => _testFile ?? HiveMind.Product.ProductContext.Local("settings.json");
@@ -171,20 +172,21 @@ public static class AppSettingsStore
         {
             AppSettings next;
             bool saved;
+            long mine;
             lock (Gate)
             {
                 next = change(_current ??= Read()).Sane();
                 _current = next;
+                mine = ++_version;
                 saved = Write(next);
             }
             // One listener failing must not keep the change from the others; it is already saved.
-            // Each is handed the latest settings, so a listener that itself changed a setting
-            // cannot leave the ones after it looking at the older state.
             foreach (Action<AppSettings> listener in Changed?.GetInvocationList().Cast<Action<AppSettings>>() ?? [])
             {
-                AppSettings latest;
-                lock (Gate) latest = _current ?? next;
-                try { listener(latest); }
+                // A listener changed a setting itself: that newer change was already announced to
+                // everyone, so the rest of this older announcement would only repeat or rewind it.
+                lock (Gate) if (_version != mine) break;
+                try { listener(next); }
                 catch (Exception failure) { Debug.WriteLine("A settings listener failed: " + failure); }
             }
             return saved;

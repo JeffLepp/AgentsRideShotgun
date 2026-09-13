@@ -36,6 +36,9 @@ internal static class Program
             Thread.Sleep(TimeSpan.FromMinutes(5));
             return 0;
         }
+        // ponytail: one probe at a time on this PC (see ui-probe); child modes above never wait for it.
+        using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
+        try { turn.WaitOne(); } catch (AbandonedMutexException) { }
         if (args.Length == 2 && args[0] == "--capture-spike" && Path.IsPathFullyQualified(args[1]))
             return CaptureSpike.Run(Path.GetFullPath(args[1]));
         if (args.Length != 1 || !Path.IsPathFullyQualified(args[0])) return 2;
