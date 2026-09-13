@@ -12,13 +12,12 @@ namespace Deskweave;
 internal sealed record ShellPreferences
 {
     public int Schema { get; init; } = 1;
-    public ShellPlacement? Full { get; init; }
-    public ShellPlacement? Compact { get; init; }
+    public ShellPlacement? Stack { get; init; }
+    public ShellPlacement? Wide { get; init; }
     public bool Maximized { get; init; }
-    public bool Topmost { get; init; }
-    public string Mode { get; init; } = "full";
+    /// <summary>"stack" (340 wide) or "wide" (1200, sidebar and a page).</summary>
+    public string Mode { get; init; } = "stack";
     public string? SelectedWorkspace { get; init; }
-    public bool Focus { get; init; }
     static string? _testFile;
     static string FilePath => _testFile ?? ProductContext.Local("shell.json");
 
@@ -84,15 +83,7 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
             ?? screens.FirstOrDefault(s => s.WorkingArea.Contains((int)Left, (int)Top))
             ?? System.Windows.Forms.Screen.PrimaryScreen!;
         var work = screen.WorkingArea;
-        double scale = VisualTreeHelper.GetDpi(window).DpiScaleX;
-        var point = new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2);
-        try
-        {
-            nint monitor = MonitorFromPoint(point, 2);
-            if (GetDpiForMonitor(monitor, 0, out uint dpi, out _) == 0 && dpi > 0) scale = dpi / 96.0;
-        }
-        catch (DllNotFoundException) { }
-        catch (EntryPointNotFoundException) { }
+        double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), window);
         double availableWidth = work.Width / scale;
         double availableHeight = work.Height / scale;
         window.MinWidth = Math.Min(minimumWidth, availableWidth);
@@ -106,8 +97,49 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
         SetWindowPos(handle, 0, left, top, width, height, 0x0004 | 0x0010); // no z-order or activation change
     }
 
+    /// <summary>Where the reference puts the stack by default: 24 from the top and right of the
+    /// primary monitor's work area, 340 wide, the work area's height minus 48.</summary>
+    internal static ShellPlacement DefaultStack()
+    {
+        var screen = System.Windows.Forms.Screen.PrimaryScreen!;
+        var work = screen.WorkingArea;
+        double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), null);
+        double width = 340;
+        double height = Math.Max(480, work.Height / scale - 48);
+        double leftPx = work.Right - width * scale - 24 * scale;
+        double topPx = work.Top + 24 * scale;
+        return new ShellPlacement(leftPx, topPx, width, height, screen.DeviceName);
+    }
+
+    /// <summary>1200 x 826, centered on the primary monitor; fitted with 20 DIP margins on a
+    /// smaller work area.</summary>
+    internal static ShellPlacement DefaultWide()
+    {
+        var screen = System.Windows.Forms.Screen.PrimaryScreen!;
+        var work = screen.WorkingArea;
+        double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), null);
+        double width = Math.Min(1200, Math.Max(960, work.Width / scale - 40));
+        double height = Math.Min(826, Math.Max(600, work.Height / scale - 40));
+        double leftPx = work.Left + (work.Width - width * scale) / 2;
+        double topPx = work.Top + (work.Height - height * scale) / 2;
+        return new ShellPlacement(leftPx, topPx, width, height, screen.DeviceName);
+    }
+
+    static double ScaleAt(NativePoint point, Window? window)
+    {
+        double scale = window is not null ? VisualTreeHelper.GetDpi(window).DpiScaleX : 1.0;
+        try
+        {
+            nint monitor = MonitorFromPoint(point, 2);
+            if (GetDpiForMonitor(monitor, 0, out uint dpi, out _) == 0 && dpi > 0) scale = dpi / 96.0;
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+        return scale;
+    }
+
     [StructLayout(LayoutKind.Sequential)] struct NativeRect { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential)] readonly struct NativePoint(int x, int y) { public readonly int X = x, Y = y; }
+    [StructLayout(LayoutKind.Sequential)] internal readonly struct NativePoint(int x, int y) { public readonly int X = x, Y = y; }
     [DllImport("user32.dll")] static extern bool GetWindowRect(nint window, out NativeRect rect);
     [DllImport("user32.dll")] static extern nint MonitorFromPoint(NativePoint point, uint flags);
     [DllImport("shcore.dll")] static extern int GetDpiForMonitor(nint monitor, int kind, out uint dpiX, out uint dpiY);
