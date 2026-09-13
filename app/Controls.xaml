@@ -1,0 +1,6 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Settings controls shared with first launch: toggle switch, dropdown, radio choice, key cap.
+         Built by the Settings worker in Wave 1. Merged after Theme.xaml; reference tokens and icons
+         with DynamicResource only, because a merged dictionary cannot StaticResource its siblings. -->
+</ResourceDictionary>

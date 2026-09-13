@@ -19,7 +19,6 @@ internal sealed record ShellPreferences
     public string Mode { get; init; } = "full";
     public string? SelectedWorkspace { get; init; }
     public bool Focus { get; init; }
-    public string? Appearance { get; init; }
     static string? _testFile;
     static string FilePath => _testFile ?? ProductContext.Local("shell.json");
 

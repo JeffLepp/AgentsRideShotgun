@@ -1,0 +1,8 @@
+<UserControl x:Class="Deskweave.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True">
+    <!-- Settings (references 05, 06): the 264 DIP category list with "Workspaces" to go back, and
+         the chosen page. The hub hosts it below its title bar. -->
+    <Grid/>
+</UserControl>

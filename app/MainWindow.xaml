@@ -80,14 +80,6 @@
                         <TextBlock Text="Deskweave" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel x:Name="ToolbarActions" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                        <Button x:Name="AppearanceButton" Style="{StaticResource QuietButton}" Padding="9,6" Margin="0,0,8,0"
-                                Click="Appearance_Click" ToolTip="Change appearance" AutomationProperties.Name="Change appearance">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE790;" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="AppearanceLabel" Text="Windows" FontSize="11" Margin="7,0,6,0"/>
-                                <TextBlock x:Name="AppearanceChevron" Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="8" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
                         <Button x:Name="CompactButton" Style="{StaticResource CaptionButton}" Content="&#xE8A7;" Click="Compact_Click" ToolTip="Compact monitor · Ctrl+Shift+M" AutomationProperties.Name="Toggle compact monitor"/>
                         <Button x:Name="CollapseButton" Style="{StaticResource CaptionButton}" Content="&#xE70E;" Click="Collapse_Click" ToolTip="Collapse to a small bar" AutomationProperties.Name="Collapse or expand Deskweave"/>
                         <Button x:Name="PinButton" Style="{StaticResource CaptionButton}" Content="&#xE718;" Click="Pin_Click" ToolTip="Keep this window on top" AutomationProperties.Name="Keep Deskweave on top"/>
@@ -96,7 +88,7 @@
                     <StackPanel x:Name="CaptionActions" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                         <Button x:Name="MinimizeButton" Style="{StaticResource CaptionButton}" Content="&#xE921;" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize Deskweave"/>
                         <Button x:Name="MaximizeButton" Style="{StaticResource CaptionButton}" Content="&#xE922;" Click="Maximize_Click" ToolTip="Maximize or restore" AutomationProperties.Name="Maximize or restore Deskweave"/>
-                        <Button x:Name="CloseButton" Style="{StaticResource CaptionButton}" Content="&#xE8BB;" Click="Close_Click" ToolTip="Hide to notification area; work keeps running" AutomationProperties.Name="Hide Deskweave to notification area"/>
+                        <Button x:Name="CloseButton" Style="{StaticResource CloseCaptionButton}" Content="&#xE8BB;" Click="Close_Click" ToolTip="Hide to notification area; work keeps running" AutomationProperties.Name="Hide Deskweave to notification area"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -197,8 +189,6 @@
                         <TextBlock Text="Take control pauses the agent's input. Workspaces use your normal Windows file permissions. They are separate desktops, not virtual machines or a security sandbox." Foreground="{DynamicResource ShellMutedBrush}" TextWrapping="Wrap" LineHeight="20" Margin="0,7,0,18"/>
                         <TextBlock Text="Shortcuts" FontWeight="SemiBold"/>
                         <TextBlock Text="Ctrl+N new workspace · Ctrl+F search · Ctrl+1 overview · Ctrl+2 focus · Ctrl+Shift+M compact · F1 help. Right-click a workspace to start or stop its computer, rename it or delete it. Use the title-bar chevron to collapse. Closing the window hides it to the notification area; Quit ends running work." Foreground="{DynamicResource ShellMutedBrush}" TextWrapping="Wrap" LineHeight="20" Margin="0,7,0,18"/>
-                        <TextBlock Text="Make it yours" FontWeight="SemiBold"/>
-                        <TextBlock Text="Choose Windows, Mac or Linux in the appearance menu. All three use the same Windows desktops, files and agents." Foreground="{DynamicResource ShellMutedBrush}" TextWrapping="Wrap" LineHeight="20" Margin="0,7,0,21"/>
                         <Grid>
                             <Button Content="Got it" Style="{StaticResource PrimaryButton}" Click="CloseHelp_Click" HorizontalAlignment="Left" Padding="23,9"/>
                             <Button Content="Quit Deskweave" Style="{StaticResource QuietButton}" Click="Quit_Click" HorizontalAlignment="Right" AutomationProperties.Name="Quit Deskweave"/>

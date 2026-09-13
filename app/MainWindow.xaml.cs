@@ -41,7 +41,8 @@ public partial class MainWindow : Window, IDisposable
 
     public MainWindow()
     {
-        AppearanceManager.Apply(AppearanceManager.Resolve(ShellPreferences.Read().Appearance));
+        AppearanceManager.Apply(AppSettingsStore.Current.Theme);
+        AppearanceManager.Changed += Repaint;
         InitializeComponent();
         WorkspaceTiles.ItemsSource = _visible;
         WorkspaceTiles.Loaded += (_, _) => UpdateGalleryGeometry();
@@ -54,76 +55,30 @@ public partial class MainWindow : Window, IDisposable
         ModuleEntry.DashboardOpenRequested += EngineRequestedWorkspace;
         LocationChanged += (_, _) => QueuePreferenceSave();
         Loaded += (_, _) => { RestorePreferences(); RefreshWorkspaces(); FitLayout(); };
-        UpdateSkinChrome();
     }
 
     public static readonly DependencyProperty PreviewHeightProperty = DependencyProperty.Register(
         nameof(PreviewHeight), typeof(double), typeof(MainWindow), new PropertyMetadata(260d));
     public double PreviewHeight { get => (double)GetValue(PreviewHeightProperty); set => SetValue(PreviewHeightProperty, value); }
-    internal AppearanceSkin CurrentSkin => AppearanceManager.Current;
     internal bool PreviewLoopRunning => _previews.IsEnabled;
     internal string DisplayMode => _collapsed ? "collapsed" : _compact ? "compact" : "full";
 
-    internal void SetAppearance(AppearanceSkin skin)
+    /// <summary>What Settings > General > Theme does: saves the choice and repaints now.</summary>
+    internal void SetTheme(ThemeChoice theme)
     {
         if (_disposed) return;
-        AppearanceManager.Apply(skin);
-        UpdateSkinChrome();
+        AppSettingsStore.Update(settings => settings with { Theme = theme });
+        AppearanceManager.Apply(theme);
+    }
+
+    // Brushes this window looked up in code rather than binding dynamically.
+    void Repaint()
+    {
+        if (_disposed || FocusNav is null) return;
         RefreshWorkspaces();
         UpdateNav();
         UpdatePin();
         UpdateFocusAction();
-        QueuePreferenceSave();
-    }
-
-    void UpdateSkinChrome()
-    {
-        if (AppearanceLabel is null) return;
-        AppearanceLabel.Text = AppearanceManager.Current.ToString();
-        AppearanceButton.ToolTip = $"Appearance: {AppearanceManager.Current}. Choose Windows, Mac or Linux.";
-        bool mac = AppearanceManager.Current == AppearanceSkin.Mac;
-        ChromeLayout.ColumnDefinitions[0].Width = mac ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
-        ChromeLayout.ColumnDefinitions[1].Width = mac ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
-        Grid.SetColumn(BrandGroup, mac ? 1 : 0);
-        Grid.SetColumn(ToolbarActions, mac ? 2 : 1);
-        Grid.SetColumn(CaptionActions, mac ? 0 : 2);
-        CaptionActions.Margin = mac ? new Thickness(0,0,14,0) : new Thickness(0);
-        CaptionSeparator.Visibility = mac ? Visibility.Collapsed : Visibility.Visible;
-        Button[] ordered = mac ? [CloseButton, MinimizeButton, MaximizeButton] : [MinimizeButton, MaximizeButton, CloseButton];
-        if (!ReferenceEquals(CaptionActions.Children[0], ordered[0]))
-        {
-            CaptionActions.Children.Clear();
-            foreach (Button caption in ordered) CaptionActions.Children.Add(caption);
-        }
-        foreach (Button caption in ordered)
-        {
-            caption.Style = (Style)FindResource(mac ? "MacCaptionButton" : "CaptionButton");
-            if (mac)
-            {
-                string color = caption == CloseButton ? "#EC6A62" : caption == MinimizeButton ? "#E9BB4F" : "#62B96B";
-                var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-                brush.Freeze();
-                caption.Background = brush;
-            }
-            else caption.ClearValue(BackgroundProperty);
-        }
-        FitLayout();
-    }
-
-    void Appearance_Click(object sender, RoutedEventArgs e)
-    {
-        var menu = new ContextMenu { PlacementTarget = AppearanceButton, Placement = PlacementMode.Bottom, MinWidth = 230 };
-        foreach (AppearanceSkin skin in Enum.GetValues<AppearanceSkin>())
-        {
-            var item = new MenuItem
-            {
-                Header = skin.ToString(), IsCheckable = true, IsChecked = AppearanceManager.Current == skin
-            };
-            System.Windows.Automation.AutomationProperties.SetName(item, $"Use {skin} appearance");
-            item.Click += (_, _) => SetAppearance(skin);
-            menu.Items.Add(item);
-        }
-        menu.IsOpen = true;
     }
 
     void RestorePreferences()
@@ -173,8 +128,7 @@ public partial class MainWindow : Window, IDisposable
         _ = new ShellPreferences
         {
             Full = _fullPlacement, Compact = _compactPlacement, Maximized = _wasMaximized,
-            Topmost = Topmost, Mode = DisplayMode, SelectedWorkspace = _selected, Focus = _focus,
-            Appearance = AppearanceManager.Current.ToString()
+            Topmost = Topmost, Mode = DisplayMode, SelectedWorkspace = _selected, Focus = _focus
         }.Save();
     }
 
@@ -777,17 +731,13 @@ public partial class MainWindow : Window, IDisposable
         if (Sidebar is null) return;
         Sidebar.Visibility = _compact ? Visibility.Collapsed : Visibility.Visible;
         SidebarColumn.Width = new GridLength(_compact ? 0 : 56);
-        MaximizeButton.Visibility = _compact && AppearanceManager.Current != AppearanceSkin.Mac ? Visibility.Collapsed : Visibility.Visible;
+        MaximizeButton.Visibility = _compact ? Visibility.Collapsed : Visibility.Visible;
         PinButton.Visibility = _compact ? Visibility.Collapsed : Visibility.Visible;
         MainArea.Margin = _compact ? new Thickness(16,17,2,0) : new Thickness(22,19,8,0);
         if (!_focus) PageTitle.Text = _filter == "running" ? "Running" : _filter == "attention" ? "Needs you" : "Workspaces";
         NewButton.Content = _compact ? "+ New" : "+  New workspace";
         SearchArea.Width = _compact ? 150 : 230;
         PageHeader.Margin = new Thickness(0,0,14,16);
-        AppearanceLabel.Visibility = _compact ? Visibility.Collapsed : Visibility.Visible;
-        AppearanceChevron.Visibility = _compact ? Visibility.Collapsed : Visibility.Visible;
-        AppearanceButton.Padding = _compact ? new Thickness(7) : new Thickness(9,6,9,6);
-        AppearanceButton.Margin = _compact ? new Thickness(0,0,3,0) : new Thickness(0,0,8,0);
         UpdateGalleryGeometry();
         HelpPanel.Width = Math.Min(510, Math.Max(300, ActualWidth - 40));
         HelpPanel.MaxHeight = Math.Max(150, ActualHeight - 130);
@@ -848,6 +798,7 @@ public partial class MainWindow : Window, IDisposable
         if (_disposed) return;
         SavePreferences();
         _disposed = true;
+        AppearanceManager.Changed -= Repaint;
         _previewGeneration++;
         _previews.Stop();
         _previews.Tick -= Preview_Tick;

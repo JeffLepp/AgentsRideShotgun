@@ -36,6 +36,8 @@ internal static class Program
             Thread.Sleep(TimeSpan.FromMinutes(5));
             return 0;
         }
+        if (args.Length == 2 && args[0] == "--capture-spike" && Path.IsPathFullyQualified(args[1]))
+            return CaptureSpike.Run(Path.GetFullPath(args[1]));
         if (args.Length != 1 || !Path.IsPathFullyQualified(args[0])) return 2;
         return Run(Path.GetFullPath(args[0]));
     }

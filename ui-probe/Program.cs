@@ -19,14 +19,19 @@ static class Program
     static MainWindow _window = null!;
     static string _output = "";
 
+    static readonly ThemeChoice[] Themes = [ThemeChoice.Light, ThemeChoice.Dark];
+
     [STAThread]
     static void Main(string[] args)
     {
-        _output = Path.GetFullPath(args.Single());
+        // A folder: the UI gate. --mvp <folder> [scene name prefix]: the reference-screen harness (Mvp.cs).
+        bool mvp = args.Length is 2 or 3 && args[0] == "--mvp";
+        _output = Path.GetFullPath(mvp ? args[1] : args.Single());
         Directory.CreateDirectory(_output);
         ProductContext.Configure("DeskweaveUiProbe");
         using var scope = WorkspaceStore.UseRootForTests(Path.Combine(_output, "workspaces"));
         using var preferences = ShellPreferences.UseFileForTests(Path.Combine(_output, "shell.json"));
+        using var settings = AppSettingsStore.UseFileForTests(Path.Combine(_output, "settings.json"));
         using var watchdog = new System.Threading.Timer(_ =>
         {
             Report(new TimeoutException("UI probe exceeded its three-minute limit."));
@@ -37,6 +42,10 @@ static class Program
         {
             Source = new Uri("pack://application:,,,/Deskweave;component/Theme.xaml")
         });
+        application.Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/Deskweave;component/Controls.xaml")
+        });
         application.DispatcherUnhandledException += (_, e) =>
         {
             e.Handled = true;
@@ -46,7 +55,7 @@ static class Program
         application.Dispatcher.BeginInvoke(async () =>
         {
             Exception? failure = null;
-            try { await Run(); }
+            try { await (mvp ? Mvp.Run(_output, args.Length == 3 ? args[2] : null) : Run()); }
             catch (Exception e) { failure = e; }
             finally
             {
@@ -70,20 +79,20 @@ static class Program
         Check(Find<FrameworkElement>("EmptyState").IsVisible, "First-run guidance is visible");
         Check(AutomationProperties.GetName(Find<Button>("NewButton")).Length > 0,
             "Create action has an accessible name");
-        Check(_window.CurrentSkin == AppearanceSkin.Windows && AppearanceManager.Resolve("unknown") == AppearanceSkin.Windows,
-            "Windows is the first-run and invalid-preference fallback appearance on Windows");
-        Check(InWindow(Find<Button>("AppearanceButton")), "Appearance choice is discoverable in the main toolbar");
+        Check(AppearanceManager.Choice == ThemeChoice.FollowWindows && AppearanceManager.Dark == AppearanceManager.WindowsIsDark(),
+            "The theme follows Windows until Settings forces one");
+        Check(_window.FindName("AppearanceButton") is null, "The Windows/Mac/Linux skin picker is gone");
+        CheckSettings();
         Capture("01-empty.png");
-        foreach (AppearanceSkin skin in Enum.GetValues<AppearanceSkin>())
+        foreach (ThemeChoice theme in Themes)
         {
-            _window.SetAppearance(skin);
+            _window.SetTheme(theme);
             await Settle();
             Point close = Find<Button>("CloseButton").TransformToAncestor(_window).Transform(new Point());
-            Check(skin == AppearanceSkin.Mac ? close.X < 100 : close.X > _window.ActualWidth - 100,
-                skin + " keeps its single close action on the intended side");
-            Capture("skin-" + skin.ToString().ToLowerInvariant() + "-empty.png");
+            Check(close.X > _window.ActualWidth - 100, theme + " theme keeps the close action at the right");
+            Capture("theme-" + Lower(theme) + "-empty.png");
         }
-        _window.SetAppearance(AppearanceSkin.Windows);
+        _window.SetTheme(ThemeChoice.Light);
         _window.Width = 900;
         _window.Height = 620;
         await Settle();
@@ -145,15 +154,15 @@ static class Program
         Check(tileContainer.ActualHeight <= _window.PreviewHeight + 20,
             "Monitor tiles are only their widescreen preview, no header or caption rows");
         Capture("04-overview.png");
-        foreach (AppearanceSkin skin in Enum.GetValues<AppearanceSkin>())
+        foreach (ThemeChoice theme in Themes)
         {
-            _window.SetAppearance(skin);
+            _window.SetTheme(theme);
             await Settle();
             Check(ReferenceEquals(runtime, WorkspaceRuntime.Of(research.Id)) && WorkspaceStore.All().Count == 3,
-                skin + " appearance keeps the running desktop and all saved workspaces");
-            Capture("skin-" + skin.ToString().ToLowerInvariant() + "-overview.png");
+                theme + " theme keeps the running desktop and all saved workspaces");
+            Capture("theme-" + Lower(theme) + "-overview.png");
         }
-        _window.SetAppearance(AppearanceSkin.Windows);
+        _window.SetTheme(ThemeChoice.Light);
         Find<TextBox>("SearchBox").Text = "Build";
         await Settle();
         Check(Find<ItemsControl>("WorkspaceTiles").Items.Count == 1, "Search filters workspace names");
@@ -165,15 +174,14 @@ static class Program
         Check(ReferenceEquals(runtime, WorkspaceRuntime.Of(research.Id)),
             "Compact mode preserves the same running desktop");
         Check(InWindow(Find<Button>("CompactButton")), "Compact restore control remains reachable");
-        foreach (AppearanceSkin skin in Enum.GetValues<AppearanceSkin>())
+        foreach (ThemeChoice theme in Themes)
         {
-            _window.SetAppearance(skin);
+            _window.SetTheme(theme);
             await Settle();
-            Check(InWindow(Find<Button>("AppearanceButton")) && InWindow(Find<Button>("CompactButton")),
-                skin + " compact appearance and restore actions fit the window");
-            Capture("skin-" + skin.ToString().ToLowerInvariant() + "-compact.png");
+            Check(InWindow(Find<Button>("CompactButton")), theme + " theme keeps the compact restore action in the window");
+            Capture("theme-" + Lower(theme) + "-compact.png");
         }
-        _window.SetAppearance(AppearanceSkin.Windows);
+        _window.SetTheme(ThemeChoice.Light);
         Capture("05-compact.png");
         Click("CollapseButton");
         await Settle();
@@ -205,7 +213,7 @@ static class Program
         runtime.Dispose();
         Check(WorkspaceStore.Find(research.Id) is not null && WorkspaceStore.Find(second.Id) is not null,
             "Stopping the desktop retains stored workspaces");
-        _window.SetAppearance(AppearanceSkin.Mac);
+        _window.SetTheme(ThemeChoice.Dark);
         _window.Dispose();
         var saved = ShellPreferences.Read();
         Check(File.Exists(Path.Combine(_output, "shell.json")) && saved.Mode == "full" && saved.Full is not null,
@@ -216,13 +224,19 @@ static class Program
         await Settle();
         Check(_window.DisplayMode == saved.Mode && Math.Abs(_window.ActualWidth - saved.Full!.Width) <= 2,
             "A new app window restores saved mode and width");
-        Check(saved.Appearance == "Mac" && _window.CurrentSkin == AppearanceSkin.Mac,
-            "An explicit appearance selection persists and overrides the host default after reopening");
+        Check(File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"Theme\": \"Dark\"") && AppearanceManager.Dark,
+            "An explicit theme persists and wins over Windows after reopening");
         Click("HelpButton");
         await Settle();
         Check(Find<FrameworkElement>("HelpPanel").IsVisible, "Getting started and quit instructions remain available");
         Capture("08-help.png");
+        // Each Wave 1 slice adds its behavior checks in its own Scenes.*.cs file.
+        await HubScenes.Gate();
+        await CornerScenes.Gate();
+        await SettingsScenes.Gate();
     }
+
+    internal static MainWindow Window => _window;
 
     static async Task CheckAppearances(AgentWorkspacesPanel panel)
     {
@@ -233,12 +247,12 @@ static class Program
         var streaming = transcript.Children.OfType<TextBlock>().Single(t => t.Text == "A streaming appearance fixture.");
         var speaker = transcript.Children.OfType<TextBlock>().First(t => t.Text == "You");
         var divider = transcript.Children.OfType<Border>().Last();
-        foreach (AppearanceSkin skin in Enum.GetValues<AppearanceSkin>())
+        foreach (ThemeChoice skin in Themes)
         {
-            _window.SetAppearance(skin);
+            _window.SetTheme(skin);
             await Settle();
             Check(ReferenceEquals(panel, Find<ContentControl>("FocusSlot").Content),
-                skin + " appearance retains the same focused workspace panel");
+                skin + " theme retains the same focused workspace panel");
             Check(ColorOf(message.Foreground) == ResourceColor("ShellTextBrush")
                 && ColorOf(streaming.Foreground) == ResourceColor("ShellTextBrush")
                 && ColorOf(speaker.Foreground) == ResourceColor("ShellMutedBrush")
@@ -254,9 +268,36 @@ static class Program
             var startButton = (Button)panel.FindName("StartButton");
             Check(ColorOf(startButton.Foreground) == ResourceColor("OnAccentBrush"),
                 skin + " actual primary control follows the current on-accent ink");
-            Capture("skin-" + skin.ToString().ToLowerInvariant() + "-focus.png");
+            Capture("theme-" + Lower(skin) + "-focus.png");
         }
-        _window.SetAppearance(AppearanceSkin.Windows);
+        _window.SetTheme(ThemeChoice.Light);
+    }
+
+    static string Lower(ThemeChoice theme) => theme.ToString().ToLowerInvariant();
+
+    static void CheckSettings()
+    {
+        AppSettings now = AppSettingsStore.Current;
+        Check(now.Control == ControlMode.TakeTurns && now.CarryOnSeconds == 20 && now.CornerShow == CornerShow.ComesAndGoes
+            && now.FadeAfterSeconds == 5 && now.SleepMinutes == 10 && now.AgentsGo == AgentPlacement.OnePerProject
+            && now.DesktopRequests == DesktopOpen.AskFirst && now.Screenshots == ScreenshotMode.KeySteps && now.KeepHistoryDays == 7
+            && now.ShareSignIns && now.PauseAfterWebPage && !now.RemindAgents && !now.SendCrashReports,
+            "Settings start at the MVP spec's defaults");
+        AppSettings odd = new AppSettings
+        {
+            CarryOnSeconds = 7, SleepMinutes = 3, Theme = (ThemeChoice)9, PauseHotkey = "P", CornerWidth = double.NaN, AccountScopes = null!
+        }.Sane();
+        Check(odd.CarryOnSeconds == 20 && odd.SleepMinutes == 10 && odd.Theme == ThemeChoice.FollowWindows && odd.PauseHotkey.Length == 0
+            && odd.CornerWidth is null && odd.AccountScopes is not null, "A hand-edited settings file falls back to real choices");
+        int heard = 0;
+        void Heard(AppSettings _) => heard++;
+        AppSettingsStore.Changed += Heard;
+        AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 10 });
+        AppSettingsStore.Changed -= Heard;
+        Check(heard == 1 && AppSettingsStore.Current.FadeAfterSeconds == 10
+            && File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"FadeAfterSeconds\": 10"),
+            "A settings change is saved and announced once");
+        AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 5 });
     }
 
     static Color ColorOf(Brush brush) => ((SolidColorBrush)brush).Color;
@@ -433,7 +474,7 @@ static class Program
         encoder.Save(output);
     }
 
-    static void Check(bool condition, string claim)
+    internal static void Check(bool condition, string claim)
     {
         if (!condition) throw new InvalidOperationException(claim);
         Passed.Add(claim);
