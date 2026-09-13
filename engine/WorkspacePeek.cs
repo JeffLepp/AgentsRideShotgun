@@ -1,191 +1,80 @@
-using System.IO;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 
 namespace HiveMind.AgentWorkspaces;
 
-/// <summary>When the corner view is on the owner's screen.</summary>
-[JsonConverter(typeof(JsonStringEnumConverter<PeekMode>))]
-public enum PeekMode
-{
-    /// <summary>Never on its own. The hotkey still calls it up.</summary>
-    Off,
-
-    /// <summary>Fades in while the workspace is doing something and out again when it goes quiet.</summary>
-    Activity,
-
-    /// <summary>Stays up for as long as a workspace is running.</summary>
-    Always,
-}
-
-/// <summary>Which corner it sits in. The owner's main screen, and its work area, not the whole of it.</summary>
-[JsonConverter(typeof(JsonStringEnumConverter<PeekCorner>))]
-public enum PeekCorner { BottomRight, BottomLeft, TopRight, TopLeft }
-
 /// <summary>
-/// The corner view's settings. One surface for the whole module rather than one per workspace: it
-/// shows whichever workspace is working, and two of them over each other in the same corner would
-/// be worse than either.
-///
-/// Kept beside the access policy rather than in the workspace folder, which is Low-writable - an
-/// agent inside a workspace has no business deciding what appears on the owner's own screen.
-/// </summary>
-internal sealed record PeekSettings
-{
-    /// <summary>Off until the owner asks for it. A window that floats over everything he does is
-    /// not something to switch on for him.</summary>
-    public PeekMode Mode { get; init; } = PeekMode.Off;
-
-    public PeekCorner Corner { get; init; } = PeekCorner.BottomRight;
-
-    /// <summary>The global hotkey, as "Ctrl+Alt+D". Empty registers nothing.</summary>
-    public string Hotkey { get; init; } = "Ctrl+Alt+D";
-
-    /// <summary>How wide it is, in device-independent pixels. The picture is 16:9 under the header.</summary>
-    public double Width { get; init; } = 360;
-
-    /// <summary>How long after the last thing the agent did it fades away in Activity mode.</summary>
-    public int QuietSeconds { get; init; } = 8;
-
-    /// <summary>
-    /// Where the owner dragged it to, when that is not a corner of the main screen. A second monitor
-    /// has no corner in these settings, and snapping a window back off the monitor he just put it on
-    /// is the one thing a dragged window must never do.
-    /// </summary>
-    public double? Left { get; init; }
-    public double? Top { get; init; }
-
-    /// <summary>Whatever was on disk, coerced into something the window can actually use.</summary>
-    internal PeekSettings Sane() => this with
-    {
-        Mode = Enum.IsDefined(Mode) ? Mode : PeekMode.Off,
-        Corner = Enum.IsDefined(Corner) ? Corner : PeekCorner.BottomRight,
-        Hotkey = WorkspaceHotkey.Parse(Hotkey, out _, out _) ? Hotkey.Trim() : string.Empty,
-        Width = double.IsFinite(Width) ? Math.Clamp(Width, 220, 900) : 360,
-        QuietSeconds = Math.Clamp(QuietSeconds, 2, 300),
-        Left = Left is { } left && double.IsFinite(left) ? left : null,
-        Top = Top is { } top && double.IsFinite(top) ? top : null,
-    };
-
-    /// <summary>The whole window, header included, at this width.</summary>
-    internal Size Size => new(Width, Math.Round(Width * 9 / 16) + WorkspacePeekPlacement.HeaderHeight);
-}
-
-/// <summary>The settings file. Small, owner-owned, and read once per change rather than polled.</summary>
-internal static class WorkspacePeekStore
-{
-    internal static string File => Path.Combine(WorkspaceAccessStore.Root, "corner-view.json");
-
-    internal static PeekSettings Read()
-    {
-        try
-        {
-            if (!System.IO.File.Exists(File) || new FileInfo(File).Length > 4096) return new PeekSettings().Sane();
-            return (JsonSerializer.Deserialize<PeekSettings>(System.IO.File.ReadAllText(File)) ?? new()).Sane();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return new PeekSettings().Sane();
-        }
-    }
-
-    /// <summary>Saves, and says whether it reached the disk. A corner it could not write is still
-    /// the corner it is using now, so a failure changes nothing on screen.</summary>
-    internal static bool Write(PeekSettings settings)
-    {
-        string temporary = File + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(File)!);
-            System.IO.File.WriteAllText(temporary,
-                JsonSerializer.Serialize(settings.Sane(), new JsonSerializerOptions { WriteIndented = true }));
-            System.IO.File.Move(temporary, File, true);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-        finally
-        {
-            try { if (System.IO.File.Exists(temporary)) System.IO.File.Delete(temporary); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        }
-    }
-}
-
-/// <summary>
-/// Whether the corner view should be on screen at this moment. Pure, because "it faded out while I
+/// Whether the corner window should be on screen at this moment. Pure, because "it faded out while I
 /// was reading it" and "it never came back" are both bugs nobody can reproduce by hand.
 /// </summary>
 internal static class WorkspacePeekPolicy
 {
-    /// <param name="running">A workspace has a computer running. Nothing else is worth a window.</param>
-    /// <param name="busy">It is working, waiting on the owner, or someone is driving it.</param>
-    /// <param name="quiet">How long since the last thing it did.</param>
-    /// <param name="settles">How long a quiet workspace stays up before it fades.</param>
-    /// <param name="pinned">The owner pressed the hotkey. That beats every mode, including Off.</param>
-    internal static bool Wanted(PeekMode mode, bool running, bool busy, TimeSpan quiet, TimeSpan settles,
-        bool pinned)
+    /// <param name="running">A workspace has a computer running. Nothing else has a picture to show.</param>
+    /// <param name="hub">The hub window is on screen, which shows the same thing bigger.</param>
+    /// <param name="dismissed">The owner pressed hide; gone until the next activity.</param>
+    /// <param name="summoned">The owner called it up with the shortcut or by dragging a file at it.</param>
+    /// <param name="held">The owner's pointer, a drag or his input is on it right now.</param>
+    /// <param name="busy">A workspace waits on the owner: a question, or a workspace he holds.</param>
+    /// <param name="quiet">How long since the last thing any workspace did.</param>
+    internal static bool Wanted(CornerShow show, bool running, bool hub, bool dismissed, bool summoned,
+        bool pinned, bool held, bool busy, TimeSpan quiet, TimeSpan fade)
     {
-        if (!running) return false;
-        if (pinned) return true;
-        return mode switch
+        if (!running || hub || dismissed) return false;
+        if (summoned || held) return true;
+        return show switch
         {
-            PeekMode.Always => true,
-            // Busy keeps it up however long it takes; quiet holds it for the settle time, so an
-            // agent between two tool calls does not make the window blink.
-            PeekMode.Activity => busy || quiet < settles,
+            CornerShow.Always => true,
+            CornerShow.ComesAndGoes => pinned || busy || quiet < fade,
             _ => false,
         };
     }
 }
 
-/// <summary>Where the window goes. Pure arithmetic, like <see cref="WorkspaceScreen"/>.</summary>
+/// <summary>Which edges of the card a resize drags.</summary>
+[Flags]
+internal enum PeekEdges { None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8 }
+
+/// <summary>How big the corner window is and where it goes, in DIPs. Pure arithmetic.</summary>
 internal static class WorkspacePeekPlacement
 {
-    /// <summary>The chrome above the picture.</summary>
-    internal const double HeaderHeight = 30;
+    /// <summary>How far inside the work area the card sits.</summary>
+    internal const double Margin = 16;
 
-    /// <summary>How far off the edges of the work area it sits.</summary>
-    internal const double Margin = 14;
+    internal const double MinWidth = 220, MaxWidth = 1600;
 
-    /// <summary>The window's place in a corner of a work area.</summary>
-    internal static Rect Place(Rect work, PeekCorner corner, Size size, double margin = Margin)
+    /// <summary>Small, the size it starts at. A card at this width or under is not grown.</summary>
+    internal const double SmallWidth = 344;
+
+    /// <summary>The card at a width, 16:10, the width kept inside what a card may be.</summary>
+    internal static Size Card(double width)
     {
-        double width = Math.Min(size.Width, Math.Max(1, work.Width));
-        double height = Math.Min(size.Height, Math.Max(1, work.Height));
-        double left = corner is PeekCorner.BottomLeft or PeekCorner.TopLeft
-            ? work.Left + margin
-            : work.Right - width - margin;
-        double top = corner is PeekCorner.TopLeft or PeekCorner.TopRight
-            ? work.Top + margin
-            : work.Bottom - height - margin;
+        double w = Math.Round(double.IsFinite(width) ? Math.Clamp(width, MinWidth, MaxWidth) : SmallWidth);
+        return new Size(w, Math.Round(w * 10 / 16));
+    }
+
+    internal static Size Card(CornerSize size) => Card(size switch
+    {
+        CornerSize.Medium => 480,
+        CornerSize.Large => 640,
+        _ => SmallWidth,
+    });
+
+    /// <summary>A width the owner dragged it to wins over the Size setting until Size changes again.</summary>
+    internal static Size Card(AppSettings settings) =>
+        settings.CornerWidth is { } width ? Card(width) : Card(settings.CornerSize);
+
+    /// <summary>The card in a corner of a work area. "Where I leave it" with no place yet is bottom right.</summary>
+    internal static Rect Corner(Rect work, CornerPosition position, Size size, double margin = Margin)
+    {
+        double width = Math.Min(size.Width, Math.Max(1, work.Width - 2 * margin));
+        double height = Math.Min(size.Height, Math.Max(1, work.Height - 2 * margin));
+        double left = position == CornerPosition.BottomLeft ? work.Left + margin : work.Right - width - margin;
+        double top = position == CornerPosition.TopRight ? work.Top + margin : work.Bottom - height - margin;
         return Fit(work, new Rect(left, top, width, height));
     }
 
-    /// <summary>
-    /// The corner a dragged window ended up nearest, by its own centre against the work area's.
-    /// Only asked when the window is still on the main screen; a window dropped on another monitor
-    /// keeps the exact place it was dropped.
-    /// </summary>
-    internal static PeekCorner Nearest(Rect work, Rect window)
-    {
-        bool left = window.Left + window.Width / 2 < work.Left + work.Width / 2;
-        bool top = window.Top + window.Height / 2 < work.Top + work.Height / 2;
-        return top ? left ? PeekCorner.TopLeft : PeekCorner.TopRight
-            : left ? PeekCorner.BottomLeft : PeekCorner.BottomRight;
-    }
-
-    /// <summary>Whether a dropped window is on the main screen, and so belongs to a corner of it.</summary>
-    internal static bool OnWorkArea(Rect work, Rect window) =>
-        work.IntersectsWith(window)
-        && Rect.Intersect(work, window) is { Width: > 0, Height: > 0 } shared
-        && shared.Width * shared.Height >= window.Width * window.Height / 2;
-
-    /// <summary>Clamps a window inside a bounding rectangle, moving it rather than shrinking it.</summary>
+    /// <summary>Moves a window inside a bounding rectangle, shrinking it only when it cannot fit.</summary>
     internal static Rect Fit(Rect bounds, Rect window)
     {
         double width = Math.Min(window.Width, bounds.Width);
@@ -194,10 +83,94 @@ internal static class WorkspacePeekPlacement
         double top = Math.Clamp(window.Top, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - height));
         return new Rect(left, top, width, height);
     }
+
+    /// <summary>
+    /// A resize by dragging edges, keeping 16:10. The edges not dragged stay put; an edge the drag
+    /// says nothing about (the sides, when only the top moves) keeps the side nearer the middle of
+    /// the work area fixed, so a card in the bottom right grows up and left, into the screen.
+    /// </summary>
+    internal static Rect Resize(Rect start, PeekEdges edges, Vector delta, Rect work)
+    {
+        double across = edges.HasFlag(PeekEdges.Left) ? start.Width - delta.X
+            : edges.HasFlag(PeekEdges.Right) ? start.Width + delta.X : double.NaN;
+        double down = edges.HasFlag(PeekEdges.Top) ? (start.Height - delta.Y) * 16 / 10
+            : edges.HasFlag(PeekEdges.Bottom) ? (start.Height + delta.Y) * 16 / 10 : double.NaN;
+        double wanted = double.IsNaN(across) ? down
+            : double.IsNaN(down) ? across
+            : Math.Abs(across - start.Width) >= Math.Abs(down - start.Width) ? across : down;
+        if (double.IsNaN(wanted)) return start;
+        Size size = Card(Math.Min(wanted, Math.Min(work.Width, work.Height * 16 / 10)));
+
+        bool keepRight = edges.HasFlag(PeekEdges.Left)
+            || !edges.HasFlag(PeekEdges.Right) && start.Left + start.Width / 2 > work.Left + work.Width / 2;
+        bool keepBottom = edges.HasFlag(PeekEdges.Top)
+            || !edges.HasFlag(PeekEdges.Bottom) && start.Top + start.Height / 2 > work.Top + work.Height / 2;
+        double left = keepRight ? start.Right - size.Width : start.Left;
+        double top = keepBottom ? start.Bottom - size.Height : start.Top;
+        return Fit(work, new Rect(left, top, size.Width, size.Height));
+    }
+
+    /// <summary>Whether a card at this width counts as grown - the shrink button only means
+    /// something once dragging or Settings has made it bigger than Small.</summary>
+    internal static bool Grown(AppSettings settings) => Card(settings).Width > SmallWidth + 0.5;
+
+    /// <summary>How far the back card of a stack sits above the front one, before its own scale.</summary>
+    internal const double StackRise = 22;
+    internal const double StackScale = 0.93;
+
+    /// <summary>The back card of a two-up stack: the same rect, scaled 0.93 about its own center and
+    /// then risen 22 DIP - so it stays centered under the front card, only smaller and higher.</summary>
+    internal static Rect Back(Rect front)
+    {
+        double width = front.Width * StackScale, height = front.Height * StackScale;
+        double left = front.Left + (front.Width - width) / 2;
+        double top = front.Top + (front.Height - height) / 2 - StackRise;
+        return new Rect(left, top, width, height);
+    }
+
+    /// <summary>
+    /// Whether a place the owner dragged it to, read back from disk, still lands on a monitor
+    /// Windows knows about. A monitor unplugged since he moved it there is not somewhere to trust;
+    /// the caller falls back to the ordinary corner instead.
+    /// </summary>
+    internal static bool OnConnectedMonitor(Rect dip)
+    {
+        double scale = PrimaryScale();
+        var rect = new NativeRect(
+            (int)Math.Round(dip.Left * scale), (int)Math.Round(dip.Top * scale),
+            (int)Math.Round(dip.Right * scale), (int)Math.Round(dip.Bottom * scale));
+        try { return MonitorFromRect(rect, 0) != 0; }
+        catch (DllNotFoundException) { return true; }
+        catch (EntryPointNotFoundException) { return true; }
+    }
+
+    /// <summary>The primary monitor's DPI scale (1.0 at 96 DPI). Good enough to place a window that
+    /// starts on the primary screen; once it is up, WPF itself keeps it correct per monitor.</summary>
+    internal static double PrimaryScale()
+    {
+        try
+        {
+            nint monitor = MonitorFromPoint(default, 1); // MONITOR_DEFAULTTOPRIMARY
+            if (GetDpiForMonitor(monitor, 0, out uint dpi, out _) == 0 && dpi > 0) return dpi / 96.0;
+        }
+        catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { }
+        return 1.0;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    readonly struct NativeRect(int left, int top, int right, int bottom)
+    {
+        public readonly int Left = left, Top = top, Right = right, Bottom = bottom;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    readonly struct NativePoint(int x, int y) { public readonly int X = x, Y = y; }
+    [DllImport("user32.dll")] static extern nint MonitorFromRect(NativeRect rect, uint flags);
+    [DllImport("user32.dll")] static extern nint MonitorFromPoint(NativePoint point, uint flags);
+    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(nint monitor, int kind, out uint dpiX, out uint dpiY);
 }
 
 /// <summary>A hotkey as the owner writes it: "Ctrl+Alt+D". Parsing lives here so the settings file,
-/// the panel's box and the registration all agree on what is a hotkey and what is not.</summary>
+/// the Settings page and the registration all agree on what is a hotkey and what is not.</summary>
 internal static class WorkspaceHotkey
 {
     internal static bool Parse(string? text, out ModifierKeys modifiers, out Key key)
@@ -220,7 +193,7 @@ internal static class WorkspaceHotkey
             }
         }
         // A bare letter is not a global hotkey. Registering one would take that key away from every
-        // program on the PC, which is not something a corner view gets to do.
+        // program on the PC, which is not something a corner window gets to do.
         return key != Key.None && modifiers != ModifierKeys.None;
     }
 
