@@ -73,6 +73,7 @@ internal static class WorkspacePeekHost
         ModuleEntry.HubShowingChanged -= HubChanged;
         ModuleEntry.ShowCornerRequested -= ShowCornerNow;
         ModuleEntry.PauseAllRequested -= TogglePauseAll;
+        _pausedAll = false;
         foreach (WorkspaceRuntime runtime in WorkspaceRuntime.Running)
             if (_pausedByUs.Contains(runtime.Id) && runtime.Plane is { Driving: Driver.Owner } plane)
                 plane.Release();
@@ -643,7 +644,15 @@ internal static class WorkspacePeekHost
         void Acted(string tool, string detail) => stir();
         void Said(string said) => stir();
         void MovedOn(MissionState state) { moved(state); stir(); }
-        void Drove(Driver who) => stir();
+        void Drove(Driver who)
+        {
+            if (_pausedAll && who != Driver.Owner && Runtime.Plane is { } plane)
+            {
+                _pausedByUs.Add(Runtime.Id);
+                plane.OwnerTakes();
+            }
+            stir();
+        }
         void Ended() => stir();
         void HandoffsChanged() => stir();
 

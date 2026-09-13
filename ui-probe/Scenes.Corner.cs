@@ -479,6 +479,24 @@ static class CornerScenes
             InvokeWindow(paused!, "ToastLink_Click", null, new RoutedEventArgs());
             Program.Check(!ModuleEntry.AllPaused && free.Plane.Driving == Driver.Nobody,
                 "The toast Resume button resumes every agent through the shared toggle");
+
+            using var input = new WorkspaceScreenInput(new System.Windows.Controls.Image(), () => ownerHeld);
+            input.SimulateClickForTests();
+            ModuleEntry.RequestPauseAll();
+            input.Release();
+            Program.Check(ownerHeld.Plane.Driving == Driver.Owner,
+                "Releasing a screen during Pause immediately transfers its lease to Pause");
+            ModuleEntry.RequestPauseAll();
+            Program.Check(ownerHeld.Plane.Driving == Driver.Nobody,
+                "Resume releases a lease that Pause retook from a released screen");
+            input.SimulateClickForTests();
+            ModuleEntry.RequestPauseAll();
+            input.Dispose();
+            Program.Check(ownerHeld.Plane.Driving == Driver.Owner,
+                "Closing an owner-held screen keeps its agent paused");
+            ModuleEntry.RequestPauseAll();
+            Program.Check(ownerHeld.Plane.Driving == Driver.Nobody,
+                "Resume releases the pause lease left by a closed screen");
         }
         finally
         {
