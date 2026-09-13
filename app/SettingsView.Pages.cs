@@ -84,15 +84,20 @@ public partial class SettingsView
             new Choice(5, "5 minutes"), new Choice(10, "10 minutes"), new Choice(30, "30 minutes"), new Choice(0, "Never"),
         ], s => s.SleepMinutes, (s, v) => s with { SleepMinutes = v });
 
+        var workspaces = Section("Workspaces", Group(
+            Row(RowText("Where agents go"), placement),
+            Row(RowText("Running at once"), runningAtOnce),
+            Row(RowText("Sleep when quiet"), sleep)));
+        // Every row in this group saves a value nothing reads yet (WAVE1.md C.3); the whole group,
+        // its label included, hides until Wave 2 slice D turns SettingsFeatures.AgentScheduling on.
+        workspaces.Visibility = SettingsFeatures.AgentScheduling ? Visibility.Visible : Visibility.Collapsed;
+
         return new StackPanel
         {
             Children =
             {
                 Section(null, Group(claude, codex, another, remind)),
-                Section("Workspaces", Group(
-                    Row(RowText("Where agents go"), placement),
-                    Row(RowText("Running at once"), runningAtOnce),
-                    Row(RowText("Sleep when quiet"), sleep))),
+                workspaces,
             },
         };
     }
@@ -178,9 +183,15 @@ public partial class SettingsView
             new Choice(DesktopOpen.AskFirst, "Ask me first"), new Choice(DesktopOpen.Always, "Always"), new Choice(DesktopOpen.Never, "Never"),
         ], s => s.DesktopRequests, (s, v) => s with { DesktopRequests = v });
         var desktopRow = Row(RowText("Agents open things on your desktop", "A file or a link the agent wants you to see"), desktop);
+        // Saves a value the corner window's "Needs you" sheet does not read yet; the section (its
+        // label included) hides until Wave 2 slice E turns SettingsFeatures.DesktopRequests on.
+        var yourDesktop = Section("Your desktop", Group(desktopRow));
+        yourDesktop.Visibility = SettingsFeatures.DesktopRequests ? Visibility.Visible : Visibility.Collapsed;
 
-        var pause = ShortcutRow("Pause every agent", "Pause every agent", s => s.PauseHotkey, (s, v) => s with { PauseHotkey = v });
-        var corner = ShortcutRow("Show the corner window", "Show the corner window", s => s.CornerHotkey, (s, v) => s with { CornerHotkey = v });
+        var pause = ShortcutRow("Pause every agent", "Pause every agent", s => s.PauseHotkey, (s, v) => s with { PauseHotkey = v },
+            () => ModuleEntry.ShortcutsTaken.Pause);
+        var corner = ShortcutRow("Show the corner window", "Show the corner window", s => s.CornerHotkey, (s, v) => s with { CornerHotkey = v },
+            () => ModuleEntry.ShortcutsTaken.Corner);
         pause.Control.Accepts = keys => !string.Equals(keys, corner.Control.Keys, StringComparison.OrdinalIgnoreCase);
         corner.Control.Accepts = keys => !string.Equals(keys, pause.Control.Keys, StringComparison.OrdinalIgnoreCase);
 
@@ -189,7 +200,7 @@ public partial class SettingsView
             Children =
             {
                 Section("When you use a workspace", Group([.. choices, carryOnRow])),
-                Section("Your desktop", Group(desktopRow)),
+                yourDesktop,
                 Section("Shortcuts", Group(pause.Row, corner.Row)),
             },
         };
@@ -217,6 +228,12 @@ public partial class SettingsView
         var browserRow = Row(RowText("Browser"), BrowserDropdown());
         var openEarly = Toggle("Open the browser early", s => s.OpenBrowserEarly, (s, v) => s with { OpenBrowserEarly = v });
         var openEarlyRow = Row(RowText("Open the browser early", "Ready the moment an agent needs it"), openEarly);
+        // Every row here saves a value the agent browser does not read yet; the section (its label
+        // included) hides until Wave 2 slice E turns SettingsFeatures.AgentBrowser on. With it and
+        // Accounts both off, only the banner above is left, which is why the category itself leaves
+        // the nav (SettingsView.RefreshNavAvailability).
+        var agentBrowser = Section("Agent browser", Group(shareRow, browserRow, openEarlyRow));
+        agentBrowser.Visibility = SettingsFeatures.AgentBrowser ? Visibility.Visible : Visibility.Collapsed;
 
         return new StackPanel
         {
@@ -224,7 +241,7 @@ public partial class SettingsView
             {
                 new StackPanel { Margin = new Thickness(0, 0, 0, 22), Children = { banner } },
                 signedIn,
-                Section("Agent browser", Group(shareRow, browserRow, openEarlyRow)),
+                agentBrowser,
             },
         };
     }
@@ -342,12 +359,17 @@ public partial class SettingsView
         var sound = Toggle("Sound", s => s.NotifySound, (s, v) => s with { NotifySound = v });
         var dnd = Toggle("Follow Windows Do not disturb", s => s.FollowDoNotDisturb, (s, v) => s with { FollowDoNotDisturb = v });
 
-        return Section(null, Group(
+        // Every control on this page saves a value nothing raises a notification from yet; the whole
+        // page hides until Wave 2 slice F turns SettingsFeatures.Notifications on, and with it the
+        // category leaves the nav (SettingsView.RefreshNavAvailability).
+        var section = Section(null, Group(
             Row(RowText("When an agent needs you"), needsYou),
             Row(RowText("When a test finishes"), testFinished),
             Row(RowText("Only when the corner window can't show it", "Hidden, off, or a full-screen app"), onlyHidden),
             Row(RowText("Sound"), sound),
             Row(RowText("Follow Windows Do not disturb"), dnd)));
+        section.Visibility = SettingsFeatures.Notifications ? Visibility.Visible : Visibility.Collapsed;
+        return section;
     }
 
     FrameworkElement History()
@@ -378,10 +400,21 @@ public partial class SettingsView
         AutomationProperties.SetName(openLogs, "Open logs folder");
         openLogs.Click += (_, _) => SettingsActions.OpenFolder(ProductContext.Local("logs"));
 
+        // Save screenshots, Continuous every and Keep history for save values nothing writes or
+        // prunes by yet; each hides until Wave 2 slice F turns SettingsFeatures.History on. Space
+        // used, Clear and Open logs folder already read and act on the real evidence store, so they
+        // stay shown - the group is never left empty, so it (and History & screenshots in the nav)
+        // never hides.
+        var saveRow = Row(RowText("Save screenshots"), save);
+        var continuousRow = Row(RowText("Continuous every"), continuous);
+        var keepRow = Row(RowText("Keep history for"), keep);
+        saveRow.Visibility = continuousRow.Visibility = keepRow.Visibility =
+            SettingsFeatures.History ? Visibility.Visible : Visibility.Collapsed;
+
         return Section(null, Group(
-            Row(RowText("Save screenshots"), save),
-            Row(RowText("Continuous every"), continuous),
-            Row(RowText("Keep history for"), keep),
+            saveRow,
+            continuousRow,
+            keepRow,
             Row(spaceLabel, clear),
             openLogs));
     }
@@ -405,6 +438,11 @@ public partial class SettingsView
     FrameworkElement Privacy()
     {
         var pauseWeb = Toggle("Pause commands after reading a web page", s => s.PauseAfterWebPage, (s, v) => s with { PauseAfterWebPage = v });
+        // Saves a value nothing pauses on yet; hides until Wave 2 slice E turns
+        // SettingsFeatures.PauseAfterWebPage on. Workspace restrictions stays shown below it either
+        // way, so this page and Privacy & safety in the nav are never left empty.
+        var pauseWebRow = Row(RowText("Pause commands after reading a web page", "Web pages can carry instructions aimed at agents"), pauseWeb);
+        pauseWebRow.Visibility = SettingsFeatures.PauseAfterWebPage ? Visibility.Visible : Visibility.Collapsed;
         var restrictions = Dropdown("Workspace restrictions", [
             new Choice(WorkspaceMode.Free, "Free"), new Choice(WorkspaceMode.Secure, "Secure"),
         ], s => s.Restrictions, (s, v) => s with { Restrictions = v });
@@ -417,7 +455,7 @@ public partial class SettingsView
             Children =
             {
                 Section(null, Group(
-                    Row(RowText("Pause commands after reading a web page", "Web pages can carry instructions aimed at agents"), pauseWeb),
+                    pauseWebRow,
                     Row(RowText("Workspace restrictions"), restrictions))),
                 Section(null, Group(deleteRow)),
             },

@@ -20,8 +20,24 @@ public partial class SettingsView : UserControl
         ["perf"] = "Performance", ["privacy"] = "Privacy & safety", ["about"] = "About",
     };
 
+    // A category whose page can be entirely SettingsFeatures-gated:
+    // once every row on it is hidden, the row it would show is only a bare
+    // card, so the category itself leaves the nav until the flag it names turns on. History &
+    // screenshots is not here: Space used, Clear and Open logs folder always show, so its page and
+    // nav row are never empty.
+    static readonly Dictionary<string, Func<bool>> CategoryGate = new(StringComparer.Ordinal)
+    {
+        ["alerts"] = () => SettingsFeatures.Notifications,
+        ["browser"] = () => SettingsFeatures.Accounts || SettingsFeatures.AgentBrowser,
+    };
+
     readonly List<Bound> _bound = [];
     readonly List<Action<AppSettings>> _followers = [];
+    // Run and cleared each time Show() replaces the page, since a control built for one page (a
+    // shortcut row following ModuleEntry.ShortcutsTakenChanged) is not guaranteed an Unloaded event
+    // just because Page.Content moved on to a different tree - Page itself, and this view, stay
+    // loaded throughout, so nothing here is ever disconnected from a live PresentationSource.
+    readonly List<Action> _cleanup = [];
     bool _listening;
     // True while controls are being set from the store, so they do not write it back.
     bool _following;
@@ -47,10 +63,26 @@ public partial class SettingsView : UserControl
     /// <summary>The controls on the current page that are bound to one setting each.</summary>
     internal IReadOnlyList<Bound> BoundControls => _bound;
 
+    /// <summary>The categories the nav shows right now - every one whose page is not entirely hidden
+    /// behind an off <see cref="SettingsFeatures"/> flag.</summary>
+    internal IReadOnlyList<string> AvailableCategories =>
+        Nav.Children.OfType<RadioButton>().Where(item => item.Visibility == Visibility.Visible).Select(item => (string)item.Tag).ToList();
+
+    // Notifications and Browser & accounts can each end up with nothing wired on yet (the latter
+    // down to its banner); re-run on every Show() since a gate can flip a flag and re-show without
+    // building a whole new SettingsView.
+    void RefreshNavAvailability()
+    {
+        foreach (RadioButton item in Nav.Children.OfType<RadioButton>())
+            if (CategoryGate.TryGetValue((string)item.Tag, out Func<bool>? on))
+                item.Visibility = on() ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     /// <summary>Opens a category: general, agents, control, browser, corner, alerts, history,
     /// perf, privacy or about.</summary>
     public void Show(string category)
     {
+        RefreshNavAvailability();
         string id = Titles.ContainsKey(category) ? category : "general";
         Category = id;
         foreach (RadioButton item in Nav.Children) if ((string)item.Tag == id) item.IsChecked = true;
@@ -58,6 +90,8 @@ public partial class SettingsView : UserControl
         PageTitle.Text = Titles[id];
         _bound.Clear();
         _followers.Clear();
+        foreach (Action cleanup in _cleanup) cleanup();
+        _cleanup.Clear();
         Page.Content = Build(id);
         Follow(AppSettingsStore.Current);
         Scroller.ScrollToTop();
