@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -17,7 +18,6 @@ internal static class WorkspacePeekHost
     static Dispatcher? _owner;
     static AppSettings _settings = new();
     static WorkspacePeekWindow? _window;
-    static WorkspacePeekHotkey? _cornerKey;
     static WorkspacePeekHotkey? _pauseKey;
     static DispatcherTimer? _beat;
     static WorkspacePeekDropHook? _dropHook;
@@ -37,9 +37,6 @@ internal static class WorkspacePeekHost
 
     static string? _frontId, _backId, _resultForId, _resultName, _resultPath, _pendingId;
     static DateTimeOffset _stirred = DateTimeOffset.MinValue;
-    // Owner input only - unlike _stirred, never set by the agent's own activity. Working alongside's
-    // pill reads this: whether the owner is really there right now, not merely whether anything moved.
-    static DateTimeOffset _ownerActedAt = DateTimeOffset.MinValue;
     static BitmapSource? _background;
     static DateTimeOffset _backgroundAt;
     static bool _started, _dismissed, _summoned, _drawing, _hooked, _pausedAll;
@@ -60,6 +57,8 @@ internal static class WorkspacePeekHost
         AppSettingsStore.Changed += SettingsChanged;
         WorkspaceRuntime.AttentionChanged += Attention;
         ModuleEntry.HubShowingChanged += HubChanged;
+        ModuleEntry.ShowCornerRequested += ShowCornerNow;
+        ModuleEntry.PauseAllRequested += TogglePauseAll;
         if (Application.Current is { } app && !_hooked) { _hooked = true; app.Exit += (_, _) => Stop(); }
         HoldHotkeys();
         Sync();
@@ -72,18 +71,23 @@ internal static class WorkspacePeekHost
         AppSettingsStore.Changed -= SettingsChanged;
         WorkspaceRuntime.AttentionChanged -= Attention;
         ModuleEntry.HubShowingChanged -= HubChanged;
+        ModuleEntry.ShowCornerRequested -= ShowCornerNow;
+        ModuleEntry.PauseAllRequested -= TogglePauseAll;
+        foreach (WorkspaceRuntime runtime in WorkspaceRuntime.Running)
+            if (_pausedByUs.Contains(runtime.Id) && runtime.Plane is { Driving: Driver.Owner } plane)
+                plane.Release();
         foreach (string id in _followed.Keys.ToArray()) Unfollow(id);
         _recent.Clear();
         _pausedByUs.Clear();
         StopBeat();
         StopDropHook();
-        _cornerKey?.Dispose(); _cornerKey = null;
         _pauseKey?.Dispose(); _pauseKey = null;
         _window?.HandBackInput();
         WorkspacePeekWindow? window = _window;
         _window = null;
         window?.Close();
         _dismissed = _summoned = _pausedAll = false;
+        ModuleEntry.AllPaused = false;
         _frontId = _backId = null;
         _background = null;
     }
@@ -95,7 +99,7 @@ internal static class WorkspacePeekHost
         AppSettings previous = _settings;
         _settings = settings;
         if (!_started) return;
-        if (previous.CornerHotkey != settings.CornerHotkey || previous.PauseHotkey != settings.PauseHotkey) HoldHotkeys();
+        if (previous.PauseHotkey != settings.PauseHotkey) HoldHotkeys();
         Rethink();
     }
 
@@ -132,6 +136,11 @@ internal static class WorkspacePeekHost
         var follow = new Follow(runtime, () => StirFrom(runtime.Id), state => RunMoved(runtime.Id, state));
         follow.Attach();
         _followed[runtime.Id] = follow;
+        if (_pausedAll && runtime.Plane is { Driving: not Driver.Owner } plane)
+        {
+            plane.OwnerTakes();
+            _pausedByUs.Add(runtime.Id);
+        }
         // Already working by the time this module noticed it (a restart mid-mission): the exact
         // start passed unseen, so the best honest floor is now - a file from before this moment is
         // not claimed as this run's, which only ever costs a chip that could have shown, never a
@@ -197,10 +206,10 @@ internal static class WorkspacePeekHost
     {
         if (!_started || _owner is null) return;
         (WorkspaceRuntime? front, WorkspaceRuntime? back) = PickTwo();
-        bool held = _window?.Hovered == true;
+        bool held = _window?.Hovered == true || _pausedAll && front is not null;
         bool busy = front is not null && Busy(front);
         TimeSpan quiet = DateTimeOffset.Now - _stirred;
-        TimeSpan fade = TimeSpan.FromSeconds(_settings.FadeAfterSeconds);
+        TimeSpan fade = TimeSpan.FromSeconds(5);
         bool wanted = WorkspacePeekPolicy.Wanted(_settings.CornerShow, front is not null,
             ModuleEntry.HubShowing, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade);
         // A hotkey summon's own grace period (held or within FadeAfterSeconds of the last activity)
@@ -230,7 +239,6 @@ internal static class WorkspacePeekHost
         window.Configure(card, back is not null, grown, !grown && _lastGrownWidth is not null);
         window.Place(PlaceRect(window.VisibleSize));
         window.SetPinned(_settings.CornerPinned);
-        window.SetOpenOnClick(_settings.CornerClick == CornerClick.OpenWorkspace);
 
         (string message, PeekTone tone) = Status(front);
         window.Describe(WorkspaceName(front), message, tone);
@@ -255,33 +263,27 @@ internal static class WorkspacePeekHost
     {
         var window = new WorkspacePeekWindow();
         window.BindInput(() => _frontId is { } id && _followed.TryGetValue(id, out Follow? f) ? f.Runtime : null);
-        window.OwnerActed += () => { _stirred = _ownerActedAt = DateTimeOffset.Now; _dismissed = false; };
+        window.OwnerActed += () => { _stirred = DateTimeOffset.Now; _dismissed = false; };
         window.OpenRequested += () => OpenWorkspace(_frontId);
         window.PinClicked += () => AppSettingsStore.Update(s => s with { CornerPinned = !s.CornerPinned });
         window.ShrinkClicked += () =>
         {
             if (WorkspacePeekPlacement.Grown(_settings))
-                AppSettingsStore.Update(s => s with { CornerSize = CornerSize.Small, CornerWidth = null });
+                AppSettingsStore.Update(s => s with { CornerWidth = null });
             else if (_lastGrownWidth is { } width)
                 AppSettingsStore.Update(s => s with { CornerWidth = width });
         };
         window.HideRequested += () => { _dismissed = true; AppSettingsStore.Update(s => s with { CornerPinned = false }); };
         window.HoverChanged += Rethink;
         window.PromoteRequested += () => { if (_backId is { } id) Touch(id); Rethink(); };
-        window.Moved += rect => AppSettingsStore.Update(s => s with
-        {
-            CornerPosition = CornerPosition.WhereILeaveIt, CornerLeft = rect.Left, CornerTop = rect.Top,
-        });
-        window.Resized += rect => AppSettingsStore.Update(s => s.CornerPosition == CornerPosition.WhereILeaveIt
-            ? s with { CornerWidth = rect.Width, CornerLeft = rect.Left, CornerTop = rect.Top }
-            : s with { CornerWidth = rect.Width });
+        window.Moved += rect => AppSettingsStore.Update(s => s with { CornerLeft = rect.Left, CornerTop = rect.Top });
+        window.Resized += rect => AppSettingsStore.Update(s => s with
+            { CornerWidth = rect.Width, CornerLeft = rect.Left, CornerTop = rect.Top });
         window.FilesDropped += DropFiles;
         window.SheetOpenClicked += () => Decide(true);
         window.SheetKeepClicked += () => Decide(false);
-        window.HandBackClicked += () =>
-        {
-            if (_frontId is { } id && _followed.TryGetValue(id, out Follow? f)) f.Runtime.Plane?.Release();
-        };
+        window.ResumeClicked += ModuleEntry.RequestPauseAll;
+        window.ChipOpenRequested += OpenResult;
         return window;
     }
 
@@ -323,6 +325,19 @@ internal static class WorkspacePeekHost
         {
             string candidate = Path.Combine(folder, $"{stem} ({n}){extension}");
             if (!File.Exists(candidate)) return candidate;
+        }
+    }
+
+    internal static Action<string>? OpenResultForTests;
+
+    static void OpenResult(string path)
+    {
+        if (!File.Exists(path)) return;
+        if (OpenResultForTests is { } observe) { observe(path); return; }
+        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
+        {
+            // The file may have gone away or its default app may be unavailable.
         }
     }
 
@@ -381,14 +396,9 @@ internal static class WorkspacePeekHost
 
     static void UpdateToast(WorkspacePeekWindow window, WorkspaceRuntime front)
     {
-        if (front.Plane?.Driving != Driver.Owner) { window.ShowToast(null); return; }
-        string agent = ShortAgentName(front);
-        switch (_settings.Control)
-        {
-            case ControlMode.TakeTurns: window.ShowToast($"You're using it · {agent} waits"); break;
-            case ControlMode.FullStop: window.ShowToast($"{agent} is stopped", handBackLink: true); break;
-            default: window.ShowToast(null); break; // Work alongside: the pill carries this instead.
-        }
+        if (_pausedAll) window.ShowPausedToast();
+        else if (front.Plane?.Driving == Driver.Owner) window.ShowUsingToast(ShortAgentName(front));
+        else window.HideToast();
     }
 
     static (string Message, PeekTone Tone) Status(WorkspaceRuntime r)
@@ -396,14 +406,7 @@ internal static class WorkspacePeekHost
         if (r.Access?.Handoffs.All.Any(request => request.State == "pending") == true)
             return (AgentName(r) + " wants you", PeekTone.Attention);
         MissionState state = r.Agent?.State ?? MissionState.Idle;
-        if (state == MissionState.Done) return ("Done", PeekTone.Quiet);
-        // "Working alongside you" claims the owner is right there working beside the agent; it says
-        // so only while that is recently true - the owner acted on this screen within the last
-        // CarryOnSeconds (see _ownerActedAt, set from WorkspaceScreenInput's OwnerActed) - and falls
-        // back to the plain agent label before he has touched anything or once he has stepped away.
-        if (_settings.Control == ControlMode.WorkAlongside && state == MissionState.Working
-            && DateTimeOffset.Now - _ownerActedAt < TimeSpan.FromSeconds(_settings.CarryOnSeconds))
-            return (AgentName(r) + " · working alongside you", PeekTone.Working);
+        if (state == MissionState.Done) return (AgentName(r), PeekTone.Quiet);
         return state switch
         {
             MissionState.Working => (AgentName(r), PeekTone.Working),
@@ -431,8 +434,10 @@ internal static class WorkspacePeekHost
     static bool InUse(WorkspaceRuntime front) => _window?.Hovered == true
         || WorkspacePeekPlacement.Grown(_settings) || front.Plane?.Driving == Driver.Owner;
 
-    static TimeSpan IdleInterval => IdleIntervalFor(_settings.Smoothness);
-    static TimeSpan InUseInterval => InUseIntervalFor(_settings.Smoothness);
+    static PreviewSmoothness Rate => WorkspacePeekCapture.OnBattery()
+        ? PreviewSmoothness.BatterySaver : PreviewSmoothness.Balanced;
+    static TimeSpan IdleInterval => IdleIntervalFor(Rate);
+    static TimeSpan InUseInterval => InUseIntervalFor(Rate);
 
     /// <summary>How often idle draws while on screen and not in use, by Preview smoothness. Public
     /// to the engine probe too, so it measures the same rate this host actually paces itself to.</summary>
@@ -481,7 +486,7 @@ internal static class WorkspacePeekHost
         if (_drawing || _owner is not { } owner || _window is not { Watching: true } window) return;
         if (_frontId is not { } id || !_followed.TryGetValue(id, out Follow? f) || f.Runtime.Computer is not { } desktop) return;
         bool inUse = InUse(f.Runtime);
-        if (!inUse && _settings.PausePreviewsOnBattery && WorkspacePeekCapture.OnBattery()) return;
+        if (!inUse && WorkspacePeekCapture.OnBattery()) return;
         _drawing = true;
         string capturedFor = id;
         Task.Run(() =>
@@ -541,26 +546,31 @@ internal static class WorkspacePeekHost
 
     static Rect PlaceRect(Size total)
     {
-        if (_settings.CornerPosition == CornerPosition.WhereILeaveIt
-            && _settings.CornerLeft is { } left && _settings.CornerTop is { } top)
+        if (_settings.CornerLeft is { } left && _settings.CornerTop is { } top)
         {
             Rect saved = new(left, top, total.Width, total.Height);
             if (WorkspacePeekPlacement.OnConnectedMonitor(saved)) return saved;
         }
-        return WorkspacePeekPlacement.Corner(SystemParameters.WorkArea, _settings.CornerPosition, total);
+        return WorkspacePeekPlacement.Corner(SystemParameters.WorkArea, total);
     }
 
     static void HoldHotkeys()
     {
-        _cornerKey ??= MakeHotkey(CornerPressed);
-        // No hotkey host at all (a probe, a test) means neither was ever really asked for, so it is
-        // not "another app holding it" - true keeps that case from reporting a false conflict.
-        bool cornerHeld = _cornerKey?.Hold(_settings.CornerHotkey) ?? true;
-        _pauseKey ??= MakeHotkey(PausePressed);
-        bool pauseHeld = _pauseKey?.Hold(_settings.PauseHotkey) ?? true;
-        // Settings shows "Another app is using this shortcut." from this, after every attempt -
-        // startup and every settings change alike (SettingsChanged calls HoldHotkeys before Rethink).
-        ModuleEntry.ReportShortcuts(!cornerHeld, !pauseHeld);
+        _pauseKey ??= MakeHotkey(ModuleEntry.RequestPauseAll);
+        // A probe without a message loop cannot register; that is not a shortcut collision.
+        bool held = _pauseKey is null;
+        string? chosen = null;
+        foreach (string candidate in new[] { _settings.PauseHotkey, "Ctrl+Alt+Shift+P",
+            "Ctrl+Alt+F12", "Ctrl+Alt+Shift+F12" }.Distinct())
+        {
+            if (string.IsNullOrWhiteSpace(candidate) || _pauseKey is null || !_pauseKey.Hold(candidate)) continue;
+            held = true;
+            chosen = candidate;
+            break;
+        }
+        ModuleEntry.ReportShortcuts(false, !held);
+        if (chosen is not null && chosen != _settings.PauseHotkey)
+            AppSettingsStore.Update(s => s with { PauseHotkey = chosen });
     }
 
     static WorkspacePeekHotkey? MakeHotkey(Action pressed)
@@ -586,10 +596,10 @@ internal static class WorkspacePeekHost
     /// until the next timer tick, which is what toggling a setting and un-summoning right away used
     /// to leave it doing. With nothing running there is no picture to show, so it opens the app.
     /// </summary>
-    static void CornerPressed()
+    static void ShowCornerNow()
     {
         if (_owner is not { } owner) return;
-        if (!owner.CheckAccess()) { owner.BeginInvoke(CornerPressed); return; }
+        if (!owner.CheckAccess()) { owner.BeginInvoke(ShowCornerNow); return; }
         if (!WorkspaceRuntime.AnyRunning) { OpenWorkspace(null); return; }
         _summoned = true;
         _dismissed = false;
@@ -600,10 +610,10 @@ internal static class WorkspacePeekHost
     /// <summary>Every running workspace waits as if the owner had taken it; pressing it again hands
     /// back only the ones Pause itself took, never a workspace the owner already held before he
     /// pressed it.</summary>
-    static void PausePressed()
+    static void TogglePauseAll()
     {
         if (_owner is not { } owner) return;
-        if (!owner.CheckAccess()) { owner.BeginInvoke(PausePressed); return; }
+        if (!owner.CheckAccess()) { owner.BeginInvoke(TogglePauseAll); return; }
         _pausedAll = !_pausedAll;
         if (_pausedAll)
         {
@@ -621,6 +631,8 @@ internal static class WorkspacePeekHost
                 if (_pausedByUs.Contains(r.Id) && r.Plane is { Driving: Driver.Owner } plane) plane.Release();
             _pausedByUs.Clear();
         }
+        ModuleEntry.AllPaused = _pausedAll;
+        Rethink();
     }
 
     /// <summary>One followed workspace's event subscriptions, kept together so unfollowing removes

@@ -85,12 +85,8 @@
                 <DropShadowEffect Color="Black" Opacity="{DynamicResource CornerShadowOpacity}" BlurRadius="60" ShadowDepth="24" Direction="270"/>
             </Border.Effect>
             <Grid x:Name="CardBody" ClipToBounds="True">
-                <!-- The live picture. A glance, not a control surface of its own: clicks land through
-                     WorkspaceScreenInput, never move the owner's own pointer onto the agent's desktop.
-                     PreviewMouseDown intercepts every click first so Clicking it = Open the workspace
-                     can claim it before WorkspaceScreenInput's own MouseDown handler ever sees it. -->
+                <!-- Owner input lands on the workspace through the shared screen-input path. -->
                 <Image x:Name="LiveScreen" Stretch="UniformToFill" Cursor="Hand"
-                       PreviewMouseDown="LiveScreen_PreviewMouseDown"
                        automation:AutomationProperties.Name="Live workspace screen"/>
 
                 <!-- The front window's own capture, laid over the whole-screen background above at
@@ -176,12 +172,14 @@
                 <Border x:Name="Chip" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom"
                         Margin="8,0,0,9" Background="{DynamicResource GlassBrush}" BorderBrush="{DynamicResource GlassEdgeBrush}"
                         BorderThickness="1" CornerRadius="{DynamicResource PillRadius}" Padding="7,4,9,4"
-                        Cursor="Hand" MouseMove="Chip_MouseMove"
-                        automation:AutomationProperties.Name="Drag the newest saved file out">
+                        Cursor="Hand" MouseLeftButtonDown="Chip_MouseLeftButtonDown"
+                        MouseLeftButtonUp="Chip_MouseLeftButtonUp" MouseMove="Chip_MouseMove"
+                        automation:AutomationProperties.Name="Open or drag the newest saved file">
                     <StackPanel Orientation="Horizontal">
                         <Path Style="{StaticResource Icon13}" Data="{StaticResource Icon.File}" Margin="0,0,6,0"
                               TextElement.Foreground="{DynamicResource AccentBrush}"/>
                         <TextBlock x:Name="ChipText" FontSize="12" VerticalAlignment="Center" MaxWidth="180"
+                                   LineHeight="18.6" LineStackingStrategy="BlockLineHeight"
                                    TextTrimming="CharacterEllipsis" Foreground="{DynamicResource InkBrush}"/>
                     </StackPanel>
                 </Border>
@@ -189,7 +187,7 @@
                 <!-- Needs-you sheet: a real question with real actions. Stays until answered. -->
                 <Border x:Name="Sheet" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
                         Margin="8" Background="{DynamicResource GlassBrush}" BorderBrush="{DynamicResource GlassEdgeBrush}"
-                        BorderThickness="1" CornerRadius="10" Padding="12,10">
+                        BorderThickness="1" CornerRadius="10" Padding="12,10,12,12">
                     <StackPanel>
                         <TextBlock x:Name="SheetQuestion" FontSize="12.5" TextWrapping="Wrap"
                                    Foreground="{DynamicResource InkBrush}"/>
@@ -197,7 +195,7 @@
                             <Button Style="{StaticResource PrimaryButton}" Padding="14,5" Click="SheetOpen_Click"
                                     Content="Open"/>
                             <Button Style="{StaticResource DeskButton}" Padding="14,5" Margin="8,0,0,0"
-                                    Click="SheetKeep_Click" Content="Keep here"/>
+                                    Click="SheetKeep_Click" Content="Not now"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -206,17 +204,18 @@
                 <Border x:Name="Toast" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom"
                         Margin="0,0,0,10" Background="#15181D" CornerRadius="7" Padding="10,4">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock x:Name="ToastText" FontSize="12" Foreground="White"/>
+                        <TextBlock x:Name="ToastText" FontSize="12" Foreground="White"
+                                   LineHeight="18.6" LineStackingStrategy="BlockLineHeight" VerticalAlignment="Center"/>
                         <!-- A real button styled as a link: keyboard-reachable and named, not a
                              TextBlock only a mouse can find. -->
-                        <Button x:Name="ToastLink" Margin="6,0,0,0" Padding="0" Cursor="Hand"
-                                Visibility="Collapsed" Click="ToastLink_Click" Content="Hand back"
+                        <Button x:Name="ToastLink" Margin="8,0,0,0" Padding="0" Cursor="Hand"
+                                Visibility="Collapsed" Click="ToastLink_Click" Content="Resume"
                                 FocusVisualStyle="{StaticResource KeyboardFocus}"
-                                automation:AutomationProperties.Name="Hand the workspace back to the agent">
+                                automation:AutomationProperties.Name="Resume every agent">
                             <Button.Template>
                                 <ControlTemplate TargetType="Button">
                                     <TextBlock Text="{TemplateBinding Content}" FontSize="12" FontWeight="SemiBold"
-                                               Foreground="White" TextDecorations="Underline"
+                                               Foreground="#9DBBFF" LineHeight="18.6" LineStackingStrategy="BlockLineHeight"
                                                Opacity="{TemplateBinding Opacity}"/>
                                 </ControlTemplate>
                             </Button.Template>

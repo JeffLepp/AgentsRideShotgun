@@ -53,24 +53,17 @@ internal static class WorkspacePeekPlacement
         return new Size(w, Math.Round(w * 10 / 16));
     }
 
-    internal static Size Card(CornerSize size) => Card(size switch
-    {
-        CornerSize.Medium => 480,
-        CornerSize.Large => 640,
-        _ => SmallWidth,
-    });
-
-    /// <summary>A width the owner dragged it to wins over the Size setting until Size changes again.</summary>
+    /// <summary>Starts small; a size the owner dragged to survives a restart.</summary>
     internal static Size Card(AppSettings settings) =>
-        settings.CornerWidth is { } width ? Card(width) : Card(settings.CornerSize);
+        Card(settings.CornerWidth ?? SmallWidth);
 
-    /// <summary>The card in a corner of a work area. "Where I leave it" with no place yet is bottom right.</summary>
-    internal static Rect Corner(Rect work, CornerPosition position, Size size, double margin = Margin)
+    /// <summary>The card at the bottom right of a work area.</summary>
+    internal static Rect Corner(Rect work, Size size, double margin = Margin)
     {
         double width = Math.Min(size.Width, Math.Max(1, work.Width - 2 * margin));
         double height = Math.Min(size.Height, Math.Max(1, work.Height - 2 * margin));
-        double left = position == CornerPosition.BottomLeft ? work.Left + margin : work.Right - width - margin;
-        double top = position == CornerPosition.TopRight ? work.Top + margin : work.Bottom - height - margin;
+        double left = work.Right - width - margin;
+        double top = work.Bottom - height - margin;
         return Fit(work, new Rect(left, top, width, height));
     }
 
