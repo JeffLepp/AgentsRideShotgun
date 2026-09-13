@@ -371,7 +371,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     // --- a scene's fixed content, in place of the real stores ----------------------------------
 
     internal void LoadFixture(string name, string path, IEnumerable<(string Text, bool Working)> pills,
-        BitmapSource screen, IEnumerable<(string Time, string Prefix, string Code)> did, IEnumerable<(string Name, string When)> files)
+        BitmapSource screen, IEnumerable<(string Time, string Prefix, string Code, BitmapSource? Thumb)> did,
+        IEnumerable<(string Name, string When)> files)
     {
         StopLive();
         _fixture = true;
@@ -384,7 +385,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         TakeOverLabel.Text = "Take over";
         TakeOverButton.IsEnabled = true;
         _did.Clear();
-        foreach (var (time, prefix, code) in did) _did.Add(new DidRow(time, prefix, code, null));
+        foreach (var (time, prefix, code, thumb) in did) _did.Add(new DidRow(time, prefix, code, thumb));
         _files.Clear();
         foreach (var (fname, when) in files) _files.Add(new FileRow(fname, when));
     }

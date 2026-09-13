@@ -84,7 +84,9 @@
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <Ellipse Grid.Column="0" Width="7" Height="7" Fill="{DynamicResource AsleepBrush}" Margin="0,0,9,0" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        <!-- LineHeight matches the reference's 1.55 leading (13px * 1.55) so the row's pitch matches; WPF's own line box runs shorter. -->
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" LineHeight="20" LineStackingStrategy="BlockLineHeight"
+                                   Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                         <TextBlock Grid.Column="2" Text="{Binding Age}" FontSize="12" Foreground="{DynamicResource FaintInkBrush}" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
@@ -92,7 +94,8 @@
         </DataTemplate>
 
         <DataTemplate x:Key="SidebarWorkingTemplate">
-            <RadioButton GroupName="HubSidebar" Style="{StaticResource SidebarItem}" IsChecked="{Binding Selected, Mode=OneWay}"
+            <!-- Padding overrides SidebarItem's own (reference .item: padding 7px 8px). -->
+            <RadioButton GroupName="HubSidebar" Style="{StaticResource SidebarItem}" Padding="8,7" IsChecked="{Binding Selected, Mode=OneWay}"
                          Checked="SidebarItem_Checked" AutomationProperties.Name="{Binding OpenLabel}">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -112,7 +115,7 @@
         </DataTemplate>
 
         <DataTemplate x:Key="SidebarAsleepTemplate">
-            <RadioButton GroupName="HubSidebar" Style="{StaticResource SidebarItem}" IsChecked="{Binding Selected, Mode=OneWay}"
+            <RadioButton GroupName="HubSidebar" Style="{StaticResource SidebarItem}" Padding="8,7" IsChecked="{Binding Selected, Mode=OneWay}"
                          Checked="SidebarItem_Checked" AutomationProperties.Name="{Binding OpenLabel}">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -147,11 +150,11 @@
                     <Button x:Name="NewButton" Style="{StaticResource IconButton}" Click="New_Click" ToolTip="New workspace · Ctrl+N" AutomationProperties.Name="New workspace">
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Plus}"/>
                     </Button>
-                    <Button x:Name="SettingsButton" Style="{StaticResource IconButton}" Click="Settings_Click" ToolTip="Settings · Ctrl+," AutomationProperties.Name="Settings">
+                    <Button x:Name="SettingsButton" Style="{StaticResource IconButton}" Click="Settings_Click" Margin="8,0,0,0" ToolTip="Settings · Ctrl+," AutomationProperties.Name="Settings">
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Gear}"/>
                     </Button>
                 </StackPanel>
-                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,0,0" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                     <Button x:Name="MinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize Deskweave">
                         <Path Style="{StaticResource CaptionIcon}" Data="{StaticResource Icon.Min}"/>
                     </Button>
@@ -163,7 +166,6 @@
                     </Button>
                 </StackPanel>
             </Grid>
-            <Border Grid.Row="0" VerticalAlignment="Bottom" Height="1" Background="{DynamicResource HairlineBrush}"/>
 
             <Grid Grid.Row="1">
                 <Grid x:Name="StackRoot">
@@ -174,7 +176,8 @@
                             </Border>
                             <local:TrackedText Text="Working" TextFontSize="11" Margin="2,8,0,0" TextForeground="{DynamicResource FaintInkBrush}"
                                                Visibility="{Binding Items.Count, ElementName=StackWorkingList, Converter={StaticResource CountToVisibility}}"/>
-                            <ItemsControl x:Name="StackWorkingList" ItemTemplate="{StaticResource WorkingCardTemplate}">
+                            <ItemsControl x:Name="StackWorkingList" Margin="0,10,0,0" ItemTemplate="{StaticResource WorkingCardTemplate}"
+                                          Visibility="{Binding Items.Count, RelativeSource={RelativeSource Self}, Converter={StaticResource CountToVisibility}}">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemContainerStyle>
                                     <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,0,12"/></Style>

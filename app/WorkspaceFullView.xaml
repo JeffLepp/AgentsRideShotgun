@@ -60,7 +60,8 @@
                         <Run Text="{Binding Prefix, Mode=OneWay}"/><Run Text="{Binding Code, Mode=OneWay}"
                              FontFamily="{DynamicResource MonoFontFamily}" Foreground="{DynamicResource AccentBrush}"/>
                     </TextBlock>
-                    <Border Grid.Column="2" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
+                    <!-- 44 wide, 16:10 (reference .act .mini) -->
+                    <Border Grid.Column="2" Height="27.5" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
                             Visibility="{Binding HasThumb, Converter={StaticResource BoolToVis}}">
                         <Image Source="{Binding Thumb}" Stretch="UniformToFill"/>
                     </Border>
@@ -77,7 +78,9 @@
                     </Grid.ColumnDefinitions>
                     <Path Grid.Column="0" Style="{StaticResource Icon13}" Data="{StaticResource Icon.File}"
                           TextElement.Foreground="{DynamicResource MutedInkBrush}" Margin="0,0,10,0"/>
-                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12.5" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                    <!-- LineHeight matches the reference's 1.55 leading (12.5px * 1.55) so the row's pitch matches. -->
+                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12.5" LineHeight="19.4" LineStackingStrategy="BlockLineHeight"
+                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="2" Text="{Binding When}" FontSize="11.5" Foreground="{DynamicResource FaintInkBrush}"
                                VerticalAlignment="Center" Margin="10,0,0,0"/>
                 </Grid>

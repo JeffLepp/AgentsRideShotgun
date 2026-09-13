@@ -15,8 +15,9 @@ static class HubScenes
     static IReadOnlyList<HubEntry> Asleep(SceneContext scene) =>
     [
         new HubEntry("landing-page") { Name = "landing-page", Age = "2h", SidebarAge = "2h ago", Preview = scene.Site("docs") },
-        new HubEntry("api") { Name = "api", Age = "yesterday", SidebarAge = "Yesterday" },
-        new HubEntry("scratch") { Name = "Scratch", Age = "Mon", SidebarAge = "Monday" },
+        // Reference 04's sidebar shows api and Scratch as dimmed terminal frames, not blank.
+        new HubEntry("api") { Name = "api", Age = "yesterday", SidebarAge = "Yesterday", Preview = scene.Site("term") },
+        new HubEntry("scratch") { Name = "Scratch", Age = "Mon", SidebarAge = "Monday", Preview = scene.Site("term") },
     ];
 
     [Scene("hub", "03-hub", 1076, 24, 340, 804)]
@@ -51,9 +52,11 @@ static class HubScenes
             [("Claude Code", true), ("Codex next", false)],
             scene.Site("shop"),
             [
-                ("10:41:52", "Opened ", "localhost:5173"),
-                ("10:42:03", "Clicked Add to cart", ""),
-                ("10:42:09", "Clicked Checkout", ""),
+                // Reference 04's "What it did" rows each carry a 44-wide thumbnail (a live screenshot
+                // in production, when one exists); the scene stands in with the workspace's own site.
+                ("10:41:52", "Opened ", "localhost:5173", scene.Site("shop")),
+                ("10:42:03", "Clicked Add to cart", "", scene.Site("shop")),
+                ("10:42:09", "Clicked Checkout", "", scene.Site("shop")),
             ],
             [
                 ("checkout.png", "Claude · 10:42"),
