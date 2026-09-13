@@ -77,21 +77,25 @@ public partial class SettingsView
     }
 
     /// <summary>A card of rows (reference .card), with a hairline between every pair - whatever the
-    /// rows are, plain or radio choices - and none above the first.</summary>
+    /// rows are, plain or radio choices - and none above the first. A row a <see cref="SettingsFeatures"/>
+    /// flag starts collapsed is skipped for this: it takes no space either way, but a hairline drawn
+    /// above one would still stretch the card's width and leave a bare line where nothing shows.</summary>
     static Border Group(params UIElement[] rows)
     {
         var card = new Border();
         card.SetResourceReference(StyleProperty, "Card");
         var stack = new StackPanel();
         stack.PreviewKeyDown += RadioArrowKeys;
-        for (int i = 0; i < rows.Length; i++)
+        bool any = false;
+        foreach (UIElement row in rows)
         {
-            if (i == 0) { stack.Children.Add(rows[i]); continue; }
+            bool hidden = row is FrameworkElement { Visibility: Visibility.Collapsed };
+            if (hidden || !any) { stack.Children.Add(row); if (!hidden) any = true; continue; }
             // The hairline is drawn in the seam, not added on top of it - CSS border-box keeps a
             // bordered row's outer height the same as an unbordered one. A WPF Border stacks its
             // BorderThickness outside its child instead, so pull the extra 1 DIP back with a
             // matching negative margin or every row below the first drifts down by 1 DIP.
-            var line = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, -1, 0, 0), Child = rows[i] };
+            var line = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, -1, 0, 0), Child = row };
             line.SetResourceReference(Border.BorderBrushProperty, "HairlineBrush");
             stack.Children.Add(line);
         }
@@ -228,9 +232,17 @@ public partial class SettingsView
     }
 
     /// <summary>A rebindable shortcut row (reference .key): the row and the control that shows and
-    /// records it, so two rows on the same page can refuse each other's combination.</summary>
+    /// records it, so two rows on the same page can refuse each other's combination. When
+    /// <paramref name="taken"/> is given, "Another app is using this shortcut." shows under the row
+    /// exactly while it reports true (reference: the same style as the Start with Windows error),
+    /// following <see cref="ModuleEntry.ShortcutsTakenChanged"/>. Show() replacing the page does not
+    /// raise this row's Unloaded - Page and this view both stay connected to the same
+    /// PresentationSource throughout, so nothing here is actually removed from a live tree - so the
+    /// follower is unsubscribed explicitly through <c>_cleanup</c>, the same call Show() makes before
+    /// building the next page; Unloaded is kept alongside it only for the whole view being torn
+    /// down.</summary>
     (Border Row, SettingsShortcut Control) ShortcutRow(string claim, string label,
-        Func<AppSettings, string> read, Func<AppSettings, string, AppSettings> write)
+        Func<AppSettings, string> read, Func<AppSettings, string, AppSettings> write, Func<bool>? taken = null)
     {
         var shortcut = new SettingsShortcut(read(AppSettingsStore.Current));
         shortcut.SetResourceReference(StyleProperty, "ShortcutButton");
@@ -240,7 +252,25 @@ public partial class SettingsView
         _followers.Add(Show);
         _bound.Add(new Bound(claim, shortcut, [], s => read(s), (s, v) => write(s, (string)v),
             _ => { }, () => shortcut.Keys, Show));
-        return (Row(RowText(label), shortcut), shortcut);
+
+        UIElement text;
+        if (taken is null) text = RowText(label);
+        else
+        {
+            var error = Styled("Another app is using this shortcut.", "RowError");
+            void RefreshError() => error.Visibility = taken() ? Visibility.Visible : Visibility.Collapsed;
+            RefreshError();
+            ModuleEntry.ShortcutsTakenChanged += RefreshError;
+            _cleanup.Add(() => ModuleEntry.ShortcutsTakenChanged -= RefreshError);
+            var stack = new StackPanel();
+            stack.Children.Add(RowText(label));
+            stack.Children.Add(error);
+            // Belt and suspenders for the one case _cleanup does not cover: this view itself torn
+            // down (not just Show() moving to another page) while this row is still the one showing.
+            stack.Unloaded += (_, _) => ModuleEntry.ShortcutsTakenChanged -= RefreshError;
+            text = stack;
+        }
+        return (Row(text, shortcut), shortcut);
     }
 
     /// <summary>A destructive or slow action that asks first: the row's control starts as one button

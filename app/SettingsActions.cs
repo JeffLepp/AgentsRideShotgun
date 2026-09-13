@@ -11,21 +11,64 @@ using Microsoft.Win32;
 namespace Deskweave;
 
 /// <summary>
-/// Settings rows that are built but stay hidden until the behavior behind them exists. The Wave 2
-/// slice that builds that behavior turns its flag on; the ui-probe's scenes force them on to
-/// photograph them.
+/// Settings rows that are built and wired to the store but stay hidden until the behavior behind
+/// them exists (WAVE1.md C.3: Settings shows only controls something already obeys). The Wave 2
+/// slice that builds that behavior turns its flag on; <see cref="AllOnForScenes"/> forces every
+/// flag on for the length of one ui-probe scene, so 05 and 06 still show their full nav and pages.
 /// </summary>
 internal static class SettingsFeatures
 {
+    /// <summary>Agents > Workspaces: Where agents go, Running at once, Sleep when quiet. Wave 2
+    /// slice D, when it places and counts running workspaces.</summary>
+    internal static bool AgentScheduling;
+
     /// <summary>Agents > Remind agents to test in Deskweave. Wave 2 slice D, when it writes that line
     /// into the agents' global instructions.</summary>
     internal static bool RemindAgents;
+
+    /// <summary>Control > Your desktop: Agents open things on your desktop. Wave 2 slice E, when it
+    /// wires the desktop handoff the corner window's "Needs you" sheet answers.</summary>
+    internal static bool DesktopRequests;
+
+    /// <summary>Browser &amp; accounts > Agent browser: Share sign-ins across workspaces, Browser,
+    /// Open the browser early. Wave 2 slice E, when it owns the agent browser.</summary>
+    internal static bool AgentBrowser;
+
+    /// <summary>Privacy &amp; safety > Pause commands after reading a web page. Wave 2 slice E,
+    /// alongside the agent browser it pauses.</summary>
+    internal static bool PauseAfterWebPage;
 
     /// <summary>Browser &amp; accounts > Signed in: the account list with each account's scope, Add
     /// account and Sign out. Wave 2 slice E, when it reads the agent browser's profile and fills
     /// <see cref="SettingsActions.Accounts"/>, <see cref="SettingsActions.AddAccount"/> and
     /// <see cref="SettingsActions.SignOut"/>.</summary>
     internal static bool Accounts;
+
+    /// <summary>The whole Notifications page. Wave 2 slice F, when it raises the alerts these
+    /// settings would otherwise only save.</summary>
+    internal static bool Notifications;
+
+    /// <summary>History &amp; screenshots > Save screenshots, Continuous every, Keep history for.
+    /// Wave 2 slice F, when it writes screenshots and prunes history by these settings. Space used,
+    /// Clear and Open logs folder already read the real evidence store, so they stay shown.</summary>
+    internal static bool History;
+
+    /// <summary>Turns every flag above on, for the length of one <c>using</c> block, and puts each
+    /// back the way it was on <see cref="IDisposable.Dispose"/>. A scene builds its page inside the
+    /// block; the built tree keeps whatever visibility it was given, so restoring before the
+    /// screenshot (or right after, as here) never undoes it - only later scenes in the same run see
+    /// the flags go back to their real, mostly-off defaults.</summary>
+    internal static IDisposable AllOnForScenes()
+    {
+        var was = (AgentScheduling, RemindAgents, DesktopRequests, AgentBrowser, PauseAfterWebPage, Accounts, Notifications, History);
+        AgentScheduling = RemindAgents = DesktopRequests = AgentBrowser = PauseAfterWebPage = Accounts = Notifications = History = true;
+        return new Scope(() => (AgentScheduling, RemindAgents, DesktopRequests, AgentBrowser, PauseAfterWebPage, Accounts, Notifications, History) = was);
+    }
+
+    sealed class Scope(Action restore) : IDisposable
+    {
+        public void Dispose() => restore();
+    }
 }
 
 internal enum AgentState { NotInstalled, Found, Connected }

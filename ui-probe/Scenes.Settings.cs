@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -35,6 +36,7 @@ static class SettingsScenes
     [Scene("settings-control", "05-settings-control", 121, 61, 1198, 784)]
     static async Task<FrameworkElement> ControlPage(SceneContext scene)
     {
+        using IDisposable flags = SettingsFeatures.AllOnForScenes();
         SettingsView view = Host(scene, "control");
         await scene.Settle();
         return view;
@@ -43,6 +45,7 @@ static class SettingsScenes
     [Scene("settings-browser", "06-settings-browser", 121, 61, 1198, 784)]
     static async Task<FrameworkElement> BrowserPage(SceneContext scene)
     {
+        using IDisposable flags = SettingsFeatures.AllOnForScenes();
         StoredWorkspace shop = scene.Workspace("shop");
         var fixtureAccounts = new[]
         {
@@ -51,9 +54,7 @@ static class SettingsScenes
             new SettingsAccount("Stripe", "Test mode", Color.FromRgb(0x63, 0x5B, 0xFF)),
         };
         var previousAccounts = SettingsActions.Accounts;
-        bool previousFlag = SettingsFeatures.Accounts;
         SettingsActions.Accounts = () => fixtureAccounts;
-        SettingsFeatures.Accounts = true;
         // Naming a concrete theme (rather than leaving FollowWindows) keeps this write from making
         // AppearanceManager re-follow Windows and undo the theme Mvp.Run just forced for this pass.
         AppSettingsStore.Update(s => s with
@@ -62,8 +63,7 @@ static class SettingsScenes
             AccountScopes = new Dictionary<string, string> { ["Stripe|Test mode"] = shop.Id },
         });
         SettingsView view = Host(scene, "browser");
-        // The tree is already built; restoring these before the screenshot keeps every later scene honest.
-        SettingsFeatures.Accounts = previousFlag;
+        // The tree is already built; restoring this before the screenshot keeps every later scene honest.
         SettingsActions.Accounts = previousAccounts;
         await scene.Settle();
         return view;
@@ -102,6 +102,7 @@ static class SettingsScenes
         var previousSync = SettingsActions.SyncStartup;
         var previousConnect = SettingsActions.Connect;
         var previousDelete = SettingsActions.DeleteAllData;
+        ThemeChoice previousTheme = AppSettingsStore.Current.Theme;
         SettingsActions.SyncStartup = _ => true;
         SettingsActions.Connect = (_, _) => Task.FromResult<string?>(null);
         SettingsActions.DeleteAllData = _ => { };
@@ -173,12 +174,118 @@ static class SettingsScenes
             view.Show("browser");
             Program.Check(SettingsActions.Accounts().Count == 0 && !SettingsFeatures.Accounts,
                 "The signed-in account list stays hidden and empty until Wave 2 turns it on");
+
+            // Theme is the one page 05/06 draws that is already wired past the store: choosing it
+            // repaints the app while Settings stays open, on the same SettingsView instance used
+            // throughout this gate, not just a value AppSettingsStore remembers.
+            view.Show("general");
+            Bound theme = view.BoundControls.First(b => b.Label == "Theme");
+            theme.Choose(ThemeChoice.Dark);
+            Pump();
+            Program.Check(AppearanceManager.Dark, "Theme > Dark turns AppearanceManager.Dark on while Settings stays open");
+            Color dark = ((SolidColorBrush)Application.Current!.Resources["WindowBrush"]).Color;
+            theme.Choose(ThemeChoice.Light);
+            Pump();
+            Program.Check(!AppearanceManager.Dark, "Theme > Light turns AppearanceManager.Dark back off while Settings stays open");
+            Color light = ((SolidColorBrush)Application.Current!.Resources["WindowBrush"]).Color;
+            Program.Check(dark != light, "Theme repaints the WindowBrush resource live between Dark and Light");
+
+            // Every other row WAVE1.md C.3 gates behind a SettingsFeatures flag: built and wired
+            // (the sweep above already proved each saves its value), but collapsed until its flag is
+            // on, and visible once it is.
+            void ChecksFlag(string category, string label, Func<bool> read, Action<bool> write)
+            {
+                bool was = read();
+                write(false);
+                view.Show(category);
+                view.UpdateLayout(); // IsVisible only reflects a Visibility change after a layout pass.
+                var off = (FrameworkElement)view.BoundControls.First(b => b.Label == label).Control;
+                Program.Check(!off.IsVisible, category + " > " + label + " is hidden by default");
+                write(true);
+                view.Show(category);
+                view.UpdateLayout();
+                var on = (FrameworkElement)view.BoundControls.First(b => b.Label == label).Control;
+                Program.Check(on.IsVisible, category + " > " + label + " shows once its flag turns on");
+                write(was);
+            }
+            ChecksFlag("agents", "Where agents go", () => SettingsFeatures.AgentScheduling, v => SettingsFeatures.AgentScheduling = v);
+            ChecksFlag("control", "Agents open things on your desktop", () => SettingsFeatures.DesktopRequests, v => SettingsFeatures.DesktopRequests = v);
+            ChecksFlag("browser", "Share sign-ins across workspaces", () => SettingsFeatures.AgentBrowser, v => SettingsFeatures.AgentBrowser = v);
+            ChecksFlag("privacy", "Pause commands after reading a web page", () => SettingsFeatures.PauseAfterWebPage, v => SettingsFeatures.PauseAfterWebPage = v);
+            ChecksFlag("alerts", "When an agent needs you", () => SettingsFeatures.Notifications, v => SettingsFeatures.Notifications = v);
+            ChecksFlag("history", "Save screenshots", () => SettingsFeatures.History, v => SettingsFeatures.History = v);
+
+            // A category left with nothing wired on leaves the nav; it rejoins once a flag that
+            // shows something on it turns on.
+            view.Show("general");
+            Program.Check(!view.AvailableCategories.Contains("alerts"), "Notifications leaves the nav while its flag is off");
+            Program.Check(!view.AvailableCategories.Contains("browser"), "Browser & accounts leaves the nav while both its flags are off");
+            SettingsFeatures.Notifications = true;
+            SettingsFeatures.AgentBrowser = true;
+            view.Show("general");
+            Program.Check(view.AvailableCategories.Contains("alerts"), "Notifications rejoins the nav once its flag turns on");
+            Program.Check(view.AvailableCategories.Contains("browser"), "Browser & accounts rejoins the nav once a flag turns on");
+            SettingsFeatures.Notifications = false;
+            SettingsFeatures.AgentBrowser = false;
+
+            // Each Show() rebuilds the page from scratch (_bound.Clear(), Page.Content = Build(id)),
+            // but Page and this view both stay connected to the same PresentationSource throughout -
+            // a row Show() replaces is never actually disconnected from a live tree, so its Unloaded
+            // does not fire (checked here first; it does not). SettingsView._cleanup is what actually
+            // unsubscribes a shortcut row's error text from ModuleEntry.ShortcutsTakenChanged when
+            // Show() moves on. Counting the event's own invocation list (reflection: the accessors
+            // are internal) proves the follower is really gone, not just that the row stopped
+            // updating because nothing tells it to any more.
+            static int TakenChangedSubscribers() =>
+                (typeof(ModuleEntry).GetField(nameof(ModuleEntry.ShortcutsTakenChanged), BindingFlags.NonPublic | BindingFlags.Static)
+                    ?.GetValue(null) as Delegate)?.GetInvocationList().Length ?? 0;
+            view.Show("control");
+            view.UpdateLayout();
+            int subscribedOnControl = TakenChangedSubscribers();
+            view.Show("general");
+            view.UpdateLayout();
+            Program.Check(TakenChangedSubscribers() < subscribedOnControl,
+                "Leaving the Control page unsubscribes its shortcut rows' followers (SettingsView._cleanup, not Unloaded, which does not fire for a page Show() replaces)");
+            view.Show("control");
+            view.UpdateLayout();
+            Program.Check(TakenChangedSubscribers() == subscribedOnControl,
+                "Returning to Control resubscribes once per row, not stacking a follower left over from an earlier visit");
+
+            // A shortcut Windows refuses shows "Another app is using this shortcut." under that row,
+            // following ModuleEntry.ShortcutsTakenChanged, and clears the same way.
+            view.Show("control");
+            var pauseControl = (FrameworkElement)view.BoundControls.First(b => b.Label == "Pause every agent").Control;
+            var cornerControl = (FrameworkElement)view.BoundControls.First(b => b.Label == "Show the corner window").Control;
+            TextBlock ErrorUnder(FrameworkElement shortcut)
+            {
+                var grid = (Grid)VisualTreeHelper.GetParent(shortcut)!;
+                var text = (StackPanel)grid.Children[0]!;
+                return (TextBlock)text.Children[1];
+            }
+            view.UpdateLayout();
+            TextBlock pauseError = ErrorUnder(pauseControl);
+            TextBlock cornerError = ErrorUnder(cornerControl);
+            Program.Check(!pauseError.IsVisible && !cornerError.IsVisible,
+                "Neither shortcut shows a taken error before ModuleEntry.ReportShortcuts says so");
+            ModuleEntry.ReportShortcuts(cornerTaken: true, pauseTaken: false);
+            view.UpdateLayout();
+            Program.Check(cornerError.IsVisible && !pauseError.IsVisible,
+                "Show the corner window shows \"Another app is using this shortcut.\" once ReportShortcuts reports it taken");
+            ModuleEntry.ReportShortcuts(cornerTaken: false, pauseTaken: true);
+            view.UpdateLayout();
+            Program.Check(pauseError.IsVisible && !cornerError.IsVisible,
+                "The taken error moves to Pause every agent and clears off Show the corner window as ReportShortcuts changes");
+            ModuleEntry.ReportShortcuts(cornerTaken: false, pauseTaken: false);
+            view.UpdateLayout();
+            Program.Check(!pauseError.IsVisible && !cornerError.IsVisible,
+                "Both shortcut-taken errors clear once ReportShortcuts reports neither taken");
         }
         finally
         {
             SettingsActions.SyncStartup = previousSync;
             SettingsActions.Connect = previousConnect;
             SettingsActions.DeleteAllData = previousDelete;
+            AppSettingsStore.Update(s => s with { Theme = previousTheme });
             window.Close();
         }
         return Task.CompletedTask;
