@@ -1,6 +1,301 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- Settings controls shared with first launch: toggle switch, dropdown, radio choice, key cap.
-         Built by the Settings worker in Wave 1. Merged after Theme.xaml; reference tokens and icons
-         with DynamicResource only, because a merged dictionary cannot StaticResource its siblings. -->
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Deskweave">
+    <!-- Settings controls shared with first launch (reference .sw, .dd, .radio, .key, .rec, .link,
+         .glyph, .banner, .srw). Merged after Theme.xaml; tokens, icons and Theme.xaml's styles are
+         reached with DynamicResource only, because a merged dictionary cannot StaticResource its
+         siblings. CSS line heights are set as block line heights so rows come out the same height
+         as the reference. -->
+
+    <!-- Focus rings for the rounder controls; the square ones use Theme.xaml's KeyboardFocus. -->
+    <Style x:Key="SwitchFocus">
+        <Setter Property="Control.Template"><Setter.Value><ControlTemplate>
+            <Border BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" CornerRadius="13" Margin="-3"/>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="RowFocus">
+        <Setter Property="Control.Template"><Setter.Value><ControlTemplate>
+            <Border BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" CornerRadius="{DynamicResource SkinControlRadius}" Margin="3"/>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+
+    <!-- Toggle switch: 40 x 20, fully round. On: accent fill, a 12 DIP knob in the on-accent ink
+         4 from the right. Off: no fill, a 1 DIP border and the knob in ToggleOffBrush, 4 inside the
+         border on the left. Space toggles it, like any check box. -->
+    <Style x:Key="ToggleSwitch" TargetType="CheckBox">
+        <Setter Property="Width" Value="40"/>
+        <Setter Property="Height" Value="20"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource SwitchFocus}"/>
+        <Setter Property="local:SettingsMotion.Slide" Value="True"/>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="CheckBox">
+                <Grid Background="Transparent">
+                    <Border x:Name="Track" CornerRadius="10" BorderThickness="1" Background="Transparent" BorderBrush="{DynamicResource ToggleOffBrush}"/>
+                    <Ellipse x:Name="Knob" Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="5,4,0,0"
+                             Fill="{DynamicResource ToggleOffBrush}">
+                        <Ellipse.RenderTransform><TranslateTransform/></Ellipse.RenderTransform>
+                    </Ellipse>
+                </Grid>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Track" Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger>
+                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="Track" Property="Background" Value="{DynamicResource PressedBrush}"/></Trigger>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                        <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        <Setter TargetName="Knob" Property="Fill" Value="{DynamicResource OnAccentBrush}"/>
+                        <Setter TargetName="Knob" Property="Margin" Value="24,4,0,0"/>
+                    </Trigger>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions><Condition Property="IsChecked" Value="True"/><Condition Property="IsMouseOver" Value="True"/></MultiTrigger.Conditions>
+                        <Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentHoverBrush}"/>
+                        <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}"/>
+                    </MultiTrigger>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions><Condition Property="IsChecked" Value="True"/><Condition Property="IsPressed" Value="True"/></MultiTrigger.Conditions>
+                        <Setter TargetName="Track" Property="Opacity" Value="0.85"/>
+                    </MultiTrigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+
+    <!-- Dropdown (reference .dd): at least 150 wide, radius 6, control border, window fill, padding
+         5 x 10, 12.5 DIP, the Down icon at 12 DIP muted, 10 after the text. The list opens on a card
+         with a hairline; the popup is its own window, so it gets one soft shadow to lift it off the
+         card it opens over. Arrow keys change the choice while it is closed, Alt+Down opens it. -->
+    <Style x:Key="DropdownItem" TargetType="ComboBoxItem">
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="ComboBoxItem">
+                <Border x:Name="Surface" CornerRadius="5" Background="Transparent" Padding="{TemplateBinding Padding}">
+                    <ContentPresenter TextBlock.LineHeight="19.375" TextBlock.LineStackingStrategy="BlockLineHeight"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger>
+                    <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions><Condition Property="IsSelected" Value="True"/><Condition Property="IsHighlighted" Value="True"/></MultiTrigger.Conditions>
+                        <Setter TargetName="Surface" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+                    </MultiTrigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+    <Style x:Key="Dropdown" TargetType="ComboBox">
+        <Setter Property="MinWidth" Value="150"/>
+        <Setter Property="MaxWidth" Value="260"/>
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource WindowBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource KeyboardFocus}"/>
+        <Setter Property="ItemContainerStyle" Value="{StaticResource DropdownItem}"/>
+        <Setter Property="MaxDropDownHeight" Value="320"/>
+        <Setter Property="ScrollViewer.CanContentScroll" Value="False"/>
+        <Setter Property="ItemTemplate"><Setter.Value>
+            <DataTemplate><TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" LineHeight="19.375" LineStackingStrategy="BlockLineHeight"/></DataTemplate>
+        </Setter.Value></Setter>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="ComboBox">
+                <Grid>
+                    <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource SkinControlRadius}"/>
+                    <Border x:Name="Tint" Background="Transparent" CornerRadius="{DynamicResource SkinControlRadius}"/>
+                    <Grid Margin="{TemplateBinding BorderThickness}" IsHitTestVisible="False">
+                        <Grid Margin="{TemplateBinding Padding}">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              VerticalAlignment="Center" TextBlock.LineHeight="19.375" TextBlock.LineStackingStrategy="BlockLineHeight"/>
+                            <Path Grid.Column="1" Style="{DynamicResource Icon12}" Data="{DynamicResource Icon.Down}" Margin="10,0,0,0"
+                                  VerticalAlignment="Center" TextElement.Foreground="{DynamicResource MutedInkBrush}"/>
+                        </Grid>
+                    </Grid>
+                    <ToggleButton Focusable="False" IsTabStop="False" ClickMode="Press"
+                                  IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                        <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent"/></ControlTemplate></ToggleButton.Template>
+                    </ToggleButton>
+                    <Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False" Placement="Bottom" VerticalOffset="4" HorizontalOffset="-12"
+                           IsOpen="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                           PopupAnimation="{DynamicResource {x:Static SystemParameters.ComboBoxPopupAnimationKey}}">
+                        <Border Margin="12,0,12,16" Style="{DynamicResource Card}" Padding="4"
+                                MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+                            <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.16" Color="#000000"/></Border.Effect>
+                            <ScrollViewer MaxHeight="{TemplateBinding MaxDropDownHeight}" Focusable="False">
+                                <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                            </ScrollViewer>
+                        </Border>
+                    </Popup>
+                </Grid>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger>
+                    <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="Tint" Property="Background" Value="{DynamicResource PressedBrush}"/></Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+
+    <!-- A choice in a card (reference .srw.top with .radio): the whole row is the radio button. An
+         18 DIP ring, 1.5 DIP, in ToggleOffBrush; checked: accent ring and an 8 DIP accent dot. The
+         content sits 12 after the ring. Arrow keys move the choice inside its group. -->
+    <Style x:Key="ChoiceRadio" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Padding" Value="14,9"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource RowFocus}"/>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="RadioButton">
+                <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Grid Width="18" Height="18" VerticalAlignment="Top" Margin="0,1,0,0">
+                            <Ellipse x:Name="Ring" Stroke="{DynamicResource ToggleOffBrush}" StrokeThickness="1.5"/>
+                            <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{DynamicResource AccentBrush}" Opacity="0"/>
+                        </Grid>
+                        <ContentPresenter Grid.Column="1" Margin="12,0,0,0" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                    </Grid>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource MutedInkBrush}"/></Trigger>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource AccentBrush}"/>
+                        <Setter TargetName="Dot" Property="Opacity" Value="1"/>
+                    </Trigger>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions><Condition Property="IsChecked" Value="True"/><Condition Property="IsMouseOver" Value="True"/></MultiTrigger.Conditions>
+                        <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource AccentHoverBrush}"/>
+                        <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource AccentHoverBrush}"/>
+                    </MultiTrigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Setter TargetName="Dot" Property="Opacity" Value="1"/>
+                        <Setter TargetName="Dot" Property="Width" Value="6"/>
+                        <Setter TargetName="Dot" Property="Height" Value="6"/>
+                        <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource AccentBrush}"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+
+    <!-- Key cap (reference .key): 11.5 mono, 1 DIP control border, radius 5, padding 2 x 6. -->
+    <Style x:Key="KeyCap" TargetType="ContentControl">
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFontFamily}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Border BorderBrush="{DynamicResource ControlBorderBrush}" BorderThickness="1" CornerRadius="5" Padding="6,2">
+                    <ContentPresenter TextBlock.LineHeight="17.825" TextBlock.LineStackingStrategy="BlockLineHeight"/>
+                </Border>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+
+    <!-- The "Default" tag after a choice (reference .rec): 11 semibold accent. A Run, so it shares the
+         label's baseline; put a 6 DIP InlineUIContainer before it. -->
+    <Style x:Key="DefaultTag" TargetType="Run">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+    </Style>
+
+    <!-- Text button (reference .link): 12.5 semibold accent, no box. -->
+    <Style x:Key="LinkButton" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource KeyboardFocus}"/>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="Button">
+                <ContentPresenter x:Name="Text" RecognizesAccessKey="True" TextBlock.Foreground="{TemplateBinding Foreground}"
+                                  TextBlock.LineHeight="19.375" TextBlock.LineStackingStrategy="BlockLineHeight"/>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Text" Property="TextBlock.Foreground" Value="{DynamicResource AccentHoverBrush}"/></Trigger>
+                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="Text" Property="Opacity" Value="0.75"/></Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+
+    <!-- Letter tile for an agent or an account (reference .glyph): 28 x 28, radius 7, white 12 bold
+         on the fixed color each tile is drawn in. -->
+    <Style x:Key="LetterTile" TargetType="ContentControl">
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="Foreground" Value="#FFFFFF"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Border Background="{TemplateBinding Background}" CornerRadius="7">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+
+    <!-- Banner (reference .banner): soft accent, radius 10, padding 12 x 14, the lock icon in accent,
+         13 DIP text at 1.45. Put a TextBlock with a semibold first run in it. -->
+    <Style x:Key="Banner" TargetType="ContentControl">
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Border Background="{DynamicResource AccentSoftBrush}" CornerRadius="10" Padding="14,12">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Path Style="{DynamicResource Icon}" Data="{DynamicResource Icon.Lock}" VerticalAlignment="Top" Margin="0,1,0,0"
+                              TextElement.Foreground="{DynamicResource AccentBrush}"/>
+                        <ContentPresenter Grid.Column="1" Margin="12,0,0,0" TextBlock.LineHeight="18.85" TextBlock.LineStackingStrategy="BlockLineHeight"/>
+                    </Grid>
+                </Border>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+
+    <!-- A row in a settings card (reference .srw): at least 50 tall, padding 9 x 14, a hairline on
+         top of every row but the first. Label 13, hint 11.5 muted under it, both at 1.35. -->
+    <Style x:Key="SettingRow" TargetType="Border">
+        <Setter Property="MinHeight" Value="50"/>
+        <Setter Property="Padding" Value="14,9"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}"/>
+        <Setter Property="BorderThickness" Value="0,1,0,0"/>
+    </Style>
+    <Style x:Key="RowLabel" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+        <Setter Property="LineHeight" Value="17.55"/>
+        <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+    <Style x:Key="RowHint" TargetType="TextBlock" BasedOn="{StaticResource RowLabel}">
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}"/>
+        <Setter Property="LineHeight" Value="15.525"/>
+    </Style>
+    <Style x:Key="RowError" TargetType="TextBlock" BasedOn="{StaticResource RowHint}">
+        <Setter Property="Foreground" Value="{DynamicResource DangerInkBrush}"/>
+    </Style>
 </ResourceDictionary>

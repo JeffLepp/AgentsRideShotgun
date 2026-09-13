@@ -1,8 +1,170 @@
 <UserControl x:Class="Deskweave.SettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Focusable="True">
+             xmlns:local="clr-namespace:Deskweave"
+             Focusable="True" IsTabStop="False" FocusVisualStyle="{x:Null}" UseLayoutRounding="True"
+             Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource InkBrush}"
+             FontFamily="{DynamicResource SkinFontFamily}" FontSize="13">
     <!-- Settings (references 05, 06): the 264 DIP category list with "Workspaces" to go back, and
-         the chosen page. The hub hosts it below its title bar. -->
-    <Grid/>
+         the chosen page, at most 720 wide. The hub hosts it below its title bar. -->
+    <UserControl.Resources>
+        <!-- "Workspaces" (reference .item.nav.back): a list row in muted ink that goes back. -->
+        <Style x:Key="BackRow" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/>
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Surface" CornerRadius="8" Background="Transparent" Padding="10,8">
+                        <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource PressedBrush}"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
+        </Style>
+        <!-- List icons are muted; the chosen category's is accent. -->
+        <Style x:Key="NavIcon" TargetType="Path" BasedOn="{StaticResource Icon}">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource MutedInkBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}" Value="True">
+                    <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="NavText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Margin" Value="10,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="LineHeight" Value="20.15"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+        <!-- A whole row that does one thing (Open logs folder, Licenses). The hover fill is inset so it
+             never squares off the card's rounded corners. -->
+        <Style x:Key="RowButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Padding" Value="14,9"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource RowFocus}"/>
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Tint" Margin="4,3" CornerRadius="{DynamicResource SkinControlRadius}" Background="Transparent"/>
+                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Background" Value="{DynamicResource PressedBrush}"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
+        </Style>
+        <!-- Key caps that rebind when clicked. The ring shows on hover and, in accent, while recording. -->
+        <Style x:Key="ShortcutButton" TargetType="local:SettingsShortcut">
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/>
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="local:SettingsShortcut">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Ring" Margin="-5,-4" CornerRadius="7" BorderThickness="1" BorderBrush="Transparent" Background="Transparent"/>
+                        <ContentPresenter VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Ring" Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Ring" Property="Background" Value="{DynamicResource PressedBrush}"/></Trigger>
+                        <Trigger Property="Recording" Value="True">
+                            <Setter TargetName="Ring" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+                            <Setter TargetName="Ring" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="264"/>
+            <ColumnDefinition/>
+        </Grid.ColumnDefinitions>
+
+        <Border Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,1,0" Padding="10,8">
+            <StackPanel>
+                <Button x:Name="BackButton" Style="{StaticResource BackRow}" Margin="0,0,0,8" AutomationProperties.Name="Workspaces" Click="Back_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Back}" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource NavText}" Text="Workspaces"/>
+                    </StackPanel>
+                </Button>
+                <StackPanel x:Name="Nav" PreviewKeyDown="Nav_PreviewKeyDown">
+                    <StackPanel.Resources>
+                        <Style TargetType="RadioButton" BasedOn="{StaticResource SidebarNavItem}">
+                            <Setter Property="GroupName" Value="SettingsNav"/>
+                            <Setter Property="Margin" Value="0,0,0,4"/>
+                            <EventSetter Event="Checked" Handler="Nav_Checked"/>
+                        </Style>
+                    </StackPanel.Resources>
+                    <RadioButton Tag="general" AutomationProperties.Name="General">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Sliders}"/><TextBlock Style="{StaticResource NavText}" Text="General"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="agents" AutomationProperties.Name="Agents">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Agents}"/><TextBlock Style="{StaticResource NavText}" Text="Agents"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="control" AutomationProperties.Name="Control">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Hand}"/><TextBlock Style="{StaticResource NavText}" Text="Control"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="browser" AutomationProperties.Name="Browser &amp; accounts">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Globe}"/><TextBlock Style="{StaticResource NavText}" Text="Browser &amp; accounts"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="corner" AutomationProperties.Name="Corner window">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Pip}"/><TextBlock Style="{StaticResource NavText}" Text="Corner window"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="alerts" AutomationProperties.Name="Notifications">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Bell}"/><TextBlock Style="{StaticResource NavText}" Text="Notifications"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="history" AutomationProperties.Name="History &amp; screenshots">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Clock}"/><TextBlock Style="{StaticResource NavText}" Text="History &amp; screenshots"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="perf" AutomationProperties.Name="Performance">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Gauge}"/><TextBlock Style="{StaticResource NavText}" Text="Performance"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="privacy" AutomationProperties.Name="Privacy &amp; safety">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Shield}"/><TextBlock Style="{StaticResource NavText}" Text="Privacy &amp; safety"/></StackPanel>
+                    </RadioButton>
+                    <RadioButton Tag="about" AutomationProperties.Name="About" Margin="0">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Info}"/><TextBlock Style="{StaticResource NavText}" Text="About"/></StackPanel>
+                    </RadioButton>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition/>
+            </Grid.RowDefinitions>
+            <TextBlock x:Name="PageTitle" Margin="28,22,28,0" FontSize="21" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+            <ScrollViewer x:Name="Scroller" Grid.Row="1" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid Margin="28,20,28,22">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="720"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <ContentControl x:Name="Page" Focusable="False" IsTabStop="False"/>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
 </UserControl>
