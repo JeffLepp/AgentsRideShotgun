@@ -126,6 +126,14 @@ static class CornerScenes
         WantedChecks();
         SizeChecks();
         await IntegrationChecks();
+        // Wave 1's fix round (design/WAVE1.md item 14): these drive the real WorkspacePeekHost and a
+        // real WorkspacePeekWindow through internal seams - reflection into the host's own private
+        // methods, and a real second global-hotkey registration to force a real conflict - rather
+        // than only the pure WorkspacePeekPolicy.Wanted function WantedChecks above already covers.
+        await HostBehaviorChecks();
+        PauseReleaseChecks();
+        ResultChipChecks();
+        await ReportShortcutsChecks();
     }
 
     static void WantedChecks()
@@ -246,4 +254,229 @@ static class CornerScenes
         (WorkspacePeekWindow?)typeof(WorkspacePeekHost).GetField("_window", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null);
 
     static bool Close(double a, double b) => Math.Abs(a - b) < 1.0;
+
+    static object? InvokeHost(string method, params object?[] args) =>
+        typeof(WorkspacePeekHost).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, args);
+
+    /// <summary>Sets one of the host's own private static fields directly - used only to force a
+    /// clean starting point (a static, process-wide module otherwise carries real state left by
+    /// every earlier gate section) before a timing-sensitive claim, never to fake a claim's result.</summary>
+    static void SetHostField(string field, object? value) =>
+        typeof(WorkspacePeekHost).GetField(field, BindingFlags.NonPublic | BindingFlags.Static)!.SetValue(null, value);
+
+    static void InvokeWindow(WorkspacePeekWindow window, string method, params object?[] args) =>
+        typeof(WorkspacePeekWindow).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, args);
+
+    /// <summary>
+    /// Fade timing (items 4 and 15's hover/pinned claims, and item 4's hotkey fix) against the real
+    /// host and a real window - not the pure policy function WantedChecks already covers. One real
+    /// fixture workspace, FadeAfterSeconds turned down to 3 so each claim waits a few real seconds
+    /// rather than the setting's usual minimum.
+    /// </summary>
+    static async Task HostBehaviorChecks()
+    {
+        StoredWorkspace stored = WorkspaceStore.Create("Corner host behavior fixture");
+        WorkspaceRuntime runtime = WorkspaceRuntime.Start(stored);
+        try
+        {
+            AppSettingsStore.Update(s => s with
+            {
+                CornerShow = CornerShow.ComesAndGoes, CornerPosition = CornerPosition.BottomRight,
+                FadeAfterSeconds = 3, CornerPinned = false,
+            });
+            WorkspacePeekHost.Start();
+            // The host is a static, process-wide module that ModuleEntry.Start() already turned on
+            // for the whole gate run, so real activity from every earlier section (agent routing's
+            // real bridge process included) may have left _stirred recent. Force the clean quiet
+            // starting point this section's timing claims depend on, rather than assume one.
+            SetHostField("_stirred", DateTimeOffset.MinValue);
+            SetHostField("_dismissed", false);
+            SetHostField("_summoned", false);
+            InvokeHost("Rethink");
+            Program.Check(GateWindow() is not { Watching: true },
+                "The real window is not up while nothing has ever stirred it, nothing pinned, nothing busy");
+
+            InvokeHost("StirFrom", stored.Id);
+            WorkspacePeekWindow? window = GateWindow();
+            Program.Check(window is { Watching: true }, "A real activity brings the real corner window up");
+
+            // Hover holds it up past FadeAfterSeconds (item 15's "hover holds" claim, on the real window).
+            window!.ForceHoverForTests(true);
+            await Task.Delay(3800);
+            Program.Check(window.Watching, "Hovering holds the real window up well past FadeAfterSeconds");
+            window.ForceHoverForTests(false);
+            await Task.Delay(3800);
+            Program.Check(!window.Watching, "Letting go of the hover lets the real window fade once quiet passes FadeAfterSeconds again");
+
+            // Pinned stays up idle no matter how long the workspace has been quiet (item 15's "pinned stays" claim).
+            InvokeHost("StirFrom", stored.Id);
+            AppSettingsStore.Update(s => s with { CornerPinned = true });
+            await Task.Delay(3800);
+            Program.Check(GateWindow() is { Watching: true }, "Pinned keeps the real window up well past FadeAfterSeconds");
+            AppSettingsStore.Update(s => s with { CornerPinned = false });
+            await Task.Delay(3800);
+            Program.Check(GateWindow() is { Watching: false }, "Un-pinning lets the real window fade once quiet again");
+
+            // The hotkey (item 4): never touches CornerPinned, and its summon survives past the next
+            // timer tick rather than only until it - checked in Off mode, where nothing else shows it.
+            AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Off });
+            await Task.Delay(600);
+            Program.Check(GateWindow() is not { Watching: true }, "Off shows nothing on its own");
+            bool pinnedBefore = AppSettingsStore.Current.CornerPinned;
+            InvokeHost("CornerPressed");
+            window = GateWindow();
+            Program.Check(window is { Watching: true }, "The real hotkey handler shows the real corner window even set to Off");
+            Program.Check(AppSettingsStore.Current.CornerPinned == pinnedBefore,
+                "The real hotkey handler never touches CornerPinned (the fixed regression: it used to toggle it)");
+            await Task.Delay(900); // longer than one idle timer tick (0.4 s at Balanced), shorter than FadeAfterSeconds
+            Program.Check(window!.Watching,
+                "The hotkey's summon survives past the next timer tick (the fixed regression: it used to drop right there)");
+            await Task.Delay(3800); // past FadeAfterSeconds since the press
+            Program.Check(!window.Watching, "The hotkey's summon still fades after the normal fade period, like any other activity");
+
+            // Hidden while ModuleEntry.HubShowing, on the real host (item 15's "HubShowing hides it" claim).
+            AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Always });
+            await Task.Delay(300);
+            Program.Check(GateWindow() is { Watching: true }, "Always keeps the real window up with a workspace running");
+            ModuleEntry.HubShowing = true;
+            await Task.Delay(300);
+            Program.Check(GateWindow() is { Watching: false }, "Showing the hub hides the real corner window even set to Always");
+            ModuleEntry.HubShowing = false;
+            await Task.Delay(300);
+            Program.Check(GateWindow() is { Watching: true }, "Hiding the hub again brings the real corner window back");
+
+            // Hide/dismiss (item 15): gone until the next activity, through the real Hide button's own
+            // click handler rather than the host's internal dismissed flag set directly.
+            window = GateWindow();
+            InvokeWindow(window!, "HideButton_Click", null, new RoutedEventArgs());
+            await Task.Delay(300);
+            Program.Check(!window!.Watching, "Clicking the real Hide button dismisses the real window");
+            InvokeHost("StirFrom", stored.Id);
+            await Task.Delay(300);
+            Program.Check(GateWindow() is { Watching: true }, "The next real activity brings a dismissed real window back");
+        }
+        finally
+        {
+            WorkspacePeekHost.Stop();
+            runtime.Dispose();
+            ModuleEntry.HubShowing = false;
+            AppSettingsStore.Update(s => s with
+            {
+                CornerShow = CornerShow.ComesAndGoes, CornerPosition = CornerPosition.BottomRight,
+                CornerLeft = null, CornerTop = null, CornerPinned = false, FadeAfterSeconds = 5,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Item 5's fix: a second Pause press hands back only the workspaces Pause itself took, never one
+    /// the owner already held before he pressed it. Driven through the real host's own hotkey handler
+    /// against two real workspaces - one already owner-driven, one free.
+    /// </summary>
+    static void PauseReleaseChecks()
+    {
+        StoredWorkspace ownerHeldStore = WorkspaceStore.Create("Corner pause fixture - owner held");
+        StoredWorkspace freeStore = WorkspaceStore.Create("Corner pause fixture - free");
+        WorkspaceRuntime ownerHeld = WorkspaceRuntime.Start(ownerHeldStore);
+        WorkspaceRuntime free = WorkspaceRuntime.Start(freeStore);
+        try
+        {
+            ownerHeld.Plane!.OwnerTakes();
+            Program.Check(ownerHeld.Plane!.Driving == Driver.Owner && free.Plane!.Driving == Driver.Nobody,
+                "Fixture: one workspace is already owner-driven before Pause, the other is free");
+            WorkspacePeekHost.Start();
+            InvokeHost("PausePressed");
+            Program.Check(ownerHeld.Plane!.Driving == Driver.Owner,
+                "The first Pause press leaves a workspace the owner already held untouched");
+            Program.Check(free.Plane!.Driving == Driver.Owner,
+                "The first Pause press takes a workspace the owner did not already hold");
+            InvokeHost("PausePressed");
+            Program.Check(free.Plane!.Driving == Driver.Nobody,
+                "The second Pause press hands back the workspace Pause itself took");
+            Program.Check(ownerHeld.Plane!.Driving == Driver.Owner,
+                "The second Pause press never releases the workspace the owner held before Pause - only what Pause itself took (the fixed regression)");
+        }
+        finally
+        {
+            WorkspacePeekHost.Stop();
+            ownerHeld.Dispose();
+            free.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Item 7's fix: the result chip's own file-picking method, on the real host via reflection
+    /// (there is no way to reach MissionState.Done here without a real agent process, which the gate
+    /// may not run) - a file made before the run offers no chip, one made during it does.
+    /// </summary>
+    static void ResultChipChecks()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "deskweave-corner-gate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            DateTimeOffset since = DateTimeOffset.Now;
+            string stale = Path.Combine(folder, "already-there.txt");
+            File.WriteAllText(stale, "old");
+            File.SetLastWriteTimeUtc(stale, since.UtcDateTime.AddMinutes(-5));
+            File.SetCreationTimeUtc(stale, since.UtcDateTime.AddMinutes(-5));
+
+            var beforeRun = ((string? Name, string? Path))InvokeHost("NewestFile", folder, since)!;
+            Program.Check(beforeRun.Name is null,
+                "The real result-chip method offers nothing when only a file that predates the run exists");
+
+            string fresh = Path.Combine(folder, "made-this-run.txt");
+            File.WriteAllText(fresh, "new");
+            var afterRun = ((string? Name, string? Path))InvokeHost("NewestFile", folder, since)!;
+            Program.Check(afterRun.Name == "made-this-run.txt" && afterRun.Path == fresh,
+                "The real result-chip method offers the file created during the run rather than the older one still in the folder");
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    /// <summary>
+    /// Item 3's fix: ModuleEntry.ReportShortcuts is called after every real registration attempt, at
+    /// startup and after a settings change. A real second WorkspacePeekHotkey holds a combination
+    /// first, so the conflict the host meets is real - not a fake registrar standing in for one.
+    /// </summary>
+    static async Task ReportShortcutsChecks()
+    {
+        WorkspacePeekHotkey? blocker = null;
+        try
+        {
+            AppSettingsStore.Update(s => s with { CornerHotkey = "Ctrl+Alt+D", PauseHotkey = "Ctrl+Alt+P" });
+            WorkspacePeekHost.Start();
+            await Task.Delay(300);
+            Program.Check(ModuleEntry.ShortcutsTaken is (false, false),
+                "Both shortcuts report free after a clean registration at startup");
+
+            blocker = new WorkspacePeekHotkey();
+            Program.Check(blocker.Hold("Ctrl+Alt+Shift+F11"),
+                "Fixture: the gate's own blocking hotkey really registers, so the conflict it creates next is real");
+            AppSettingsStore.Update(s => s with { CornerHotkey = "Ctrl+Alt+Shift+F11" });
+            await Task.Delay(300);
+            Program.Check(ModuleEntry.ShortcutsTaken.Corner,
+                "A Corner hotkey change that collides with a real registration is reported taken after the attempt");
+            Program.Check(!ModuleEntry.ShortcutsTaken.Pause, "A Corner-only collision leaves Pause reported free");
+
+            AppSettingsStore.Update(s => s with { CornerHotkey = "Ctrl+Alt+D" });
+            await Task.Delay(300);
+            Program.Check(!ModuleEntry.ShortcutsTaken.Corner,
+                "Changing away from the taken combination reports Corner free again after the next attempt");
+
+            blocker.Release();
+            Program.Check(blocker.Hold("Ctrl+Alt+Shift+F10"), "Fixture: the blocker moves to a second combination for the Pause check");
+            AppSettingsStore.Update(s => s with { PauseHotkey = "Ctrl+Alt+Shift+F10" });
+            await Task.Delay(300);
+            Program.Check(ModuleEntry.ShortcutsTaken.Pause,
+                "A Pause hotkey change that collides with a real registration is reported taken after the attempt");
+            Program.Check(!ModuleEntry.ShortcutsTaken.Corner, "A Pause-only collision leaves Corner reported free");
+        }
+        finally
+        {
+            blocker?.Dispose();
+            WorkspacePeekHost.Stop();
+            AppSettingsStore.Update(s => s with { CornerHotkey = "Ctrl+Alt+D", PauseHotkey = "Ctrl+Alt+P" });
+        }
+    }
 }
