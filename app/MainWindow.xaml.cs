@@ -360,6 +360,15 @@ public partial class MainWindow : Window, IDisposable
     }
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
 
+    // Escape while focus sits outside Settings (on the title bar, say) still goes back. Inside it,
+    // Settings has already handled the key.
+    void Window_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || _mode != "settings") return;
+        e.Handled = true;
+        BackFromSettings();
+    }
+
     void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         // Settings handles its own Escape and raises BackRequested; this window

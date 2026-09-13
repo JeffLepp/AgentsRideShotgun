@@ -9,7 +9,7 @@
         Foreground="{DynamicResource InkBrush}" Background="{DynamicResource WindowBrush}"
         TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
         SourceInitialized="Window_SourceInitialized"
-        PreviewKeyDown="Window_PreviewKeyDown" SizeChanged="Window_SizeChanged"
+        PreviewKeyDown="Window_PreviewKeyDown" KeyDown="Window_KeyDown" SizeChanged="Window_SizeChanged"
         StateChanged="Window_StateChanged" IsVisibleChanged="Window_IsVisibleChanged">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="40" ResizeBorderThickness="6" GlassFrameThickness="0,0,0,1" CornerRadius="0"/>

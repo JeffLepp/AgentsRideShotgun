@@ -108,9 +108,11 @@ static class HubScenes
             Program.Check(window.DisplayMode == "settings", "The gear opens Settings in the wide window");
             var settingsSlot = (System.Windows.Controls.ContentControl)window.FindName("SettingsSlot")!;
             var settingsView = (SettingsView)settingsSlot.Content;
+            // Settings takes Escape on the bubbling KeyDown, after any open dropdown or shortcut
+            // recorder inside it has had the key.
             settingsView.RaiseEvent(new System.Windows.Input.KeyEventArgs(
                 System.Windows.Input.Keyboard.PrimaryDevice, System.Windows.PresentationSource.FromVisual(window),
-                0, System.Windows.Input.Key.Escape) { RoutedEvent = UIElement.PreviewKeyDownEvent });
+                0, System.Windows.Input.Key.Escape) { RoutedEvent = UIElement.KeyDownEvent });
             await Task.Delay(300);
             Program.Check(window.DisplayMode == "wide" && window.SelectedWorkspaceId == shop.Id,
                 "Settings' back action returns to the workspace the owner had open");
