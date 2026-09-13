@@ -86,9 +86,18 @@
             </Border.Effect>
             <Grid x:Name="CardBody" ClipToBounds="True">
                 <!-- The live picture. A glance, not a control surface of its own: clicks land through
-                     WorkspaceScreenInput, never move the owner's own pointer onto the agent's desktop. -->
+                     WorkspaceScreenInput, never move the owner's own pointer onto the agent's desktop.
+                     PreviewMouseDown intercepts every click first so Clicking it = Open the workspace
+                     can claim it before WorkspaceScreenInput's own MouseDown handler ever sees it. -->
                 <Image x:Name="LiveScreen" Stretch="UniformToFill" Cursor="Hand"
+                       PreviewMouseDown="LiveScreen_PreviewMouseDown"
                        automation:AutomationProperties.Name="Live workspace screen"/>
+
+                <!-- The front window's own capture, laid over the whole-screen background above at
+                     its own position and scale - never a full-frame composite. Never hit-testable:
+                     input always lands on LiveScreen underneath, whole-screen or patched alike. -->
+                <Image x:Name="FrontPatch" Stretch="Fill" HorizontalAlignment="Left" VerticalAlignment="Top"
+                       IsHitTestVisible="False" Visibility="Collapsed"/>
 
                 <!-- Activity line: a slow sweep while the agent works, static with animations off. -->
                 <Rectangle x:Name="ActivityLine" Height="2" VerticalAlignment="Bottom" Visibility="Collapsed"
@@ -198,9 +207,30 @@
                         Margin="0,0,0,10" Background="#15181D" CornerRadius="7" Padding="10,4">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="ToastText" FontSize="12" Foreground="White"/>
-                        <TextBlock x:Name="ToastLink" FontSize="12" FontWeight="SemiBold" Foreground="White"
-                                   Margin="6,0,0,0" TextDecorations="Underline" Cursor="Hand" Visibility="Collapsed"
-                                   Text="Hand back" MouseLeftButtonDown="ToastLink_MouseLeftButtonDown"/>
+                        <!-- A real button styled as a link: keyboard-reachable and named, not a
+                             TextBlock only a mouse can find. -->
+                        <Button x:Name="ToastLink" Margin="6,0,0,0" Padding="0" Cursor="Hand"
+                                Visibility="Collapsed" Click="ToastLink_Click" Content="Hand back"
+                                FocusVisualStyle="{StaticResource KeyboardFocus}"
+                                automation:AutomationProperties.Name="Hand the workspace back to the agent">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <TextBlock Text="{TemplateBinding Content}" FontSize="12" FontWeight="SemiBold"
+                                               Foreground="White" TextDecorations="Underline"
+                                               Opacity="{TemplateBinding Opacity}"/>
+                                </ControlTemplate>
+                            </Button.Template>
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Opacity" Value="1"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Opacity" Value="0.8"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
                     </StackPanel>
                 </Border>
 

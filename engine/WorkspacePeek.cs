@@ -135,17 +135,55 @@ internal static class WorkspacePeekPlacement
     /// </summary>
     internal static bool OnConnectedMonitor(Rect dip)
     {
-        double scale = PrimaryScale();
+        // MonitorFor already found the nearest monitor and its real DPI; converting with that scale
+        // (rather than always the primary's) and then asking whether any monitor is really there
+        // (MONITOR_DEFAULTTONULL) is what makes this correct on a mixed-DPI secondary monitor.
+        double scale = MonitorFor(dip).Scale;
         var rect = new NativeRect(
             (int)Math.Round(dip.Left * scale), (int)Math.Round(dip.Top * scale),
             (int)Math.Round(dip.Right * scale), (int)Math.Round(dip.Bottom * scale));
-        try { return MonitorFromRect(rect, 0) != 0; }
+        try { return MonitorFromRect(rect, 0) != 0; } // MONITOR_DEFAULTTONULL
         catch (DllNotFoundException) { return true; }
         catch (EntryPointNotFoundException) { return true; }
     }
 
-    /// <summary>The primary monitor's DPI scale (1.0 at 96 DPI). Good enough to place a window that
-    /// starts on the primary screen; once it is up, WPF itself keeps it correct per monitor.</summary>
+    /// <summary>A monitor's DPI scale and its work area, in DIPs of that same scale.</summary>
+    internal readonly record struct MonitorGeometry(double Scale, Rect WorkArea);
+
+    /// <summary>
+    /// The DPI scale and work area of whichever monitor a DIP rect is nearest to - found with a
+    /// first pass at the primary monitor's scale (the only one known before any monitor is picked),
+    /// then corrected to that monitor's own DPI and work area. Saved positions, drop targets and
+    /// resize clamping all go through this, so a secondary monitor at a different DPI than the
+    /// primary one places and clamps correctly instead of by the primary's scale. Falls back to the
+    /// primary monitor's own work area when nothing can be queried.
+    /// </summary>
+    internal static MonitorGeometry MonitorFor(Rect dip)
+    {
+        double guess = PrimaryScale();
+        try
+        {
+            var probe = new NativeRect(
+                (int)Math.Round(dip.Left * guess), (int)Math.Round(dip.Top * guess),
+                (int)Math.Round(dip.Right * guess), (int)Math.Round(dip.Bottom * guess));
+            nint monitor = MonitorFromRect(probe, 2); // MONITOR_DEFAULTTONEAREST: always finds one
+            if (monitor != 0 && GetDpiForMonitor(monitor, 0, out uint dpi, out _) == 0 && dpi > 0)
+            {
+                double scale = dpi / 96.0;
+                var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+                if (GetMonitorInfo(monitor, ref info))
+                    return new MonitorGeometry(scale, new Rect(
+                        info.Work.Left / scale, info.Work.Top / scale,
+                        (info.Work.Right - info.Work.Left) / scale, (info.Work.Bottom - info.Work.Top) / scale));
+            }
+        }
+        catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { }
+        return new MonitorGeometry(guess, SystemParameters.WorkArea);
+    }
+
+    /// <summary>The primary monitor's DPI scale (1.0 at 96 DPI). Used only as the first-pass guess
+    /// <see cref="MonitorFor"/> needs before it knows which monitor it is really asking about, and to
+    /// place a window that has never been placed anywhere before.</summary>
     internal static double PrimaryScale()
     {
         try
@@ -164,9 +202,17 @@ internal static class WorkspacePeekPlacement
     }
     [StructLayout(LayoutKind.Sequential)]
     readonly struct NativePoint(int x, int y) { public readonly int X = x, Y = y; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor, Work;
+        public uint Flags;
+    }
     [DllImport("user32.dll")] static extern nint MonitorFromRect(NativeRect rect, uint flags);
     [DllImport("user32.dll")] static extern nint MonitorFromPoint(NativePoint point, uint flags);
     [DllImport("shcore.dll")] static extern int GetDpiForMonitor(nint monitor, int kind, out uint dpiX, out uint dpiY);
+    [DllImport("user32.dll")] static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
 }
 
 /// <summary>A hotkey as the owner writes it: "Ctrl+Alt+D". Parsing lives here so the settings file,

@@ -74,9 +74,9 @@ internal static class CornerRate
         while (clock.Elapsed < span)
         {
             long start = Stopwatch.GetTimestamp();
-            BitmapSource? frame = WorkspacePeekCapture.Take(desktop, ref background, ref backgroundAt, inUse);
+            WorkspacePeekCapture.Frame frame = WorkspacePeekCapture.Take(desktop, ref background, ref backgroundAt, inUse);
             double ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-            if (frame is not null) { frames++; times.Add(ms); } else empty++;
+            if (frame.Background is not null) { frames++; times.Add(ms); } else empty++;
             double wait = 1000 / targetFps - ms;
             if (wait > 0) Thread.Sleep(TimeSpan.FromMilliseconds(wait));
         }

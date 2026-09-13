@@ -30,12 +30,15 @@ internal enum PeekTone { Working, Attention, Quiet }
 public partial class WorkspacePeekWindow : Window
 {
     static readonly Duration Arriving = new(TimeSpan.FromMilliseconds(220));
-    static readonly Duration Leaving = new(TimeSpan.FromMilliseconds(420));
+    // Motion at most 220 ms: this used to be 420, past the limit every other move in this window
+    // keeps to.
+    static readonly Duration Leaving = new(TimeSpan.FromMilliseconds(220));
 
     bool _leaving;
     bool _hovered;
     double _stackExtra;
     string? _chipPath;
+    bool _openOnClick;
     WorkspaceScreenInput? _input;
     PeekEdges _dragEdges;
     Rect _dragStart;
@@ -49,6 +52,9 @@ public partial class WorkspacePeekWindow : Window
         // otherwise show square corners poking past the card's radius.
         CardBody.SizeChanged += (_, e) => CardBody.Clip = new RectangleGeometry(new Rect(e.NewSize), 12, 12);
         BackBody.SizeChanged += (_, e) => BackBody.Clip = new RectangleGeometry(new Rect(e.NewSize), 12, 12);
+        // The hover actions are also how a keyboard user reaches pin/shrink/open/hide: show them
+        // whenever focus is anywhere inside the window, not only under the mouse.
+        IsKeyboardFocusWithinChanged += (_, _) => UpdateChrome();
     }
 
     internal event Action? OpenRequested;
@@ -71,9 +77,6 @@ public partial class WorkspacePeekWindow : Window
     /// <summary>The visible card's own bounding size, back-card peek included but shadow margin
     /// excluded - what <see cref="Configure"/> just laid out and the corner rule should place.</summary>
     internal Size VisibleSize { get; private set; }
-
-    /// <summary>Where the corner rule should clamp resizing to. Set once by the host.</summary>
-    internal Func<Rect>? WorkArea { get; set; }
 
     /// <summary>Owner clicks, scrolls and keys on the live picture, through the one input path every
     /// view of a workspace shares. Bound once: the runtime it reads can change from call to call.</summary>
@@ -180,10 +183,52 @@ public partial class WorkspacePeekWindow : Window
             tone == PeekTone.Attention ? "NeedsYouInkBrush" : "MutedInkBrush");
     }
 
-    /// <summary>The latest picture of the front workspace.</summary>
+    /// <summary>The whole-screen background: idle's only picture, and in-use's backdrop under the
+    /// window patch. The host passes null to blank it - leaving a failed capture on screen is the
+    /// caller's decision, made by not calling this at all.</summary>
     internal void ShowFrame(BitmapSource? frame) => LiveScreen.Source = frame;
 
+    /// <summary>
+    /// The front window's own capture, laid over the last whole frame at its screen position - the
+    /// whole point of not compositing a full frame every in-use tick. <paramref name="x"/> and
+    /// <paramref name="y"/> are screen pixels on the background <see cref="ShowFrame"/> last set;
+    /// scaled and offset here to match however that background is currently stretched into the card.
+    /// Null (idle, or no window yet) hides the patch and leaves the plain background showing.
+    /// </summary>
+    internal void ShowFramePatch(BitmapSource? patch, int x, int y)
+    {
+        if (patch is null || LiveScreen.Source is not BitmapSource background
+            || CardBody.ActualWidth <= 0 || CardBody.ActualHeight <= 0)
+        {
+            FrontPatch.Visibility = Visibility.Collapsed;
+            FrontPatch.Source = null;
+            return;
+        }
+        // The same UniformToFill math LiveScreen's own Stretch applies: the larger of the two axis
+        // scales wins, and the shorter axis is centered rather than letterboxed.
+        double scale = Math.Max(CardBody.ActualWidth / background.PixelWidth, CardBody.ActualHeight / background.PixelHeight);
+        double left = (CardBody.ActualWidth - background.PixelWidth * scale) / 2;
+        double top = (CardBody.ActualHeight - background.PixelHeight * scale) / 2;
+        FrontPatch.Source = patch;
+        FrontPatch.Width = patch.PixelWidth * scale;
+        FrontPatch.Height = patch.PixelHeight * scale;
+        FrontPatch.Margin = new Thickness(left + x * scale, top + y * scale, 0, 0);
+        FrontPatch.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Hides the patch without touching the background - used when going idle or switching
+    /// to a workspace with no picture of its own yet.</summary>
+    internal void HideFramePatch()
+    {
+        FrontPatch.Visibility = Visibility.Collapsed;
+        FrontPatch.Source = null;
+    }
+
     internal void ShowBackFrame(BitmapSource? frame) => BackScreen.Source = frame;
+
+    /// <summary>Whether a click on the live picture opens the workspace in the hub instead of using
+    /// it right there (Settings > Corner window > Clicking it).</summary>
+    internal void SetOpenOnClick(bool open) => _openOnClick = open;
 
     /// <summary>The 2 DIP line along the bottom while the agent works, sweeping unless Windows'
     /// animations are off.</summary>
@@ -278,9 +323,18 @@ public partial class WorkspacePeekWindow : Window
     void SetHover(bool hovered)
     {
         _hovered = hovered;
-        Actions.Visibility = hovered ? Visibility.Visible : Visibility.Collapsed;
-        Grip.Visibility = hovered ? Visibility.Visible : Visibility.Collapsed;
-        Pill.Margin = new Thickness(hovered ? 22 : 8, 8, 0, 0);
+        UpdateChrome();
+    }
+
+    /// <summary>The hover actions and grip: shown under the mouse, same as always, and now also
+    /// while keyboard focus is anywhere inside the window - a keyboard user reaches pin, shrink,
+    /// open and hide the same way a mouse user does, not only by pointing at the card.</summary>
+    void UpdateChrome()
+    {
+        bool show = _hovered || IsKeyboardFocusWithin;
+        Actions.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        Grip.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        Pill.Margin = new Thickness(show ? 22 : 8, 8, 0, 0);
     }
 
     /// <summary>Fades in, rising a little, from wherever it is now. Interrupts a fade out. No motion
@@ -315,6 +369,7 @@ public partial class WorkspacePeekWindow : Window
             Hide();
             ShowFrame(null);
             ShowBackFrame(null);
+            HideFramePatch();
         };
         BeginAnimation(OpacityProperty, fade);
     }
@@ -371,7 +426,17 @@ public partial class WorkspacePeekWindow : Window
     void HideButton_Click(object sender, RoutedEventArgs e) => HideRequested?.Invoke();
     void SheetOpen_Click(object sender, RoutedEventArgs e) => SheetOpenClicked?.Invoke();
     void SheetKeep_Click(object sender, RoutedEventArgs e) => SheetKeepClicked?.Invoke();
-    void ToastLink_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => HandBackClicked?.Invoke();
+    void ToastLink_Click(object sender, RoutedEventArgs e) => HandBackClicked?.Invoke();
+
+    /// <summary>Settings > Corner window > Clicking it = Open the workspace: claim every click here,
+    /// before WorkspaceScreenInput's own (bubbling) handler on the same image ever runs, so the click
+    /// opens the hub instead of reaching the workspace.</summary>
+    void LiveScreen_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_openOnClick) return;
+        e.Handled = true;
+        OpenRequested?.Invoke();
+    }
 
     void Chip_MouseMove(object sender, MouseEventArgs e)
     {
@@ -423,7 +488,9 @@ public partial class WorkspacePeekWindow : Window
     {
         if (e.LeftButton != MouseButtonState.Pressed) return;
         Vector delta = ScreenDip() - _dragAnchor;
-        Rect work = WorkArea?.Invoke() ?? FrontRect;
+        // The monitor under the card as the drag started, its own DPI and work area - not always the
+        // primary monitor's, so a card grown on a secondary monitor clamps to that monitor's edges.
+        Rect work = WorkspacePeekPlacement.MonitorFor(_dragStart).WorkArea;
         // The drag is anchored on the front card's own rect (set in BeginResize), so the result must
         // go back through the same offset Configure gave the front card - the stacked back card's
         // peek above it - rather than being placed as if it were the whole visible box itself.

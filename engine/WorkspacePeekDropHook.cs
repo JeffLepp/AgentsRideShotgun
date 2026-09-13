@@ -1,6 +1,9 @@
+using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using HiveMind.Product;
 
 namespace HiveMind.AgentWorkspaces;
 
@@ -14,11 +17,35 @@ namespace HiveMind.AgentWorkspaces;
 internal sealed class WorkspacePeekDropHook : IDisposable
 {
     const int WhMouseLl = 14, WmLButtonDown = 0x0201, WmLButtonUp = 0x0202, WmMouseMove = 0x0200;
+    const uint GaRoot = 2;
+
+    // The classes a desktop or (older-style) Explorer window itself carries. SysListView32 is the
+    // desktop's own icon list; DirectUIHWND and SHELLDLL_DefView are the toolbar and icon-view
+    // children some Explorer builds put directly under the cursor.
+    static readonly HashSet<string> DirectClasses = new(StringComparer.Ordinal)
+    {
+        "Progman", "WorkerW", "SysListView32", "CabinetWClass", "ExploreWClass",
+        "DirectUIHWND", "SHELLDLL_DefView",
+    };
+
+    // Windows 11 hosts much of modern Explorer's own chrome - and, on some builds, the desktop's -
+    // in XAML island child windows whose own class name is a generic composition/bridge one, not
+    // in the list above. Their top-level owner still is, so a miss on the immediate class walks up
+    // to the root with GetAncestor(GA_ROOT) and checks that instead of giving up.
+    static readonly HashSet<string> RootClasses = new(StringComparer.Ordinal)
+    {
+        "CabinetWClass", "ExploreWClass", "Progman", "WorkerW",
+    };
 
     // Kept alive: a delegate handed to native code must not be collected while the hook holds it.
     readonly HookProc _proc;
     readonly nint _hook;
     bool _dragging;
+
+    /// <summary>Whether the hook actually installed. False when Windows refused it (SetLastError is
+    /// logged); the caller is expected to simply have no hidden-window drop summon rather than
+    /// crash or retry in a loop.</summary>
+    internal bool Installed => _hook != 0;
 
     /// <param name="target">The corner rect to watch for, in screen pixels, asked fresh each time.</param>
     /// <param name="summon">Called once, on the hook's own thread, when a drag from the desktop or
@@ -46,19 +73,39 @@ internal sealed class WorkspacePeekDropHook : IDisposable
             return CallNextHookEx(0, code, wparam, lparam);
         };
         _hook = SetWindowsHookEx(WhMouseLl, _proc, GetModuleHandle(null), 0);
+        if (_hook == 0) LogInstallFailure(Marshal.GetLastWin32Error());
     }
 
     static bool IsDesktopOrExplorer(NativePoint point)
     {
         nint window = WindowFromPoint(point);
         if (window == 0) return false;
+        if (DirectClasses.Contains(ClassOf(window))) return true;
+        nint root = GetAncestor(window, GaRoot);
+        return root != 0 && root != window && RootClasses.Contains(ClassOf(root));
+    }
+
+    static string ClassOf(nint window)
+    {
         var name = new StringBuilder(64);
         GetClassName(window, name, name.Capacity);
-        return name.ToString() switch
+        return name.ToString();
+    }
+
+    /// <summary>The same diagnostic path <c>App.LogFailure</c> writes real crashes to
+    /// (<c>ProductContext.Local("logs")</c>): a hook that never installs would otherwise fail
+    /// silently, leaving a hidden corner window that never wakes for a drag started on the desktop
+    /// with no trace of why. Never throws: a logging failure must not become the caller's problem.</summary>
+    static void LogInstallFailure(int win32Error)
+    {
+        try
         {
-            "Progman" or "WorkerW" or "SysListView32" or "CabinetWClass" or "ExploreWClass" => true,
-            _ => false,
-        };
+            string root = ProductContext.Local("logs");
+            Directory.CreateDirectory(root);
+            File.AppendAllText(Path.Combine(root, "corner-drop-hook.txt"),
+                $"{DateTimeOffset.Now}: SetWindowsHookEx(WH_MOUSE_LL) failed, Win32 error {win32Error}\n");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Debug.WriteLine(ex.Message); }
     }
 
     public void Dispose()
@@ -76,6 +123,7 @@ internal sealed class WorkspacePeekDropHook : IDisposable
     [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(nint hook);
     [DllImport("user32.dll")] static extern nint CallNextHookEx(nint hook, int code, nint wparam, nint lparam);
     [DllImport("user32.dll")] static extern nint WindowFromPoint(NativePoint point);
+    [DllImport("user32.dll")] static extern nint GetAncestor(nint window, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(nint window, StringBuilder text, int max);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern nint GetModuleHandle(string? module);
 }
