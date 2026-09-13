@@ -87,7 +87,11 @@ public partial class SettingsView
         for (int i = 0; i < rows.Length; i++)
         {
             if (i == 0) { stack.Children.Add(rows[i]); continue; }
-            var line = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Child = rows[i] };
+            // The hairline is drawn in the seam, not added on top of it - CSS border-box keeps a
+            // bordered row's outer height the same as an unbordered one. A WPF Border stacks its
+            // BorderThickness outside its child instead, so pull the extra 1 DIP back with a
+            // matching negative margin or every row below the first drifts down by 1 DIP.
+            var line = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, -1, 0, 0), Child = rows[i] };
             line.SetResourceReference(Border.BorderBrushProperty, "HairlineBrush");
             stack.Children.Add(line);
         }
@@ -123,11 +127,15 @@ public partial class SettingsView
             if (action is null) { text.Margin = new Thickness(2, 0, 0, 8); stack.Children.Add(text); }
             else
             {
+                // .lbl is a flex row with align-items:center (reference CSS) - the label and its
+                // button share a middle, not a top, or the label sits high against the taller button.
                 var header = new Grid { Margin = new Thickness(2, 0, 0, 8) };
                 header.ColumnDefinitions.Add(new ColumnDefinition());
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                text.VerticalAlignment = VerticalAlignment.Center;
                 header.Children.Add(text);
                 Grid.SetColumn(action, 1);
+                if (action is FrameworkElement actionElement) actionElement.VerticalAlignment = VerticalAlignment.Center;
                 header.Children.Add(action);
                 stack.Children.Add(header);
             }

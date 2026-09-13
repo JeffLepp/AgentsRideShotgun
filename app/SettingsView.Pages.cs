@@ -199,7 +199,9 @@ public partial class SettingsView
     {
         var banner = new ContentControl();
         banner.SetResourceReference(StyleProperty, "Banner");
-        var bannerText = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        // Line height straight on the block, not just the Banner template's ContentPresenter - it
+        // wraps to two lines and any shortfall in the per-line height doubles up, shrinking the banner.
+        var bannerText = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18.85, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         bannerText.Inlines.Add(new Run("Local only.") { FontWeight = FontWeights.SemiBold });
         bannerText.Inlines.Add(new Run(" Sign-ins live in Deskweave's own browser, on this PC. Nothing is uploaded, and your own Chrome is never touched."));
         banner.Content = bannerText;
