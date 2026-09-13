@@ -23,5 +23,6 @@
     <InternalsVisibleTo Include="Deskweave.Probe" />
     <InternalsVisibleTo Include="Deskweave.UiProbe" />
     <Resource Include="Assets/Deskweave.ico" />
+    <Resource Include="Assets/ThirdPartyNotices.txt" />
   </ItemGroup>
 </Project>

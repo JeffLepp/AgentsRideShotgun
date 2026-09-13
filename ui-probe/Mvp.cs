@@ -63,8 +63,8 @@ sealed class SceneContext(string references) : IDisposable
 
 /// <summary>
 /// The reference-screen harness (design/BUILD_PLAYBOOK.md, Wave 0). For every scene, in light then
-/// dark: {name}.png is the real app, {name}.compare.png is reference | app | difference (red is
-/// different), and mvp-report.json gives the size error and how much differs.
+/// dark: {name}.png is the real app, {name}.compare.png is reference | app over gray | difference
+/// (red is different), and mvp-report.json gives the size error and how much differs.
 /// </summary>
 static class Mvp
 {
@@ -130,13 +130,13 @@ static class Mvp
         Int32Rect crop = scene.Crop;
         int width = crop.Width, height = crop.Height;
         BitmapSource reference = new FormatConvertedBitmap(new CroppedBitmap(Load(referencePath), crop), PixelFormats.Pbgra32, null, 0);
-        // The app over its reference crop, so a rounded window's transparent corners show the
-        // reference's own background instead of counting as a difference.
+        // The app over neutral gray, never over the reference: a capture that came out transparent
+        // must show as different, not as a perfect match. Rounded corners cost a few gray pixels.
         var over = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         var layer = new DrawingVisual();
         using (DrawingContext context = layer.RenderOpen())
         {
-            context.DrawImage(reference, new Rect(0, 0, width, height));
+            context.DrawRectangle(new SolidColorBrush(Color.FromRgb(128, 128, 128)), null, new Rect(0, 0, width, height));
             context.DrawImage(shot, new Rect(0, 0, shot.PixelWidth, shot.PixelHeight));
         }
         over.Render(layer);
@@ -167,6 +167,9 @@ static class Mvp
         sheet.Render(page);
         Save(sheet, comparePath);
         double pixels = width * height;
+        byte[] own = Pixels(shot);
+        int clear = 0;
+        for (int i = 3; i < own.Length; i += 4) if (own[i] < 250) clear++;
         return new
         {
             scene = scene.Name,
@@ -175,8 +178,12 @@ static class Mvp
             crop = new { crop.X, crop.Y, crop.Width, crop.Height },
             captured = new { width = shot.PixelWidth, height = shot.PixelHeight },
             sizeOff = new { width = shot.PixelWidth - width, height = shot.PixelHeight - height },
+            // Mean of the per-pixel mean RGB difference, as a share of 255.
             meanDifferencePercent = Math.Round(total / pixels / 255 * 100, 2),
-            changedPixelsPercent = Math.Round(changed / pixels * 100, 2),
+            // Share of pixels whose mean RGB difference is over 24 of 255 (about 9%).
+            pixelsOver24Percent = Math.Round(changed / pixels * 100, 2),
+            // Share of the app's own pixels that are not fully opaque (rounded corners, or a defect).
+            transparentPixelsPercent = Math.Round(clear * 100.0 / Math.Max(1, own.Length / 4), 2),
         };
     }
 

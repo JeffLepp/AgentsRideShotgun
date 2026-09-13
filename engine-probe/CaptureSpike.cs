@@ -95,9 +95,10 @@ internal static class CaptureSpike
         {
             if (capture is null) { Thread.Sleep(100); continue; }
             long start = Stopwatch.GetTimestamp();
-            if (capture()) frames++; else empty++;
+            bool got = capture();
             double ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-            times.Add(ms);
+            // Frame times describe frames; a refused or empty capture is only counted.
+            if (got) { frames++; times.Add(ms); } else empty++;
             if (fps > 0 && 1000 / fps - ms is > 0 and var wait) Thread.Sleep(TimeSpan.FromMilliseconds(wait));
         }
         double seconds = clock.Elapsed.TotalSeconds;
@@ -111,7 +112,8 @@ internal static class CaptureSpike
             empty,
             fps = Math.Round(frames / seconds, 2),
             averageMs = times.Count > 0 ? Math.Round(times.Average(), 1) : 0,
-            p95Ms = times.Count > 0 ? Math.Round(times[(int)(times.Count * 0.95)], 1) : 0,
+            // Nearest rank: the smallest frame time at least 95% of frames are no slower than.
+            p95Ms = times.Count > 0 ? Math.Round(times[Math.Max(0, (int)Math.Ceiling(times.Count * 0.95) - 1)], 1) : 0,
             maxMs = times.Count > 0 ? Math.Round(times[^1], 1) : 0,
             captureCpuPercentOfOneCore = Math.Round(selfCpu / seconds * 100, 1),
             workspaceCpuPercentOfOneCore = Math.Round(workspaceCpu / seconds * 100, 1),

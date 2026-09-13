@@ -21,6 +21,9 @@ public sealed class WorkspaceScreenInput : IDisposable
     readonly Image _screen;
     readonly Func<WorkspaceRuntime?> _runtime;
     DispatcherTimer? _quiet;
+    // The workspace this view took, kept so handing back releases that one even if the view has
+    // moved on to another workspace since.
+    WorkspaceControl? _held;
     bool _carryOn;
 
     /// <param name="screen">Shows a whole workspace screen, Stretch Uniform or UniformToFill.</param>
@@ -44,21 +47,26 @@ public sealed class WorkspaceScreenInput : IDisposable
     {
         _quiet?.Stop();
         _carryOn = false;
-        if (_runtime()?.Plane is { Driving: Driver.Owner } plane) plane.Release();
+        WorkspaceControl? held = _held;
+        _held = null;
+        if (held is { Driving: Driver.Owner }) held.Release();
     }
 
     void MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_runtime() is not { Computer: { } computer, Plane: { } plane }) return;
+        // A click on the letterbox around the picture is not a click on the workspace.
+        if (!Map(e.GetPosition(_screen), out int x, out int y)) return;
         ControlMode mode = AppSettingsStore.Current.Control;
         if (mode != ControlMode.WorkAlongside && plane.Driving != Driver.Owner)
         {
             // Instant: the lease changes here and input the agent had queued is dropped.
             plane.OwnerTakes();
+            _held = plane;
             _carryOn = mode == ControlMode.TakeTurns;
         }
         Keyboard.Focus(_screen);
-        if (Map(e.GetPosition(_screen), out int x, out int y)) computer.Click(x, y, e.ChangedButton == MouseButton.Right);
+        computer.Click(x, y, e.ChangedButton == MouseButton.Right);
         Acted();
         e.Handled = true;
     }
@@ -81,11 +89,20 @@ public sealed class WorkspaceScreenInput : IDisposable
 
     void KeyDown(object sender, KeyEventArgs e)
     {
-        // TextInput carries the printable characters; these are the ones it never reports.
-        if (e.Key is not (Key.Enter or Key.Tab or Key.Back or Key.Delete or Key.Escape
-            or Key.Left or Key.Right or Key.Up or Key.Down or Key.Home or Key.End)) return;
         if (Using() is not { } computer) return;
-        computer.SendKey(KeyInterop.VirtualKeyFromKey(e.Key));
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (Keyboard.Modifiers == ModifierKeys.Control && key is Key.C or Key.V)
+        {
+            // Copy and paste go through the workspace's own clipboard, never the owner's.
+            if (key == Key.C) computer.Copy(); else computer.Paste();
+        }
+        // TextInput carries the printable characters; these are the plain keys it never reports.
+        // ponytail: other chords (Ctrl+A, Ctrl+Z, Shift+arrows) need chord delivery on the desktop pump, Wave 2 slice E.
+        else if (Keyboard.Modifiers == ModifierKeys.None && key is Key.Enter or Key.Tab or Key.Back or Key.Delete
+            or Key.Escape or Key.Left or Key.Right or Key.Up or Key.Down or Key.Home or Key.End
+            or Key.PageUp or Key.PageDown or Key.Insert or (>= Key.F1 and <= Key.F12))
+            computer.SendKey(KeyInterop.VirtualKeyFromKey(key));
+        else return;
         Acted();
         e.Handled = true;
     }

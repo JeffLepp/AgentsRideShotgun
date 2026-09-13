@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -31,14 +33,14 @@ public sealed record AppSettings
     public bool StartWithWindows { get; init; } = true;
     public ThemeChoice Theme { get; init; } = ThemeChoice.FollowWindows;
     public CloseChoice CloseButton { get; init; } = CloseChoice.KeepRunning;
-    public bool CheckForUpdates { get; init; } = true;
+    // Check for updates and Send crash reports arrive with a release channel (MVP_SPEC, out of scope).
     /// <summary>The first-launch window was answered, with Start or Skip.</summary>
     public bool FirstRunDone { get; init; }
 
     // Agents
     public bool RemindAgents { get; init; }
     public AgentPlacement AgentsGo { get; init; } = AgentPlacement.OnePerProject;
-    /// <summary>0 is Auto: the engine's one per 3 GB of memory, 2 to 10.</summary>
+    /// <summary>0 is Auto: the engine's one per 3 GB of memory, 2 to 10. Otherwise 2 to 10.</summary>
     public int RunningAtOnce { get; init; }
     /// <summary>0 is Never.</summary>
     public int SleepMinutes { get; init; } = 10;
@@ -57,7 +59,7 @@ public sealed record AppSettings
     public bool OpenBrowserEarly { get; init; } = true;
     /// <summary>An account, as "site|name", to the one workspace id it is kept for. An account
     /// that is not listed is available to all workspaces.</summary>
-    public IReadOnlyDictionary<string, string> AccountScopes { get; init; } = new Dictionary<string, string>();
+    public IReadOnlyDictionary<string, string> AccountScopes { get; init; } = ReadOnlyDictionary<string, string>.Empty;
 
     // Corner window
     public CornerShow CornerShow { get; init; } = CornerShow.ComesAndGoes;
@@ -93,7 +95,6 @@ public sealed record AppSettings
     // Privacy & safety
     public bool PauseAfterWebPage { get; init; } = true;
     public WorkspaceMode Restrictions { get; init; } = WorkspaceMode.Free;
-    public bool SendCrashReports { get; init; }
 
     /// <summary>Whatever was on disk, coerced to the choices Settings actually offers.</summary>
     internal AppSettings Sane()
@@ -101,7 +102,8 @@ public sealed record AppSettings
         var d = new AppSettings();
         static T Known<T>(T value, T fallback) where T : struct, Enum => Enum.IsDefined(value) ? value : fallback;
         static int Pick(int value, int fallback, params int[] allowed) => allowed.Contains(value) ? value : fallback;
-        static string Key(string? text) => WorkspaceHotkey.Parse(text, out _, out _) ? text!.Trim() : string.Empty;
+        // Both shortcuts are rebindable, never removable, so a broken one goes back to its default.
+        static string Key(string? text, string fallback) => WorkspaceHotkey.Parse(text, out _, out _) ? text!.Trim() : fallback;
         static double? Finite(double? value) => value is { } v && double.IsFinite(v) ? v : null;
         return this with
         {
@@ -109,15 +111,18 @@ public sealed record AppSettings
             Theme = Known(Theme, d.Theme),
             CloseButton = Known(CloseButton, d.CloseButton),
             AgentsGo = Known(AgentsGo, d.AgentsGo),
-            RunningAtOnce = RunningAtOnce is >= 0 and <= 10 ? RunningAtOnce : 0,
+            RunningAtOnce = RunningAtOnce is 0 or (>= 2 and <= 10) ? RunningAtOnce : 0,
             SleepMinutes = Pick(SleepMinutes, d.SleepMinutes, 0, 5, 10, 30),
             Control = Known(Control, d.Control),
             CarryOnSeconds = Pick(CarryOnSeconds, d.CarryOnSeconds, 10, 20, 30, 60),
             DesktopRequests = Known(DesktopRequests, d.DesktopRequests),
-            PauseHotkey = Key(PauseHotkey),
-            CornerHotkey = Key(CornerHotkey),
+            PauseHotkey = Key(PauseHotkey, d.PauseHotkey),
+            CornerHotkey = Key(CornerHotkey, d.CornerHotkey),
             Browser = Known(Browser, d.Browser),
-            AccountScopes = AccountScopes ?? d.AccountScopes,
+            // A copy nobody else holds, so the only way to change a scope is Update.
+            AccountScopes = new ReadOnlyDictionary<string, string>((AccountScopes ?? d.AccountScopes)
+                .Where(scope => scope.Key.Length > 0 && !string.IsNullOrEmpty(scope.Value))
+                .ToDictionary(scope => scope.Key, scope => scope.Value, StringComparer.Ordinal)),
             CornerShow = Known(CornerShow, d.CornerShow),
             CornerPosition = Known(CornerPosition, d.CornerPosition),
             CornerSize = Known(CornerSize, d.CornerSize),
@@ -144,6 +149,9 @@ public sealed record AppSettings
 public static class AppSettingsStore
 {
     static readonly Lock Gate = new();
+    // Changes are announced one at a time, in the order they were made. Listeners must not wait on
+    // another thread that could itself be changing a setting; UI listeners use BeginInvoke.
+    static readonly object Announcing = new();
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     static AppSettings? _current;
     static string? _testFile;
@@ -159,29 +167,37 @@ public static class AppSettingsStore
     /// not be written; the change still holds for this session.</summary>
     public static bool Update(Func<AppSettings, AppSettings> change)
     {
-        AppSettings next;
-        bool saved;
-        lock (Gate)
+        lock (Announcing)
         {
-            next = change(_current ??= Read()).Sane();
-            _current = next;
-            saved = Write(next);
+            AppSettings next;
+            bool saved;
+            lock (Gate)
+            {
+                next = change(_current ??= Read()).Sane();
+                _current = next;
+                saved = Write(next);
+            }
+            // One listener failing must not keep the change from the others; it is already saved.
+            foreach (Action<AppSettings> listener in Changed?.GetInvocationList().Cast<Action<AppSettings>>() ?? [])
+            {
+                try { listener(next); }
+                catch (Exception failure) { Debug.WriteLine("A settings listener failed: " + failure); }
+            }
+            return saved;
         }
-        Changed?.Invoke(next);
-        return saved;
     }
 
     static AppSettings Read()
     {
         try
         {
-            if (!System.IO.File.Exists(File) || new FileInfo(File).Length > 65_536) return new AppSettings();
+            if (!System.IO.File.Exists(File) || new FileInfo(File).Length > 1_048_576) return new AppSettings().Sane();
             AppSettings? read = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(File), Json);
-            return read is { Schema: 1 } ? read.Sane() : new AppSettings();
+            return read is { Schema: 1 } ? read.Sane() : new AppSettings().Sane();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            return new AppSettings();
+            return new AppSettings().Sane();
         }
     }
 

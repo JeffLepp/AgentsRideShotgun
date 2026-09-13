@@ -277,18 +277,31 @@ static class Program
 
     static void CheckSettings()
     {
-        AppSettings now = AppSettingsStore.Current;
-        Check(now.Control == ControlMode.TakeTurns && now.CarryOnSeconds == 20 && now.CornerShow == CornerShow.ComesAndGoes
-            && now.FadeAfterSeconds == 5 && now.SleepMinutes == 10 && now.AgentsGo == AgentPlacement.OnePerProject
-            && now.DesktopRequests == DesktopOpen.AskFirst && now.Screenshots == ScreenshotMode.KeySteps && now.KeepHistoryDays == 7
-            && now.ShareSignIns && now.PauseAfterWebPage && !now.RemindAgents && !now.SendCrashReports,
-            "Settings start at the MVP spec's defaults");
+        // Written out from MVP_SPEC Surfaces 4 rather than compared with the code's own defaults.
+        AppSettings s = AppSettingsStore.Current;
+        Check(s.StartWithWindows && s.Theme == ThemeChoice.FollowWindows && s.CloseButton == CloseChoice.KeepRunning && !s.FirstRunDone
+            && !s.RemindAgents && s.AgentsGo == AgentPlacement.OnePerProject && s.RunningAtOnce == 0 && s.SleepMinutes == 10
+            && s.Control == ControlMode.TakeTurns && s.CarryOnSeconds == 20 && s.DesktopRequests == DesktopOpen.AskFirst
+            && s.PauseHotkey == "Ctrl+Alt+P" && s.CornerHotkey == "Ctrl+Alt+D"
+            && s.ShareSignIns && s.Browser == BrowserChoice.Auto && s.OpenBrowserEarly && s.AccountScopes.Count == 0
+            && s.CornerShow == CornerShow.ComesAndGoes && s.CornerPosition == CornerPosition.BottomRight && s.CornerSize == CornerSize.Small
+            && s.FadeAfterSeconds == 5 && s.CornerClick == CornerClick.UseItHere && !s.CornerPinned
+            && s.CornerLeft is null && s.CornerTop is null && s.CornerWidth is null
+            && s.NotifyNeedsYou && !s.NotifyTestFinished && s.NotifyOnlyWhenCornerCannot && !s.NotifySound && s.FollowDoNotDisturb
+            && s.Screenshots == ScreenshotMode.KeySteps && s.ContinuousSeconds == 2 && s.KeepHistoryDays == 7
+            && s.NewWorkspaceSpeed == WorkspacePower.Fast && s.Smoothness == PreviewSmoothness.Balanced && s.PausePreviewsOnBattery
+            && s.PauseAfterWebPage && s.Restrictions == WorkspaceMode.Free,
+            "Every setting starts at the MVP spec's default");
         AppSettings odd = new AppSettings
         {
-            CarryOnSeconds = 7, SleepMinutes = 3, Theme = (ThemeChoice)9, PauseHotkey = "P", CornerWidth = double.NaN, AccountScopes = null!
+            CarryOnSeconds = 7, SleepMinutes = 3, Theme = (ThemeChoice)9, PauseHotkey = "P", CornerHotkey = "",
+            RunningAtOnce = 1, KeepHistoryDays = 2, CornerWidth = double.NaN, AccountScopes = null!
         }.Sane();
-        Check(odd.CarryOnSeconds == 20 && odd.SleepMinutes == 10 && odd.Theme == ThemeChoice.FollowWindows && odd.PauseHotkey.Length == 0
-            && odd.CornerWidth is null && odd.AccountScopes is not null, "A hand-edited settings file falls back to real choices");
+        Check(odd.CarryOnSeconds == 20 && odd.SleepMinutes == 10 && odd.Theme == ThemeChoice.FollowWindows
+            && odd.PauseHotkey == "Ctrl+Alt+P" && odd.CornerHotkey == "Ctrl+Alt+D" && odd.RunningAtOnce == 0 && odd.KeepHistoryDays == 7
+            && odd.CornerWidth is null && odd.AccountScopes is { Count: 0 }, "A hand-edited settings file falls back to real choices");
+        Check(s.AccountScopes is not Dictionary<string, string> && AppSettingsStore.Current.AccountScopes is not Dictionary<string, string>,
+            "Account scopes cannot be changed behind the store's back");
         int heard = 0;
         void Heard(AppSettings _) => heard++;
         AppSettingsStore.Changed += Heard;
