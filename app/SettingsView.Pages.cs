@@ -107,12 +107,16 @@ public partial class SettingsView
         var pause = ShortcutRow("Pause every agent", "Pause every agent", s => s.PauseHotkey,
             (s, v) => s with { PauseHotkey = v }, () => ModuleEntry.ShortcutsTaken.Pause);
 
+        var onThisPcSection = Section("On this PC", onThisPc);
+        onThisPcSection.Margin = new Thickness(0, 0, 0, 21);
+        var anotherAppSection = Section("Another app", Group(AnotherAgentRow()));
+        anotherAppSection.Margin = new Thickness(0, 0, 0, 21);
         return new StackPanel
         {
             Children =
             {
-                Section("On this PC", onThisPc),
-                Section("Another app", Group(AnotherAgentRow())),
+                onThisPcSection,
+                anotherAppSection,
                 Section("Shortcut", Group(pause.Row)),
             },
         };
@@ -211,7 +215,7 @@ public partial class SettingsView
         var content = new StackPanel { Orientation = Orientation.Horizontal };
         content.Children.Add(icon);
         content.Children.Add(new TextBlock { Text = "Add account", VerticalAlignment = VerticalAlignment.Center });
-        var button = new Button { Content = content };
+        var button = new Button { Content = content, MinWidth = 113 };
         button.SetResourceReference(StyleProperty, "DeskButton");
         AutomationProperties.SetName(button, "Add account");
         button.Click += (_, _) => SettingsActions.AddAccount?.Invoke();
@@ -247,7 +251,7 @@ public partial class SettingsView
                 return s with { AccountScopes = scopes };
             });
         };
-        var signOut = new Button { Content = "Sign out", Margin = new Thickness(8, 0, 0, 0) };
+        var signOut = new Button { Content = "Sign out", Margin = new Thickness(9, 0, 0, 0) };
         signOut.SetResourceReference(StyleProperty, "LinkButton");
         signOut.Click += (_, _) => SettingsActions.SignOut?.Invoke(account);
         var controls = new StackPanel { Orientation = Orientation.Horizontal };
@@ -268,6 +272,7 @@ public partial class SettingsView
         // left empty either way.
         var screenshots = Section("Screenshots", Group(saveRow));
         screenshots.Visibility = SettingsFeatures.History ? Visibility.Visible : Visibility.Collapsed;
+        screenshots.Margin = new Thickness(0, 0, 0, 21);
 
         IReadOnlyList<StorageKind> kinds = SettingsStorage.Kinds();
         var totalText = Styled("— used", "StorageTotal");
@@ -275,7 +280,7 @@ public partial class SettingsView
         var meterStack = new StackPanel();
         meterStack.Children.Add(totalText);
         meterStack.Children.Add(StorageMeter(meterGrid));
-        var meterRow = new Border { Padding = new Thickness(14, 12, 14, 12), MinHeight = 50, Child = meterStack };
+        var meterRow = new Border { Padding = new Thickness(14, 13, 14, 13), MinHeight = 50, Child = meterStack };
 
         var sizeTexts = new TextBlock[kinds.Count];
         var kindRows = new UIElement[kinds.Count];
@@ -288,7 +293,7 @@ public partial class SettingsView
                 () => sizeText.Text == "—" ? "Clear " + kind.ClearNoun + "?" : "Clear " + sizeText.Text + " of " + kind.ClearNoun + "?",
                 () => { kind.Clear(); RefreshStorage(); },
                 danger: false, style: "LinkButton", enabled: kind.CanClear, disabledTooltip: kind.DisabledTooltip);
-            clear.Margin = new Thickness(8, 0, 0, 0);
+            clear.Margin = new Thickness(9, 0, 0, 0);
             var controls = new StackPanel { Orientation = Orientation.Horizontal };
             controls.Children.Add(sizeText);
             controls.Children.Add(clear);
@@ -299,6 +304,7 @@ public partial class SettingsView
             kindRows[i] = row;
         }
         var storage = Section("Storage", Group([meterRow, .. kindRows]));
+        storage.Margin = new Thickness(0, 0, 0, 20);
 
         void RefreshStorage()
         {

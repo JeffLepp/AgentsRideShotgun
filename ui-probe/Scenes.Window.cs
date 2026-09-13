@@ -1,39 +1,22 @@
 using System.Windows;
-using System.Windows.Media;
-using HiveMind.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
 
-/// <summary>Settings hosted in the real wide window, title bar included: references 05 and 06 whole.
-/// It checks that the hub and Settings fit together.</summary>
+/// <summary>Settings in the real wide window, including its title bar.</summary>
 static class WindowScenes
 {
-    [Scene("window-settings-control", "05-settings-control", 120, 20, 1200, 826)]
-    static async Task<FrameworkElement> Control(SceneContext scene)
-    {
-        using IDisposable flags = SettingsFeatures.AllOnForScenes();
-        return await Open(scene, "control");
-    }
+    [Scene("window-settings-agents", "05-settings-agents", 120, 20, 1200, 826)]
+    static Task<FrameworkElement> Agents(SceneContext scene) => Open(scene, "agents");
 
-    [Scene("window-settings-browser", "06-settings-browser", 120, 20, 1200, 826)]
-    static async Task<FrameworkElement> Browser(SceneContext scene)
-    {
-        using IDisposable flags = SettingsFeatures.AllOnForScenes();
-        StoredWorkspace shop = scene.Workspace("shop");
-        var accounts = SettingsActions.Accounts;
-        SettingsActions.Accounts = () =>
-        [
-            new SettingsAccount("Google", "you@gmail.com", Color.FromRgb(0x4A, 0x7B, 0xF7)),
-            new SettingsAccount("GitHub", "yourname", Color.FromRgb(0x24, 0x29, 0x2F)),
-            new SettingsAccount("Stripe", "Test mode", Color.FromRgb(0x63, 0x5B, 0xFF)),
-        ];
-        AppSettingsStore.Update(s => s with { AccountScopes = new Dictionary<string, string> { ["Stripe|Test mode"] = shop.Id } });
-        try { return await Open(scene, "browser"); }
-        finally { SettingsActions.Accounts = accounts; }
-    }
+    [Scene("window-settings-accounts", "06-settings-accounts", 120, 20, 1200, 826)]
+    static Task<FrameworkElement> Accounts(SceneContext scene) => Open(scene, "accounts");
+
+    [Scene("window-settings-storage", "15-settings-storage", 120, 20, 1200, 826)]
+    static Task<FrameworkElement> Storage(SceneContext scene) => Open(scene, "history");
 
     static async Task<FrameworkElement> Open(SceneContext scene, string category)
     {
+        using IDisposable fixture = SettingsFixtures.Use(scene, category);
         var window = scene.Own(new MainWindow());
         window.Left = SceneContext.OffScreen.X;
         window.Top = SceneContext.OffScreen.Y;
@@ -44,7 +27,7 @@ static class WindowScenes
         window.Height = 826;
         window.ShowSettings();
         ((SettingsView)window.SettingsSlot.Content).Show(category);
-        await scene.Settle();
+        await scene.Settle(550);
         return window;
     }
 }

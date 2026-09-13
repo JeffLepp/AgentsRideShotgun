@@ -149,7 +149,9 @@ internal static class SettingsActions
 
     /// <summary>Bytes of history: the step log and screenshots each workspace keeps in its evidence
     /// folder (WorkspaceEvidence). Read-only, so it needs no seam of its own.</summary>
-    internal static long HistoryBytes()
+    internal static Func<long> HistoryBytes = MeasureHistory;
+
+    static long MeasureHistory()
     {
         long total = 0;
         foreach (string file in HistoryFiles())
@@ -199,7 +201,9 @@ internal static class SettingsActions
     // files" - the rest is either machine state nobody asked to keep or counted under a different row.
     static readonly string[] ScratchSkip = ["appdata", "local", "temp", "chrome-profile", "evidence", "last-frame.png", "workspace.json"];
 
-    internal static long ScratchBytes()
+    internal static Func<long> ScratchBytes = MeasureScratch;
+
+    static long MeasureScratch()
     {
         string? folder = ScratchFolder();
         if (folder is null) return 0;
@@ -210,7 +214,7 @@ internal static class SettingsActions
         return total;
     }
 
-    internal static bool ScratchRunning() =>
+    internal static Func<bool> ScratchRunning = () =>
         ScratchWorkspace() is { } scratch && WorkspaceRuntime.Of(scratch.Id) is not null;
 
     /// <summary>A field, so the gate can swap it for a harmless stand-in.</summary>
@@ -218,6 +222,7 @@ internal static class SettingsActions
 
     static void ClearScratchReal()
     {
+        if (ScratchRunning()) return;
         string? folder = ScratchFolder();
         if (folder is null) return;
         foreach (string entry in SafeEntries(folder).ToArray())
@@ -233,7 +238,7 @@ internal static class SettingsActions
         return scratch is null ? null : WorkspaceStore.FolderForDesktop(scratch.Id);
     }
 
-    internal static long LogsBytes() => EntryBytes(ProductContext.Local("logs"));
+    internal static Func<long> LogsBytes = () => EntryBytes(ProductContext.Local("logs"));
 
     /// <summary>A field, so the gate can swap it for a harmless stand-in.</summary>
     internal static Action ClearLogs = ClearLogsReal;
@@ -257,7 +262,7 @@ internal static class SettingsActions
 
     static IEnumerable<string> SafeEntries(string folder)
     {
-        try { return Directory.Exists(folder) ? Directory.EnumerateFileSystemEntries(folder) : []; }
+        try { return Directory.Exists(folder) ? Directory.GetFileSystemEntries(folder) : []; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
     }
 

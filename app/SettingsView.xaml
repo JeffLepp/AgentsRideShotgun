@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:Deskweave"
              Focusable="True" IsTabStop="False" FocusVisualStyle="{x:Null}" UseLayoutRounding="True"
+             TextOptions.TextFormattingMode="Display"
              Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource InkBrush}"
              FontFamily="{DynamicResource SkinFontFamily}" FontSize="13">
     <!-- Settings (references 05, 06): the 264 DIP category list with "Workspaces" to go back, and
