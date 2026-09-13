@@ -84,6 +84,9 @@ static class Mvp
         var rows = new List<object>();
         foreach (ThemeChoice theme in Themes)
         {
+            // Through the store too: the theme follows the store, so a scene that saves any setting
+            // would otherwise snap the painted theme back to Windows' own.
+            AppSettingsStore.Update(settings => settings with { Theme = theme });
             AppearanceManager.Apply(theme);
             string name = theme.ToString().ToLowerInvariant();
             string folder = Path.Combine(output, name);
