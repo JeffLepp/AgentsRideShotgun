@@ -31,7 +31,12 @@ internal static class WorkspacePeekHost
     static DateTimeOffset _stirred = DateTimeOffset.MinValue;
     static BitmapSource? _background;
     static DateTimeOffset _backgroundAt;
-    static bool _started, _pinned, _dismissed, _summoned, _drawing, _hooked, _pausedAll;
+    static bool _started, _dismissed, _summoned, _drawing, _hooked, _pausedAll;
+
+    // Remembered only for this run: the width the owner last grew it to, so the shrink button can
+    // offer to grow back once he has shrunk it again. Size and position that must survive a real
+    // restart live in AppSettings (CornerWidth, CornerLeft/Top) instead.
+    static double? _lastGrownWidth;
 
     internal static void Start()
     {
@@ -66,7 +71,7 @@ internal static class WorkspacePeekHost
         WorkspacePeekWindow? window = _window;
         _window = null;
         window?.Close();
-        _pinned = _dismissed = _summoned = _pausedAll = false;
+        _dismissed = _summoned = _pausedAll = false;
         _frontId = _backId = null;
         _background = null;
     }
@@ -162,7 +167,7 @@ internal static class WorkspacePeekHost
         TimeSpan quiet = DateTimeOffset.Now - _stirred;
         TimeSpan fade = TimeSpan.FromSeconds(_settings.FadeAfterSeconds);
         bool wanted = WorkspacePeekPolicy.Wanted(_settings.CornerShow, front is not null,
-            ModuleEntry.HubShowing, _dismissed, _summoned, _pinned, held, busy, quiet, fade);
+            ModuleEntry.HubShowing, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade);
 
         if (front is null || !wanted)
         {
@@ -180,11 +185,12 @@ internal static class WorkspacePeekHost
         _backId = back?.Id;
 
         WorkspacePeekWindow window = _window ??= Build();
-        bool grown = WorkspacePeekPlacement.Grown(_settings);
         Size card = WorkspacePeekPlacement.Card(_settings);
-        window.Configure(card, back is not null, grown);
+        bool grown = card.Width > WorkspacePeekPlacement.SmallWidth + 0.5;
+        if (grown) _lastGrownWidth = card.Width;
+        window.Configure(card, back is not null, grown, !grown && _lastGrownWidth is not null);
         window.Place(PlaceRect(window.VisibleSize));
-        window.SetPinned(_pinned);
+        window.SetPinned(_settings.CornerPinned);
 
         (string message, PeekTone tone) = Status(front);
         window.Describe(WorkspaceName(front), message, tone);
@@ -214,9 +220,15 @@ internal static class WorkspacePeekHost
         window.BindInput(() => _frontId is { } id && _followed.TryGetValue(id, out Follow? f) ? f.Runtime : null);
         window.OwnerActed += () => { _stirred = DateTimeOffset.Now; _dismissed = false; };
         window.OpenRequested += () => OpenWorkspace(_frontId);
-        window.PinClicked += () => { _pinned = !_pinned; Rethink(); };
-        window.ShrinkClicked += () => AppSettingsStore.Update(s => s with { CornerSize = CornerSize.Small, CornerWidth = null });
-        window.HideRequested += () => { _dismissed = true; _pinned = false; Rethink(); };
+        window.PinClicked += () => AppSettingsStore.Update(s => s with { CornerPinned = !s.CornerPinned });
+        window.ShrinkClicked += () =>
+        {
+            if (WorkspacePeekPlacement.Grown(_settings))
+                AppSettingsStore.Update(s => s with { CornerSize = CornerSize.Small, CornerWidth = null });
+            else if (_lastGrownWidth is { } width)
+                AppSettingsStore.Update(s => s with { CornerWidth = width });
+        };
+        window.HideRequested += () => { _dismissed = true; AppSettingsStore.Update(s => s with { CornerPinned = false }); };
         window.HoverChanged += Rethink;
         window.PromoteRequested += () => { if (_backId is { } id) Touch(id); Rethink(); };
         window.Moved += rect => AppSettingsStore.Update(s => s with
@@ -247,7 +259,9 @@ internal static class WorkspacePeekHost
         shell.Activate();
     }
 
-    static void DropFiles(string[] paths)
+    /// <summary>Copies dropped files into the front workspace's folder, never moving the source.
+    /// Internal rather than private so the gate can exercise it without a real OS drag.</summary>
+    internal static void DropFiles(string[] paths)
     {
         if (_frontId is not { } id || !_followed.TryGetValue(id, out Follow? f) || f.Runtime.Plane is not { } plane) return;
         string folder = plane.Folder;
@@ -365,14 +379,19 @@ internal static class WorkspacePeekHost
     static bool InUse(WorkspaceRuntime front) => _window?.Hovered == true
         || WorkspacePeekPlacement.Grown(_settings) || front.Plane?.Driving == Driver.Owner;
 
-    static TimeSpan IdleInterval => _settings.Smoothness switch
+    static TimeSpan IdleInterval => IdleIntervalFor(_settings.Smoothness);
+    static TimeSpan InUseInterval => InUseIntervalFor(_settings.Smoothness);
+
+    /// <summary>How often idle draws while on screen and not in use, by Preview smoothness. Public
+    /// to the engine probe too, so it measures the same rate this host actually paces itself to.</summary>
+    internal static TimeSpan IdleIntervalFor(PreviewSmoothness smoothness) => smoothness switch
     {
         PreviewSmoothness.Smooth => TimeSpan.FromSeconds(1 / 5.0),
         PreviewSmoothness.BatterySaver => TimeSpan.FromSeconds(1.0),
         _ => TimeSpan.FromSeconds(1 / 2.5),
     };
 
-    static TimeSpan InUseInterval => _settings.Smoothness switch
+    internal static TimeSpan InUseIntervalFor(PreviewSmoothness smoothness) => smoothness switch
     {
         PreviewSmoothness.Smooth => TimeSpan.FromSeconds(1 / 15.0),
         PreviewSmoothness.BatterySaver => TimeSpan.FromSeconds(1 / 8.0),
@@ -502,11 +521,11 @@ internal static class WorkspacePeekHost
         if (_owner is not { } owner) return;
         if (!owner.CheckAccess()) { owner.BeginInvoke(CornerPressed); return; }
         if (!WorkspaceRuntime.AnyRunning) { OpenWorkspace(null); return; }
-        _pinned = !_pinned;
         _summoned = true;
         _dismissed = false;
         _stirred = DateTimeOffset.Now;
-        Rethink();
+        // Toggling the setting announces itself and calls Rethink() on its own (SettingsChanged).
+        AppSettingsStore.Update(s => s with { CornerPinned = !s.CornerPinned });
         _summoned = false;
     }
 

@@ -82,7 +82,7 @@
                 BorderThickness="1" CornerRadius="{DynamicResource CornerWindowRadius}"
                 MouseEnter="FrontCard_MouseEnter" MouseLeave="FrontCard_MouseLeave">
             <Border.Effect>
-                <DropShadowEffect Color="Black" Opacity="0.28" BlurRadius="60" ShadowDepth="24" Direction="270"/>
+                <DropShadowEffect Color="Black" Opacity="{DynamicResource CornerShadowOpacity}" BlurRadius="60" ShadowDepth="24" Direction="270"/>
             </Border.Effect>
             <Grid x:Name="CardBody" ClipToBounds="True">
                 <!-- The live picture. A glance, not a control surface of its own: clicks land through
@@ -151,7 +151,7 @@
                     </Button>
                     <Button x:Name="ShrinkButton" Margin="0,0,5,0" Click="ShrinkButton_Click" ToolTip="Shrink to small"
                             Visibility="Collapsed" automation:AutomationProperties.Name="Shrink the corner view to small">
-                        <Path Style="{StaticResource GlassActionIcon}" Data="{StaticResource Icon.Shrink}"/>
+                        <Path x:Name="ShrinkGlyph" Style="{StaticResource GlassActionIcon}" Data="{StaticResource Icon.Shrink}"/>
                     </Button>
                     <Button x:Name="OpenButton" Margin="0,0,5,0" Click="OpenButton_Click" ToolTip="Open this workspace"
                             automation:AutomationProperties.Name="Open this workspace">

@@ -34,6 +34,7 @@ public partial class WorkspacePeekWindow : Window
 
     bool _leaving;
     bool _hovered;
+    double _stackExtra;
     string? _chipPath;
     WorkspaceScreenInput? _input;
     PeekEdges _dragEdges;
@@ -98,8 +99,10 @@ public partial class WorkspacePeekWindow : Window
     /// Lays out the card (and, once a second workspace is busy, the smaller card peeking above it).
     /// <see cref="VisibleSize"/> is the card's own bounding size afterward - what the corner rule
     /// should place; <see cref="Place"/> adds the shadow margin around whatever rect it is given.
+    /// <paramref name="canGrow"/> is whether a remembered grown size exists to return to - the
+    /// shrink/grow button shows while grown, and while small only if there is somewhere to grow back to.
     /// </summary>
-    internal void Configure(Size card, bool hasBack, bool grown)
+    internal void Configure(Size card, bool hasBack, bool grown, bool canGrow)
     {
         Rect front0 = new(0, 0, card.Width, card.Height);
         double extra = 0;
@@ -108,6 +111,7 @@ public partial class WorkspacePeekWindow : Window
             Rect back0 = WorkspacePeekPlacement.Back(front0);
             extra = Math.Max(0, -back0.Top);
         }
+        _stackExtra = extra;
         VisibleSize = new Size(card.Width, card.Height + extra);
         FrontCard.Width = card.Width;
         FrontCard.Height = card.Height;
@@ -120,7 +124,15 @@ public partial class WorkspacePeekWindow : Window
             BackCard.Height = back.Height;
             BackCard.Margin = new Thickness(back.Left + ShadowMargin, back.Top + ShadowMargin, 0, 0);
         }
-        ShrinkButton.Visibility = grown ? Visibility.Visible : Visibility.Collapsed;
+        bool showSizeButton = grown || canGrow;
+        ShrinkButton.Visibility = showSizeButton ? Visibility.Visible : Visibility.Collapsed;
+        if (showSizeButton)
+        {
+            ShrinkGlyph.SetResourceReference(System.Windows.Shapes.Path.DataProperty, grown ? "Icon.Shrink" : "Icon.Max");
+            ShrinkButton.ToolTip = grown ? "Shrink to small" : "Grow back to the last size";
+            AutomationProperties.SetName(ShrinkButton, grown
+                ? "Shrink the corner view to small" : "Grow the corner view back to its last size");
+        }
     }
 
     /// <summary>Puts the visible card exactly where the corner rule decided, in DIPs on the virtual
@@ -235,6 +247,33 @@ public partial class WorkspacePeekWindow : Window
 
     /// <summary>Forces the hover chrome on or off without a real pointer, for photographing it.</summary>
     internal void ForceHoverForTests(bool hovered) => SetHover(hovered);
+
+    /// <summary>Forces the drop-target overlay on or off without a real drag, for photographing it.</summary>
+    internal void ForceDropOverlayForTests(bool shown) => DropOverlay.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>What a scene should photograph: the visible card (or the stacked pair), cropped out of
+    /// a real render of this window so every pixel - live picture, glass, hover chrome - is genuine,
+    /// with the shadow's transparent margin left out.</summary>
+    internal FrameworkElement PhotographCard()
+    {
+        UpdateLayout();
+        int totalWidth = Math.Max(1, (int)Math.Round(ActualWidth));
+        int totalHeight = Math.Max(1, (int)Math.Round(ActualHeight));
+        var full = new RenderTargetBitmap(totalWidth, totalHeight, 96, 96, PixelFormats.Pbgra32);
+        full.Render(this);
+        var crop = new CroppedBitmap(full, new Int32Rect((int)Math.Round(ShadowMargin), (int)Math.Round(ShadowMargin),
+            Math.Max(1, (int)Math.Round(VisibleSize.Width)), Math.Max(1, (int)Math.Round(VisibleSize.Height))));
+        crop.Freeze();
+        var image = new System.Windows.Controls.Image
+        {
+            Source = crop, Width = VisibleSize.Width, Height = VisibleSize.Height, Stretch = Stretch.None,
+        };
+        // Never added to any tree, so nothing lays it out on its own - measure and arrange it here
+        // rather than trust Mvp's later UpdateLayout() call to do that for an orphan element.
+        image.Measure(VisibleSize);
+        image.Arrange(new Rect(VisibleSize));
+        return image;
+    }
 
     void SetHover(bool hovered)
     {
@@ -385,11 +424,14 @@ public partial class WorkspacePeekWindow : Window
         if (e.LeftButton != MouseButtonState.Pressed) return;
         Vector delta = ScreenDip() - _dragAnchor;
         Rect work = WorkArea?.Invoke() ?? FrontRect;
+        // The drag is anchored on the front card's own rect (set in BeginResize), so the result must
+        // go back through the same offset Configure gave the front card - the stacked back card's
+        // peek above it - rather than being placed as if it were the whole visible box itself.
         Rect next = WorkspacePeekPlacement.Resize(_dragStart, _dragEdges, delta, work);
         FrontCard.Width = next.Width;
         FrontCard.Height = next.Height;
-        VisibleSize = next.Size;
-        Place(next);
+        VisibleSize = new Size(next.Width, next.Height + _stackExtra);
+        Place(new Rect(next.Left, next.Top - _stackExtra, next.Width, next.Height + _stackExtra));
     }
 
     void ResizeZone_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
