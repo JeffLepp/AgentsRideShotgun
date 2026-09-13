@@ -38,7 +38,8 @@ public partial class WorkspacePeekWindow : Window
     bool _hovered;
     double _stackExtra;
     string? _chipPath;
-    bool _openOnClick;
+    bool _chipPressed, _chipDragging;
+    Point _chipStart;
     WorkspaceScreenInput? _input;
     PeekEdges _dragEdges;
     Rect _dragStart;
@@ -69,7 +70,8 @@ public partial class WorkspacePeekWindow : Window
     internal event Action? SheetKeepClicked;
     internal event Action? HoverChanged;
     internal event Action? PromoteRequested;
-    internal event Action? HandBackClicked;
+    internal event Action? ResumeClicked;
+    internal event Action<string>? ChipOpenRequested;
 
     /// <summary>Whether the owner's pointer is over the card right now. Held, in the policy's terms.</summary>
     internal bool Hovered => _hovered;
@@ -89,7 +91,7 @@ public partial class WorkspacePeekWindow : Window
 
     /// <summary>Gives back whatever the input is holding. Called before the window moves to another
     /// workspace or goes away, so no agent is left waiting on a view that stopped looking.</summary>
-    internal void HandBackInput() => _input?.HandBack();
+    internal void HandBackInput() => _input?.Release();
 
     /// <summary>
     /// How far the window's own bounds reach past the card on every side, reserved for the shadow
@@ -112,7 +114,7 @@ public partial class WorkspacePeekWindow : Window
         if (hasBack)
         {
             Rect back0 = WorkspacePeekPlacement.Back(front0);
-            extra = Math.Max(0, -back0.Top);
+            extra = Math.Ceiling(Math.Max(0, -back0.Top));
         }
         _stackExtra = extra;
         VisibleSize = new Size(card.Width, card.Height + extra);
@@ -159,9 +161,9 @@ public partial class WorkspacePeekWindow : Window
     {
         NameText.Text = workspaceName;
         WhoText.Text = message;
-        DropText.Text = "Drop into " + workspaceName;
+        DropText.Text = "Copy into " + workspaceName;
         SetTone(StateDot, WhoText, tone);
-        AutomationProperties.SetName(Chip, "Drag the newest file " + workspaceName + " saved out");
+        AutomationProperties.SetName(Chip, "Open or drag the newest file " + workspaceName + " saved");
     }
 
     internal void DescribeBack(string workspaceName, string message, PeekTone tone)
@@ -226,10 +228,6 @@ public partial class WorkspacePeekWindow : Window
 
     internal void ShowBackFrame(BitmapSource? frame) => BackScreen.Source = frame;
 
-    /// <summary>Whether a click on the live picture opens the workspace in the hub instead of using
-    /// it right there (Settings > Corner window > Clicking it).</summary>
-    internal void SetOpenOnClick(bool open) => _openOnClick = open;
-
     /// <summary>The 2 DIP line along the bottom while the agent works, sweeping unless Windows'
     /// animations are off.</summary>
     internal void SetActive(bool active)
@@ -270,8 +268,9 @@ public partial class WorkspacePeekWindow : Window
     internal void ShowResultChip(string? name, string? path)
     {
         _chipPath = path;
-        Chip.Visibility = name is null ? Visibility.Collapsed : Visibility.Visible;
         ChipText.Text = name ?? string.Empty;
+        Chip.Visibility = name is not null && DropOverlay.Visibility != Visibility.Visible
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>A pending desktop request as a question, or null while there is none.</summary>
@@ -281,20 +280,38 @@ public partial class WorkspacePeekWindow : Window
         SheetQuestion.Text = question ?? string.Empty;
     }
 
-    /// <summary>The dark toast while the owner is using it under Take turns or Full stop. Full stop
-    /// carries a "Hand back" link; Take turns does not, since it lets go on its own.</summary>
-    internal void ShowToast(string? text, bool handBackLink = false)
+    internal void ShowUsingToast(string agent)
     {
-        Toast.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
-        ToastText.Text = text ?? string.Empty;
-        ToastLink.Visibility = handBackLink ? Visibility.Visible : Visibility.Collapsed;
+        Toast.Visibility = Visibility.Visible;
+        ToastText.Text = $"You're using it · {agent} waits";
+        ToastLink.Visibility = Visibility.Collapsed;
     }
+
+    internal void ShowPausedToast()
+    {
+        Toast.Visibility = Visibility.Visible;
+        ToastText.Text = "Paused";
+        ToastLink.Visibility = Visibility.Visible;
+    }
+
+    internal void HideToast()
+    {
+        Toast.Visibility = Visibility.Collapsed;
+        ToastLink.Visibility = Visibility.Collapsed;
+    }
+
+    internal bool PausedToastVisible => Toast.Visibility == Visibility.Visible
+        && ToastText.Text == "Paused" && ToastLink.Visibility == Visibility.Visible;
+
+    internal bool DropHidesChrome => DropOverlay.Visibility == Visibility.Visible
+        && Pill.Visibility == Visibility.Collapsed && Actions.Visibility == Visibility.Collapsed
+        && Grip.Visibility == Visibility.Collapsed;
 
     /// <summary>Forces the hover chrome on or off without a real pointer, for photographing it.</summary>
     internal void ForceHoverForTests(bool hovered) => SetHover(hovered);
 
     /// <summary>Forces the drop-target overlay on or off without a real drag, for photographing it.</summary>
-    internal void ForceDropOverlayForTests(bool shown) => DropOverlay.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+    internal void ForceDropOverlayForTests(bool shown) => SetDropOverlay(shown);
 
     /// <summary>What a scene should photograph: the visible card (or the stacked pair), cropped out of
     /// a real render of this window so every pixel - live picture, glass, hover chrome - is genuine,
@@ -331,10 +348,20 @@ public partial class WorkspacePeekWindow : Window
     /// open and hide the same way a mouse user does, not only by pointing at the card.</summary>
     void UpdateChrome()
     {
-        bool show = _hovered || IsKeyboardFocusWithin;
+        bool dropping = DropOverlay.Visibility == Visibility.Visible;
+        bool show = (_hovered || IsKeyboardFocusWithin) && !dropping;
         Actions.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         Grip.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        Pill.Visibility = dropping ? Visibility.Collapsed : Visibility.Visible;
+        Chip.Visibility = !dropping && !string.IsNullOrEmpty(ChipText.Text)
+            ? Visibility.Visible : Visibility.Collapsed;
         Pill.Margin = new Thickness(show ? 22 : 8, 8, 0, 0);
+    }
+
+    void SetDropOverlay(bool shown)
+    {
+        DropOverlay.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        UpdateChrome();
     }
 
     /// <summary>Fades in, rising a little, from wherever it is now. Interrupts a fade out. No motion
@@ -426,30 +453,50 @@ public partial class WorkspacePeekWindow : Window
     void HideButton_Click(object sender, RoutedEventArgs e) => HideRequested?.Invoke();
     void SheetOpen_Click(object sender, RoutedEventArgs e) => SheetOpenClicked?.Invoke();
     void SheetKeep_Click(object sender, RoutedEventArgs e) => SheetKeepClicked?.Invoke();
-    void ToastLink_Click(object sender, RoutedEventArgs e) => HandBackClicked?.Invoke();
+    void ToastLink_Click(object sender, RoutedEventArgs e) => ResumeClicked?.Invoke();
 
-    /// <summary>Settings > Corner window > Clicking it = Open the workspace: claim every click here,
-    /// before WorkspaceScreenInput's own (bubbling) handler on the same image ever runs, so the click
-    /// opens the hub instead of reaching the workspace.</summary>
-    void LiveScreen_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    void Chip_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (!_openOnClick) return;
+        _chipPressed = true;
+        _chipDragging = false;
+        _chipStart = e.GetPosition(Chip);
+        Chip.CaptureMouse();
         e.Handled = true;
-        OpenRequested?.Invoke();
+    }
+
+    void Chip_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        bool click = _chipPressed && !_chipDragging;
+        _chipPressed = false;
+        Chip.ReleaseMouseCapture();
+        if (click && _chipPath is { } path) ChipOpenRequested?.Invoke(path);
+        e.Handled = true;
+    }
+
+    internal void ClickChipForTests()
+    {
+        if (_chipPath is { } path) ChipOpenRequested?.Invoke(path);
     }
 
     void Chip_MouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed || _chipPath is not { } path || !File.Exists(path)) return;
-        DragDrop.DoDragDrop(Chip, new DataObject(DataFormats.FileDrop, new[] { path }), DragDropEffects.Copy);
+        if (!_chipPressed || _chipDragging || e.LeftButton != MouseButtonState.Pressed
+            || _chipPath is not { } path || !File.Exists(path)) return;
+        Point now = e.GetPosition(Chip);
+        if (Math.Abs(now.X - _chipStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(now.Y - _chipStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        _chipDragging = true;
+        Chip.ReleaseMouseCapture();
+        try { DragDrop.DoDragDrop(Chip, new DataObject(DataFormats.FileDrop, new[] { path }), DragDropEffects.Copy); }
+        finally { _chipPressed = false; _chipDragging = false; }
     }
 
     protected override void OnDragEnter(DragEventArgs e) => UpdateDrop(e);
     protected override void OnDragOver(DragEventArgs e) => UpdateDrop(e);
-    protected override void OnDragLeave(DragEventArgs e) => DropOverlay.Visibility = Visibility.Collapsed;
+    protected override void OnDragLeave(DragEventArgs e) => SetDropOverlay(false);
     protected override void OnDrop(DragEventArgs e)
     {
-        DropOverlay.Visibility = Visibility.Collapsed;
+        SetDropOverlay(false);
         if (e.Data.GetDataPresent(DataFormats.FileDrop) && e.Data.GetData(DataFormats.FileDrop) is string[] paths && paths.Length > 0)
             FilesDropped?.Invoke(paths);
         e.Handled = true;
@@ -459,7 +506,7 @@ public partial class WorkspacePeekWindow : Window
     {
         bool has = e.Data.GetDataPresent(DataFormats.FileDrop);
         e.Effects = has ? DragDropEffects.Copy : DragDropEffects.None;
-        DropOverlay.Visibility = has ? Visibility.Visible : Visibility.Collapsed;
+        SetDropOverlay(has);
         e.Handled = true;
     }
 
