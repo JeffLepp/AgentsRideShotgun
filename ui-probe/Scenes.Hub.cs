@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Media;
 using HiveMind.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
@@ -50,7 +52,7 @@ static class HubScenes
         window.Width = 1200;
         window.Height = 826;
         window.OpenWorkspaceView!.LoadFixture("shop", @"C:\code\shop",
-            [("Claude Code", true), ("Codex next", false)],
+            [("Claude Code", true), ("Codex waiting", false)],
             scene.Site("shop"),
             [
                 // Reference 04's "What it did" rows each carry a 44-wide thumbnail (a live screenshot
@@ -97,11 +99,11 @@ static class HubScenes
             StoredWorkspace asleepOne = WorkspaceStore.Create("asleep-one");
             await Task.Delay(300);
             Program.Check(window.Hub.Asleep.Any(e => e.Id == shop.Id) && window.Hub.Asleep.Any(e => e.Id == asleepOne.Id),
-                "A stored workspace with no computer shows under Asleep");
+                "A stored workspace with no computer shows under Recent");
             using WorkspaceRuntime runtime = WorkspaceRuntime.Start(shop);
             await Task.Delay(300);
             Program.Check(window.Hub.Working.Any(e => e.Id == shop.Id) && !window.Hub.Asleep.Any(e => e.Id == shop.Id),
-                "Starting a workspace's computer moves it from Asleep to Working");
+                "Starting a workspace's computer moves it from Recent to Working");
             window.ShowWide(shop.Id);
             await Task.Delay(300);
             Program.Check(window.DisplayMode == "wide" && window.MinWidth == 960 && window.MinHeight == 600,
@@ -137,21 +139,20 @@ static class HubScenes
             Program.Check(raised && window.SelectedWorkspaceId == asleepOne.Id,
                 "The corner window's open-in-hub opens that workspace in the wide window");
 
-            // --- fix list item 7: an asleep workspace's More menu offers "Start computer" ---------
+            // --- brief A.3: opening a recent workspace starts nothing; its More menu is exactly
+            // Rename, Delete (Stop/Start computer and Who can use it are gone) -------------------
             WorkspaceFullView moreView = window.OpenWorkspaceView!;
             Program.Check(WorkspaceRuntime.Of(asleepOne.Id) is null,
-                "The workspace this check opens has no computer running yet (asleep)");
+                "Opening a recent workspace starts nothing");
             moreView.MoreButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Task.Delay(100);
-            MenuItem? startItem = moreView.LastMoreMenu?.Items.OfType<MenuItem>()
-                .FirstOrDefault(item => Equals(item.Header, "Start computer"));
-            Program.Check(startItem is not null,
-                "An asleep workspace's More menu offers \"Start computer\" in place of \"Stop computer\"");
-            startItem?.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            await Task.Delay(500);
-            Program.Check(WorkspaceRuntime.Of(asleepOne.Id) is not null,
-                "Clicking \"Start computer\" on the real menu item actually starts that workspace's computer");
-            WorkspaceRuntime.Of(asleepOne.Id)?.Dispose();
+            var moreItems = moreView.LastMoreMenu?.Items.Cast<object>().ToList() ?? [];
+            Program.Check(moreItems.Count == 3 && moreItems[0] is MenuItem { Header: "Rename" }
+                && moreItems[1] is Separator && moreItems[2] is MenuItem { Header: "Delete" },
+                "The More menu is exactly Rename, Delete, with a separator before Delete");
+            moreView.LastMoreMenu!.IsOpen = false;
+            Program.Check(WorkspaceRuntime.Of(asleepOne.Id) is null,
+                "...and the More menu itself never starts that workspace's computer");
 
             // --- fix list item 6: store/attention events off the UI thread; dispose vs a queued refresh
             Exception? crossThreadFailure = null;

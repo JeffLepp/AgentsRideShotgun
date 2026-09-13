@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -48,7 +47,6 @@ public partial class MainWindow : Window, IDisposable
         _cardPreviews.Tick += CardPreviews_Tick;
         _savePreferences = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(600) };
         _savePreferences.Tick += (_, _) => { _savePreferences.Stop(); SavePreferences(); };
-        AppSettingsStore.Changed += SettingsChanged;
         ModuleEntry.DashboardOpenRequested += EngineRequestedWorkspace;
         LocationChanged += (_, _) => QueuePreferenceSave();
         Loaded += Window_Loaded;
@@ -56,7 +54,7 @@ public partial class MainWindow : Window, IDisposable
 
     void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        // Never empty (brief A.4): a fresh install always has something under Asleep to show.
+        // Never empty (brief A.4): a fresh install always has something under Recent to show.
         if (WorkspaceStore.All().Count == 0) WorkspaceStore.Create("Scratch");
         RestorePreferences();
         _hub.Refresh();
@@ -177,41 +175,7 @@ public partial class MainWindow : Window, IDisposable
         if (_priorMode == "wide") ShowWide(_selectedId); else ShowStack();
     }
 
-    // --- new workspace, filter, clicks ----------------------------------------------------------
-
-    void New_Click(object sender, RoutedEventArgs e)
-    {
-        AppSettings settings = AppSettingsStore.Current;
-        StoredWorkspace created;
-        try
-        {
-            created = WorkspaceStore.Create(NextName());
-            created = WorkspaceStore.Update(created.Id, w => w with { Power = settings.NewWorkspaceSpeed, Mode = settings.Restrictions }) ?? created;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        { SetError("The workspace could not be created. " + ex.Message); return; }
-        StartWorkspace(created.Id);
-    }
-
-    string NextName()
-    {
-        var names = WorkspaceStore.All().Select(w => w.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        int n = 1;
-        while (names.Contains("Workspace " + n)) n++;
-        return "Workspace " + n;
-    }
-
-    internal void StartWorkspace(string id)
-    {
-        if (WorkspaceStore.Find(id) is not { } workspace) return;
-        try { WorkspaceRuntime.Start(workspace); }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
-        { SetError("The computer could not start. " + ex.Message); }
-    }
-
-    internal void StopWorkspace(string id) => WorkspaceRuntime.Of(id)?.Dispose();
-
-    void SetError(string message) => MessageBox.Show(this, message, "Deskweave", MessageBoxButton.OK, MessageBoxImage.Warning);
+    // --- filter, clicks --------------------------------------------------------------------------
 
     void WorkingCard_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) ShowWide(id); }
     void AsleepRow_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) ShowWide(id); }
@@ -257,15 +221,6 @@ public partial class MainWindow : Window, IDisposable
         }
         else { _cardPreviews.Stop(); _previewGeneration++; _hub.StopAging(); }
     }
-
-    /// <summary>A live change to Settings > Performance > Smoothness re-times the running loop
-    /// immediately instead of waiting for the next stop/start.</summary>
-    void SettingsChanged(AppSettings settings) => Application.Current?.Dispatcher.BeginInvoke(() =>
-    {
-        if (_disposed || !_cardPreviews.IsEnabled) return;
-        TimeSpan interval = HubPreview.Interval();
-        if (_cardPreviews.Interval != interval) _cardPreviews.Interval = interval;
-    });
 
     async void CardPreviews_Tick(object? sender, EventArgs e)
     {
@@ -406,11 +361,8 @@ public partial class MainWindow : Window, IDisposable
     void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings();
     void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     void Maximize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-    void Close_Click(object sender, RoutedEventArgs e)
-    {
-        if (AppSettingsStore.Current.CloseButton == CloseChoice.Quit) { if (Application.Current is App app) app.RequestQuit(); }
-        else Close();
-    }
+    // The close button always hides to the tray (brief A.5); Quit lives only on the tray menu.
+    void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     // --- windows: keyboard, DWM rounding, lifecycle -----------------------------------------------
 
@@ -450,8 +402,7 @@ public partial class MainWindow : Window, IDisposable
         }
         if (Keyboard.Modifiers == ModifierKeys.Control)
         {
-            if (e.Key == Key.N) { New_Click(sender, new RoutedEventArgs()); e.Handled = true; }
-            else if (e.Key == Key.F && _mode == "stack") { BeginFilter(); e.Handled = true; }
+            if (e.Key == Key.F && _mode == "stack") { BeginFilter(); e.Handled = true; }
             else if (e.Key == Key.OemComma) { Settings_Click(sender, new RoutedEventArgs()); e.Handled = true; }
         }
     }
@@ -483,7 +434,6 @@ public partial class MainWindow : Window, IDisposable
         _cardPreviews.Stop();
         _cardPreviews.Tick -= CardPreviews_Tick;
         _savePreferences.Stop();
-        AppSettingsStore.Changed -= SettingsChanged;
         ModuleEntry.DashboardOpenRequested -= EngineRequestedWorkspace;
         _hub.Working.CollectionChanged -= HubChanged;
         _hub.Asleep.CollectionChanged -= HubChanged;

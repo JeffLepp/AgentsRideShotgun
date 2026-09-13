@@ -154,10 +154,8 @@
                 <Path Grid.Column="0" Style="{StaticResource MarkIcon}" Width="14" Height="14" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="1" Text="Deskweave" FontWeight="SemiBold" FontSize="12.5" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                    <Button x:Name="NewButton" Style="{StaticResource IconButton}" Click="New_Click" ToolTip="New workspace" AutomationProperties.Name="New workspace">
-                        <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Plus}"/>
-                    </Button>
-                    <Button x:Name="SettingsButton" Style="{StaticResource IconButton}" Click="Settings_Click" Margin="8,0,0,0" ToolTip="Settings" AutomationProperties.Name="Settings">
+                    <!-- No new-workspace button (brief A.1): workspaces make themselves. -->
+                    <Button x:Name="SettingsButton" Style="{StaticResource IconButton}" Click="Settings_Click" ToolTip="Settings" AutomationProperties.Name="Settings">
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Gear}"/>
                     </Button>
                 </StackPanel>
@@ -190,7 +188,7 @@
                                     <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,0,12"/></Style>
                                 </ItemsControl.ItemContainerStyle>
                             </ItemsControl>
-                            <local:TrackedText Text="Asleep" TextFontSize="11" Margin="2,8,0,3" TextForeground="{DynamicResource FaintInkBrush}"/>
+                            <local:TrackedText Text="Recent" TextFontSize="11" Margin="2,8,0,3" TextForeground="{DynamicResource FaintInkBrush}"/>
                             <ItemsControl x:Name="StackAsleepList" ItemTemplate="{StaticResource AsleepRowTemplate}">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                             </ItemsControl>
@@ -205,9 +203,20 @@
                             <StackPanel Margin="8,10,8,10">
                                 <local:TrackedText Text="Working" TextFontSize="11" Margin="2,10,2,4" TextForeground="{DynamicResource FaintInkBrush}"
                                                    Visibility="{Binding Items.Count, ElementName=SidebarWorkingList, Converter={StaticResource CountToVisibility}}"/>
-                                <ItemsControl x:Name="SidebarWorkingList" ItemTemplate="{StaticResource SidebarWorkingTemplate}"/>
-                                <local:TrackedText Text="Asleep" TextFontSize="11" Margin="2,10,2,4" TextForeground="{DynamicResource FaintInkBrush}"/>
-                                <ItemsControl x:Name="SidebarAsleepList" ItemTemplate="{StaticResource SidebarAsleepTemplate}"/>
+                                <!-- ItemContainerStyle's bottom margin (measured against reference 04's row pitch,
+                                     see artifacts/cut/edge-hub.ps1): the row template alone renders a shade short
+                                     per row, the same drift the last fix round left at the bottom of a long list. -->
+                                <ItemsControl x:Name="SidebarWorkingList" ItemTemplate="{StaticResource SidebarWorkingTemplate}">
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,0,2"/></Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                </ItemsControl>
+                                <local:TrackedText Text="Recent" TextFontSize="11" Margin="2,10,2,7" TextForeground="{DynamicResource FaintInkBrush}"/>
+                                <ItemsControl x:Name="SidebarAsleepList" ItemTemplate="{StaticResource SidebarAsleepTemplate}">
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,0,2"/></Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                </ItemsControl>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>

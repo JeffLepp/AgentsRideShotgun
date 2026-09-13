@@ -103,7 +103,6 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="NameText" Grid.Column="0" FontSize="21" FontWeight="SemiBold" VerticalAlignment="Center"
                        TextTrimming="CharacterEllipsis" MaxWidth="320"/>
@@ -121,18 +120,13 @@
             <TextBlock x:Name="HeaderError" Grid.Column="3" FontSize="12" Foreground="{DynamicResource DangerInkBrush}"
                        VerticalAlignment="Center" HorizontalAlignment="Right" Margin="10,0,10,0"
                        TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
-            <Button x:Name="TakeOverButton" Grid.Column="4" Click="TakeOver_Click" Padding="12,6"
-                    AutomationProperties.Name="{Binding ElementName=TakeOverLabel, Path=Text}">
-                <StackPanel Orientation="Horizontal">
-                    <Path Style="{StaticResource Icon14}" Data="{StaticResource Icon.Hand}" Margin="0,0,6,0"/>
-                    <TextBlock x:Name="TakeOverLabel" Text="Take over"/>
-                </StackPanel>
-            </Button>
-            <Button x:Name="FolderButton" Grid.Column="5" Style="{StaticResource IconButton}" Click="Folder_Click"
-                    Margin="6,0,0,0" ToolTip="Open folder" AutomationProperties.Name="Open workspace folder">
+            <!-- No Take over / Hand back (brief A.3): clicking the screen is taking over, same as the
+                 corner window. -->
+            <Button x:Name="FolderButton" Grid.Column="4" Style="{StaticResource IconButton}" Click="Folder_Click"
+                    ToolTip="Open folder" AutomationProperties.Name="Open workspace folder">
                 <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Folder}"/>
             </Button>
-            <Button x:Name="MoreButton" Grid.Column="6" Style="{StaticResource IconButton}" Click="More_Click"
+            <Button x:Name="MoreButton" Grid.Column="5" Style="{StaticResource IconButton}" Click="More_Click"
                     Margin="2,0,0,0" ToolTip="More" AutomationProperties.Name="More workspace actions">
                 <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.More}" StrokeThickness="2.4"/>
             </Button>

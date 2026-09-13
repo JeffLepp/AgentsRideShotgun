@@ -88,8 +88,7 @@ static class Program
             && _window.FindName("HelpButton") is null && _window.FindName("SearchBox") is null
             && _window.FindName("AppearanceButton") is null && _window.FindName("FocusSlot") is null,
             "The icon rail, overview grid, compact/collapsed modes, search box, help panel and boss panel are gone");
-        Check(AutomationProperties.GetName(Find<Button>("NewButton")).Length > 0,
-            "New workspace has an accessible name");
+        Check(_window.FindName("NewButton") is null, "The title bar has no new-workspace button (brief A.1)");
         Check(AppearanceManager.Choice == ThemeChoice.FollowWindows && AppearanceManager.Dark == AppearanceManager.WindowsIsDark(),
             "The theme follows Windows until Settings forces one");
         CheckSettings();
@@ -108,27 +107,28 @@ static class Program
         _window.Width = 320;
         _window.Height = 480;
         await Settle();
-        Check(InWindow(Find<Button>("NewButton")), "Create remains reachable at the stack's minimum size");
         Capture("02-narrow-stack.png");
         _window.Width = 340;
         _window.Height = 804;
         await Settle();
 
-        // New workspace: created, started, follows the store's speed and restrictions (brief A.11).
-        Click("NewButton");
+        // A workspace the engine's own router creates (brief A.7: no + button; workspaces make
+        // themselves), started with the store's speed and restrictions (brief A.11).
+        AppSettings settings = AppSettingsStore.Current;
+        var created = WorkspaceStore.Create("Workspace 1");
+        created = WorkspaceStore.Update(created.Id, w => w with { Power = settings.NewWorkspaceSpeed, Mode = settings.Restrictions }) ?? created;
+        WorkspaceRuntime.Start(created);
         await Settle();
-        Check(WorkspaceStore.All().Any(w => w.Name == "Workspace 1"), "One click creates a workspace with a default name");
-        var created = WorkspaceStore.All().First(w => w.Name == "Workspace 1");
         Check(WorkspaceRuntime.Of(created.Id) is not null, "A new workspace starts its own computer");
         Check(_window.Hub.Working.Any(e => e.Id == created.Id), "A running workspace shows under Working on the stack");
         Check(WorkspaceStore.Find(created.Id)!.Power == AppSettingsStore.Current.NewWorkspaceSpeed
             && WorkspaceStore.Find(created.Id)!.Mode == AppSettingsStore.Current.Restrictions,
             "A new workspace is created with the store's new-workspace speed and restrictions");
-        _window.StopWorkspace(created.Id);
+        WorkspaceRuntime.Of(created.Id)?.Dispose();
         await Settle();
         Check(WorkspaceRuntime.Of(created.Id) is null && _window.Hub.Asleep.Any(e => e.Id == created.Id),
-            "Stopping a workspace's computer moves it from Working to Asleep");
-        _window.StartWorkspace(created.Id);
+            "Stopping a workspace's computer moves it from Working to Recent");
+        WorkspaceRuntime.Start(WorkspaceStore.Find(created.Id)!);
         await Settle();
         Check(WorkspaceRuntime.Of(created.Id) is not null && _window.Hub.Working.Any(e => e.Id == created.Id),
             "Starting it again brings it back under Working");
@@ -203,7 +203,7 @@ static class Program
         _window.ShowStack();
         await Settle();
 
-        _window.StopWorkspace(created.Id);
+        WorkspaceRuntime.Of(created.Id)?.Dispose();
         await Settle();
         WorkspaceAccessStore.Write(created.Id, new WorkspaceAccessPolicy { PrewarmBrowser = false });
         var runtime = WorkspaceRuntime.Start(WorkspaceStore.Find(created.Id)!);

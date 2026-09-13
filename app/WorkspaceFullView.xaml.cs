@@ -38,7 +38,6 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     string? _id;
     WorkspaceScreenInput? _input;
     DispatcherTimer? _screenTimer;
-    DispatcherTimer? _carryOnTimer;
     bool _fixture;
     bool _renaming;
     bool _disposed;
@@ -74,9 +73,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         _fixture = false;
         _id = id;
         Reload();
+        // Clicking the screen takes over right there (brief A.3), the same as the corner window.
         _input = new WorkspaceScreenInput(ScreenImage, () => WorkspaceRuntime.Of(_id));
-        _input.OwnerActed += RestartCarryOn;
-        ScreenImage.Focusable = true;
         StartScreenTimer();
     }
 
@@ -95,8 +93,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         LoadFiles(id);
     }
 
-    /// <summary>Cheap, frequent: pills, the take-over label and a fresh frame. Called by the timer
-    /// and after a theme change, since the resources code caches here go stale otherwise.</summary>
+    /// <summary>Cheap, frequent: the "who is here" pills and a fresh frame. Called by the timer and
+    /// after a theme change, since the resources code caches here go stale otherwise.</summary>
     internal void RefreshLive()
     {
         if (_fixture || _id is not { } id) return;
@@ -107,14 +105,6 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         if (driver.Length > 0) _pills.Add(new PillInfo(WorkspaceHome.DisplayName(driver), true));
         else if (workspace is not null && !WorkspaceHome.IsFolder(workspace.Agents) && WorkspaceHome.Label(workspace.Agents) is { Length: > 0 } kept)
             _pills.Add(new PillInfo(kept, false));
-        UpdateTakeOverLabel(runtime);
-    }
-
-    void UpdateTakeOverLabel(WorkspaceRuntime? runtime)
-    {
-        bool holding = runtime?.Plane?.Driving == Driver.Owner;
-        TakeOverLabel.Text = holding ? "Hand back" : "Take over";
-        TakeOverButton.IsEnabled = runtime is not null;
     }
 
     // --- "What it did", from the workspace's own evidence log --------------------------------
@@ -246,34 +236,6 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         if (ScreenBorder.ActualWidth > 0) ScreenBorder.Height = Math.Round(ScreenBorder.ActualWidth * 9 / 16);
     }
 
-    // --- take over / hand back, with the same "carry on after quiet" the screen itself uses ---
-
-    void TakeOver_Click(object sender, RoutedEventArgs e)
-    {
-        HeaderError.Visibility = Visibility.Collapsed;
-        if (_id is not { } id || WorkspaceRuntime.Of(id)?.Plane is not { } plane) return;
-        if (plane.Driving == Driver.Owner) { plane.Release(); StopCarryOn(); }
-        else { plane.OwnerTakes(); RestartCarryOn(); }
-        UpdateTakeOverLabel(WorkspaceRuntime.Of(id));
-    }
-
-    void RestartCarryOn()
-    {
-        StopCarryOn();
-        if (AppSettingsStore.Current.Control != ControlMode.TakeTurns) return;
-        _carryOnTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(AppSettingsStore.Current.CarryOnSeconds) };
-        _carryOnTimer.Tick += (_, _) =>
-        {
-            StopCarryOn();
-            WorkspaceRuntime? runtime = _id is { } id ? WorkspaceRuntime.Of(id) : null;
-            if (runtime?.Plane is { Driving: Driver.Owner } plane) plane.Release();
-            UpdateTakeOverLabel(runtime);
-        };
-        _carryOnTimer.Start();
-    }
-
-    void StopCarryOn() { _carryOnTimer?.Stop(); _carryOnTimer = null; }
-
     // --- folder, rename, more ------------------------------------------------------------------
 
     void Folder_Click(object sender, RoutedEventArgs e)
@@ -307,11 +269,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             item.Click += (_, _) => action();
             menu.Items.Add(item);
         }
-        // An asleep workspace's More menu offers "Start computer" in its place (WAVE1 decisions).
-        if (WorkspaceRuntime.Of(id) is not null) Add("Stop computer", () => WorkspaceRuntime.Of(id)?.Dispose());
-        else Add("Start computer", () => StartComputer(id));
+        // Exactly Rename, Delete (brief A.3): no Stop/Start computer (automatic) or Who can use it.
         Add("Rename", BeginRename);
-        menu.Items.Add(AgentsMenu(id));
         menu.Items.Add(new Separator());
         Add("Delete", () => DeleteWorkspace(id));
         // Test seam (ui-probe/Scenes.Hub.cs): the gate drives this exact menu instance rather than
@@ -321,43 +280,6 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     }
 
     internal ContextMenu? LastMoreMenu;
-
-    void StartComputer(string id)
-    {
-        if (WorkspaceStore.Find(id) is not { } workspace) return;
-        try { WorkspaceRuntime.Start(workspace); }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
-        { ShowHeaderError("The computer could not start."); }
-        RefreshLive();
-    }
-
-    MenuItem AgentsMenu(string id)
-    {
-        string rule = WorkspaceStore.Find(id)?.Agents ?? string.Empty;
-        var parent = new MenuItem { Header = "Who can use it" };
-        void Choice(string label, bool chosen, Func<string?> pick)
-        {
-            var item = new MenuItem { Header = label, IsCheckable = true, IsChecked = chosen };
-            item.Click += (_, _) => { if (pick() is { } picked) { WorkspaceHome.Set(id, picked); RefreshLive(); } };
-            parent.Items.Add(item);
-        }
-        bool folder = WorkspaceHome.IsFolder(rule);
-        string claude = WorkspaceHome.Agent("claude-code"), codex = WorkspaceHome.Agent("codex");
-        Choice("Just me", rule.Length == 0, () => string.Empty);
-        Choice("Any agent", rule == WorkspaceHome.Anyone, () => WorkspaceHome.Anyone);
-        Choice(folder ? "Agents in " + WorkspaceHome.Label(rule) : "Agents in a folder…", folder, PickAgentsFolder);
-        Choice("Only Claude Code", rule == claude, () => claude);
-        Choice("Only Codex", rule == codex, () => codex);
-        if (!folder && rule.Length > 0 && rule != WorkspaceHome.Anyone && rule != claude && rule != codex)
-            Choice("Only " + WorkspaceHome.Label(rule), true, () => rule);
-        return parent;
-    }
-
-    string? PickAgentsFolder()
-    {
-        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Agents working in this folder use this workspace" };
-        return dialog.ShowDialog(Window.GetWindow(this)) == true ? WorkspaceHome.Folder(dialog.FolderName) : null;
-    }
 
     void BeginRename()
     {
@@ -419,8 +341,6 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         _pills.Clear();
         foreach (var (text, working) in pills) _pills.Add(new PillInfo(text, working));
         ScreenImage.Source = screen;
-        TakeOverLabel.Text = "Take over";
-        TakeOverButton.IsEnabled = true;
         _did.Clear();
         foreach (var (time, prefix, code, thumb) in did) _did.Add(new DidRow(time, prefix, code, thumb));
         _files.Clear();
@@ -429,9 +349,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     void StopLive()
     {
-        StopCarryOn();
         if (_screenTimer is not null) { _screenTimer.Stop(); _screenTimer.Tick -= ScreenTick; _screenTimer = null; }
-        if (_input is not null) { _input.OwnerActed -= RestartCarryOn; _input.Dispose(); _input = null; }
+        if (_input is not null) { _input.Dispose(); _input = null; }
     }
 
     public void Dispose()

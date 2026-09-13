@@ -19,7 +19,7 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
     bool _needsYou;
     public bool NeedsYou { get => _needsYou; set { Set(ref _needsYou, value); Changed(nameof(OpenLabel)); } }
     /// <summary>Screen-reader name for the card or row: the dot is the only visible status.</summary>
-    public string OpenLabel => "Open workspace " + Name + (NeedsYou ? ", needs you" : Working ? ", working" : ", asleep");
+    public string OpenLabel => "Open workspace " + Name + (NeedsYou ? ", needs you" : Working ? ", working" : ", recent");
     /// <summary>"Claude Code", "Codex wants you", or empty when nobody is here right now.</summary>
     string _agentText = "";
     public string AgentText { get => _agentText; set => Set(ref _agentText, value); }
@@ -190,19 +190,15 @@ internal sealed class HubViewModel : IDisposable
     }
 }
 
-/// <summary>Shared preview-loop rules (brief A.10): how often, and whether battery says stop.</summary>
+/// <summary>Shared preview-loop rules (brief A.6, A.10): the app picks the rate itself, no Smoothness
+/// or Pause-previews-on-battery setting to read. Balanced pace; on battery, idle capture stops and
+/// the last frame stays.</summary>
 internal static class HubPreview
 {
-    internal static TimeSpan Interval() => AppSettingsStore.Current.Smoothness switch
-    {
-        PreviewSmoothness.Smooth => TimeSpan.FromMilliseconds(500),
-        PreviewSmoothness.BatterySaver => TimeSpan.FromSeconds(3),
-        _ => TimeSpan.FromSeconds(1),
-    };
+    internal static TimeSpan Interval() => TimeSpan.FromSeconds(1);
 
-    /// <summary>False when the setting says to stop drawing new previews on battery power; the
-    /// last frame stays on screen either way.</summary>
-    internal static bool Allowed => !(AppSettingsStore.Current.PausePreviewsOnBattery && OnBattery());
+    /// <summary>False on battery power: idle capture stops and the last frame stays either way.</summary>
+    internal static bool Allowed => !OnBattery();
 
     static bool OnBattery() =>
         System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Offline;
