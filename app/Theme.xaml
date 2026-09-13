@@ -76,6 +76,8 @@
     <CornerRadius x:Key="SkinWindowRadius">8</CornerRadius>
     <CornerRadius x:Key="PillRadius">8</CornerRadius>
     <CornerRadius x:Key="CornerWindowRadius">12</CornerRadius>
+    <!-- The corner window's one soft shadow (reference: 0 24 60 at 20%, 55% in dark). -->
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="CornerShadowOpacity">0.2</sys:Double>
     <FontFamily x:Key="SkinFontFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
     <FontFamily x:Key="MonoFontFamily">Cascadia Mono, Consolas</FontFamily>
 
