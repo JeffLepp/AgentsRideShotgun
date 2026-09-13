@@ -10,6 +10,22 @@ public static class ModuleEntry
     /// <summary>Which stored workspace the panel opens on. Set by clicking a card on the dashboard.</summary>
     internal static string? Selected { get; set; }
 
+    /// <summary>True while the hub window is on screen and not minimized. The app sets it on the UI
+    /// thread; the corner window stays away while it is true.</summary>
+    public static bool HubShowing
+    {
+        get => _hubShowing;
+        set
+        {
+            if (_hubShowing == value) return;
+            _hubShowing = value;
+            HubShowingChanged?.Invoke();
+        }
+    }
+    static bool _hubShowing;
+
+    public static event Action? HubShowingChanged;
+
     /// <summary>
     /// The module now has a background runtime, and it is one clock. Without it a mission parked for
     /// an hour only woke if the owner happened to have this app open when the hour was up, which is
