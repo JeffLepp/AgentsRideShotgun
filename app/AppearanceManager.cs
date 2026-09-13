@@ -93,6 +93,7 @@ internal static class AppearanceManager
             resources[key] = brush;
         }
         foreach (var (alias, of) in Aliases) resources[alias] = resources[of];
+        resources["CornerShadowOpacity"] = Dark ? 0.55 : 0.2;
         if (!_listening) Listen(application);
         Changed?.Invoke();
     }
