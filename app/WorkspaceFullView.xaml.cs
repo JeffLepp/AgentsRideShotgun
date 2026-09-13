@@ -1,0 +1,406 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using HiveMind.AgentWorkspaces;
+
+namespace Deskweave;
+
+internal sealed class PillInfo(string text, bool working) { public string Text => text; public bool Working => working; }
+/// <summary>One "What it did" row. <paramref name="code"/> is the part shown in accent mono, such
+/// as the address a page was opened at (reference 04: "Opened `localhost:5173`"); empty for a step
+/// that is plain text throughout.</summary>
+internal sealed class DidRow(string time, string prefix, string code, BitmapSource? thumb)
+{
+    public string Time => time;
+    public string Prefix => prefix;
+    public string Code => code;
+    public bool HasCode => code.Length > 0;
+    public BitmapSource? Thumb => thumb;
+    public bool HasThumb => thumb is not null;
+}
+internal sealed class FileRow(string name, string when) { public string Name => name; public string When => when; }
+
+/// <summary>
+/// A workspace in full (reference 04): header, the live screen, "What it did" and "Files". Its own
+/// preview loop follows the same Settings > Performance rules as the stack's working cards.
+/// </summary>
+public partial class WorkspaceFullView : UserControl, IDisposable
+{
+    readonly ObservableCollection<PillInfo> _pills = [];
+    readonly ObservableCollection<DidRow> _did = [];
+    readonly ObservableCollection<FileRow> _files = [];
+    string? _id;
+    WorkspaceScreenInput? _input;
+    DispatcherTimer? _screenTimer;
+    DispatcherTimer? _carryOnTimer;
+    bool _fixture;
+    bool _renaming;
+    bool _disposed;
+
+    public WorkspaceFullView()
+    {
+        InitializeComponent();
+        HerePanel.ItemsSource = _pills;
+        DidList.ItemsSource = _did;
+        FilesList.ItemsSource = _files;
+        // Hidden means the wide window isn't showing this page (stack mode, or another workspace
+        // selected): the timer keeps existing but does no work until it is visible again.
+        IsVisibleChanged += (_, _) =>
+        {
+            if (_screenTimer is null) return;
+            if (IsVisible) { _screenTimer.Start(); ScreenTick(null, EventArgs.Empty); }
+            else _screenTimer.Stop();
+        };
+        Unloaded += (_, _) => StopLive();
+    }
+
+    /// <summary>The workspace was renamed from this page: id, new name.</summary>
+    public event Action<string, string>? Renamed;
+    /// <summary>The workspace was deleted from this page.</summary>
+    public event Action<string>? Deleted;
+
+    public string? WorkspaceId => _id;
+
+    public void SetWorkspace(string id)
+    {
+        StopLive();
+        _fixture = false;
+        _id = id;
+        Reload();
+        _input = new WorkspaceScreenInput(ScreenImage, () => WorkspaceRuntime.Of(_id));
+        _input.OwnerActed += RestartCarryOn;
+        ScreenImage.Focusable = true;
+        StartScreenTimer();
+    }
+
+    void Reload()
+    {
+        if (_id is not { } id || WorkspaceStore.Find(id) is not { } workspace) return;
+        NameText.Text = workspace.Name;
+        RenameBox.Text = workspace.Name;
+        const string folderPrefix = "folder:";
+        PathText.Text = WorkspaceHome.IsFolder(workspace.Agents) ? workspace.Agents[folderPrefix.Length..] : WorkspaceStore.FolderOf(id);
+        BitmapSource? last = ReadLastFrame(id);
+        if (last is not null) ScreenImage.Source = last;
+        RefreshLive();
+        LoadDid(id);
+        LoadFiles(id);
+    }
+
+    /// <summary>Cheap, frequent: pills, the take-over label and a fresh frame. Called by the timer
+    /// and after a theme change, since the resources code caches here go stale otherwise.</summary>
+    internal void RefreshLive()
+    {
+        if (_fixture || _id is not { } id) return;
+        WorkspaceRuntime? runtime = WorkspaceRuntime.Of(id);
+        StoredWorkspace? workspace = WorkspaceStore.Find(id);
+        string driver = runtime?.Access?.Controller ?? "";
+        _pills.Clear();
+        if (driver.Length > 0) _pills.Add(new PillInfo(WorkspaceHome.DisplayName(driver), true));
+        else if (workspace is not null && !WorkspaceHome.IsFolder(workspace.Agents) && WorkspaceHome.Label(workspace.Agents) is { Length: > 0 } kept)
+            _pills.Add(new PillInfo(kept, false));
+        UpdateTakeOverLabel(runtime);
+    }
+
+    void UpdateTakeOverLabel(WorkspaceRuntime? runtime)
+    {
+        bool holding = runtime?.Plane?.Driving == Driver.Owner;
+        TakeOverLabel.Text = holding ? "Hand back" : "Take over";
+        TakeOverButton.IsEnabled = runtime is not null;
+    }
+
+    // --- "What it did", from the workspace's own evidence log --------------------------------
+
+    static readonly HashSet<string> QuietActions = new(StringComparer.Ordinal)
+        { "workspace", "control", "policy", "elements", "marks", "wait", "ceiling", "window", "untrusted" };
+
+    void LoadDid(string id)
+    {
+        _did.Clear();
+        string log = Path.Combine(WorkspaceStore.FolderOf(id), "evidence", "actions.log");
+        if (!File.Exists(log)) return;
+        string[] lines;
+        try { lines = File.ReadAllLines(log); }
+        catch (IOException) { return; }
+        catch (UnauthorizedAccessException) { return; }
+        foreach (string line in lines.TakeLast(200))
+        {
+            string[] parts = line.Split('\t');
+            if (parts.Length < 4) continue;
+            if (!DateTimeOffset.TryParse(parts[0], out DateTimeOffset when)) continue;
+            string action = parts[1];
+            if (action.StartsWith("computer.", StringComparison.Ordinal) || QuietActions.Contains(action)) continue;
+            string detail = parts[2];
+            BitmapSource? thumb = null;
+            if (parts.Length > 4 && parts[4].Length > 0)
+            {
+                string framePath = Path.Combine(WorkspaceStore.FolderOf(id), "evidence", parts[4]);
+                if (File.Exists(framePath)) thumb = LoadImage(framePath);
+            }
+            (string prefix, string code) = Describe(action, detail);
+            _did.Add(new DidRow(when.ToLocalTime().ToString("HH:mm:ss"), prefix, code, thumb));
+            if (_did.Count >= 40) break;
+        }
+    }
+
+    static (string Prefix, string Code) Describe(string action, string detail) => action switch
+    {
+        "page" => ("Opened ", detail),
+        "computer" => (detail.Length > 0 && detail != "desktop" ? "Used the computer (" + detail + ")" : "Used the computer", ""),
+        "run" => ("Ran a command", ""),
+        "save" => ("Saved " + detail, ""),
+        "file" => ("Read " + detail, ""),
+        "browser" => ("Opened the browser", ""),
+        "owner" => ("You said: " + detail, ""),
+        "mission" => (detail, ""),
+        _ when action.Length > 0 => (char.ToUpperInvariant(action[0]) + action[1..], ""),
+        _ => (action, ""),
+    };
+
+    // --- "Files", newest first from the workspace folder --------------------------------------
+
+    static readonly HashSet<string> MachineNames = new(StringComparer.OrdinalIgnoreCase)
+        { "workspace.json", "last-frame.png" };
+
+    void LoadFiles(string id)
+    {
+        _files.Clear();
+        string folder = WorkspaceStore.FolderOf(id);
+        if (!Directory.Exists(folder)) return;
+        IEnumerable<FileInfo> found;
+        try { found = new DirectoryInfo(folder).GetFiles().Where(f => !MachineNames.Contains(f.Name)); }
+        catch (IOException) { return; }
+        catch (UnauthorizedAccessException) { return; }
+        foreach (FileInfo file in found.OrderByDescending(f => f.LastWriteTimeUtc).Take(30))
+            _files.Add(new FileRow(file.Name, file.LastWriteTime.ToString("HH:mm")));
+    }
+
+    // --- the live screen -----------------------------------------------------------------------
+
+    void StartScreenTimer()
+    {
+        _screenTimer ??= new DispatcherTimer(DispatcherPriority.Background);
+        _screenTimer.Interval = HubPreview.Interval();
+        _screenTimer.Tick -= ScreenTick;
+        _screenTimer.Tick += ScreenTick;
+        if (!IsVisible) return;
+        _screenTimer.Start();
+        ScreenTick(null, EventArgs.Empty);
+    }
+
+    async void ScreenTick(object? sender, EventArgs e)
+    {
+        if (_disposed || _id is not { } id || !IsVisible) return;
+        RefreshLive();
+        if (!HubPreview.Allowed) return;
+        WorkspaceControl? plane = WorkspaceRuntime.Of(id)?.Plane;
+        if (plane is null) return;
+        BitmapSource? frame = await Task.Run(() =>
+        {
+            try { BitmapSource? shot = plane.Frame(); if (shot is not null && !shot.IsFrozen) shot.Freeze(); return shot; }
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or System.ComponentModel.Win32Exception) { return null; }
+        });
+        if (_disposed || id != _id || frame is null) return;
+        ScreenImage.Source = frame;
+    }
+
+    static BitmapSource? ReadLastFrame(string id)
+    {
+        string path = WorkspaceStore.LastFrameOf(id);
+        return File.Exists(path) ? LoadImage(path) : null;
+    }
+
+    static BitmapSource? LoadImage(string path)
+    {
+        try
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.UriSource = new Uri(path);
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { return null; }
+    }
+
+    void Root_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (ScreenBorder.ActualWidth > 0) ScreenBorder.Height = Math.Round(ScreenBorder.ActualWidth * 9 / 16);
+    }
+
+    // --- take over / hand back, with the same "carry on after quiet" the screen itself uses ---
+
+    void TakeOver_Click(object sender, RoutedEventArgs e)
+    {
+        if (_id is not { } id || WorkspaceRuntime.Of(id)?.Plane is not { } plane) return;
+        if (plane.Driving == Driver.Owner) { plane.Release(); StopCarryOn(); }
+        else { plane.OwnerTakes(); RestartCarryOn(); }
+        UpdateTakeOverLabel(WorkspaceRuntime.Of(id));
+    }
+
+    void RestartCarryOn()
+    {
+        StopCarryOn();
+        if (AppSettingsStore.Current.Control != ControlMode.TakeTurns) return;
+        _carryOnTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(AppSettingsStore.Current.CarryOnSeconds) };
+        _carryOnTimer.Tick += (_, _) =>
+        {
+            StopCarryOn();
+            WorkspaceRuntime? runtime = _id is { } id ? WorkspaceRuntime.Of(id) : null;
+            if (runtime?.Plane is { Driving: Driver.Owner } plane) plane.Release();
+            UpdateTakeOverLabel(runtime);
+        };
+        _carryOnTimer.Start();
+    }
+
+    void StopCarryOn() { _carryOnTimer?.Stop(); _carryOnTimer = null; }
+
+    // --- folder, rename, more ------------------------------------------------------------------
+
+    void Folder_Click(object sender, RoutedEventArgs e)
+    {
+        if (_id is not { } id) return;
+        try
+        {
+            string folder = WorkspaceStore.FolderOf(id);
+            if (!Directory.Exists(folder)) return;
+            Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException) { }
+    }
+
+    void More_Click(object sender, RoutedEventArgs e)
+    {
+        if (_id is not { } id) return;
+        var menu = new ContextMenu { PlacementTarget = MoreButton, Placement = PlacementMode.Bottom };
+        void Add(string label, Action action)
+        {
+            var item = new MenuItem { Header = label };
+            item.Click += (_, _) => action();
+            menu.Items.Add(item);
+        }
+        if (WorkspaceRuntime.Of(id) is not null) Add("Stop computer", () => WorkspaceRuntime.Of(id)?.Dispose());
+        Add("Rename", BeginRename);
+        menu.Items.Add(AgentsMenu(id));
+        menu.Items.Add(new Separator());
+        Add("Delete", () => DeleteWorkspace(id));
+        menu.IsOpen = true;
+    }
+
+    MenuItem AgentsMenu(string id)
+    {
+        string rule = WorkspaceStore.Find(id)?.Agents ?? string.Empty;
+        var parent = new MenuItem { Header = "Who can use it" };
+        void Choice(string label, bool chosen, Func<string?> pick)
+        {
+            var item = new MenuItem { Header = label, IsCheckable = true, IsChecked = chosen };
+            item.Click += (_, _) => { if (pick() is { } picked) { WorkspaceHome.Set(id, picked); RefreshLive(); } };
+            parent.Items.Add(item);
+        }
+        bool folder = WorkspaceHome.IsFolder(rule);
+        string claude = WorkspaceHome.Agent("claude-code"), codex = WorkspaceHome.Agent("codex");
+        Choice("Just me", rule.Length == 0, () => string.Empty);
+        Choice("Any agent", rule == WorkspaceHome.Anyone, () => WorkspaceHome.Anyone);
+        Choice(folder ? "Agents in " + WorkspaceHome.Label(rule) : "Agents in a folder…", folder, PickAgentsFolder);
+        Choice("Only Claude Code", rule == claude, () => claude);
+        Choice("Only Codex", rule == codex, () => codex);
+        if (!folder && rule.Length > 0 && rule != WorkspaceHome.Anyone && rule != claude && rule != codex)
+            Choice("Only " + WorkspaceHome.Label(rule), true, () => rule);
+        return parent;
+    }
+
+    string? PickAgentsFolder()
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Agents working in this folder use this workspace" };
+        return dialog.ShowDialog(Window.GetWindow(this)) == true ? WorkspaceHome.Folder(dialog.FolderName) : null;
+    }
+
+    void BeginRename()
+    {
+        _renaming = true;
+        NameText.Visibility = Visibility.Collapsed;
+        RenameBox.Visibility = Visibility.Visible;
+        RenameBox.Focus();
+        RenameBox.SelectAll();
+    }
+
+    void CommitRename()
+    {
+        if (!_renaming) return;
+        _renaming = false;
+        RenameBox.Visibility = Visibility.Collapsed;
+        NameText.Visibility = Visibility.Visible;
+        string name = RenameBox.Text.Trim();
+        if (_id is not { } id || name.Length == 0) { Reload(); return; }
+        if (WorkspaceStore.Update(id, w => w with { Name = name }) is { } updated)
+        {
+            NameText.Text = updated.Name;
+            Renamed?.Invoke(id, updated.Name);
+        }
+    }
+
+    void RenameBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { CommitRename(); e.Handled = true; }
+        else if (e.Key == Key.Escape) { _renaming = false; RenameBox.Visibility = Visibility.Collapsed; NameText.Visibility = Visibility.Visible; e.Handled = true; }
+    }
+    void RenameBox_LostFocus(object sender, RoutedEventArgs e) => CommitRename();
+
+    void DeleteWorkspace(string id)
+    {
+        StoredWorkspace? workspace = WorkspaceStore.Find(id);
+        if (workspace is null) return;
+        if (MessageBox.Show(Window.GetWindow(this), $"Delete {workspace.Name} and all files inside its workspace folder?\n\n"
+                + "Its running desktop and active work will stop. This cannot be undone.",
+                "Delete workspace", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        WorkspaceRuntime.Of(id)?.Dispose();
+        WorkspaceAccessStore.Write(id, new WorkspaceAccessPolicy());
+        WorkspaceAccessStore.Withdraw(id);
+        WorkspaceStore.Delete(id);
+        Deleted?.Invoke(id);
+    }
+
+    // --- a scene's fixed content, in place of the real stores ----------------------------------
+
+    internal void LoadFixture(string name, string path, IEnumerable<(string Text, bool Working)> pills,
+        BitmapSource screen, IEnumerable<(string Time, string Prefix, string Code, BitmapSource? Thumb)> did,
+        IEnumerable<(string Name, string When)> files)
+    {
+        StopLive();
+        _fixture = true;
+        _id = null;
+        NameText.Text = name;
+        PathText.Text = path;
+        _pills.Clear();
+        foreach (var (text, working) in pills) _pills.Add(new PillInfo(text, working));
+        ScreenImage.Source = screen;
+        TakeOverLabel.Text = "Take over";
+        TakeOverButton.IsEnabled = true;
+        _did.Clear();
+        foreach (var (time, prefix, code, thumb) in did) _did.Add(new DidRow(time, prefix, code, thumb));
+        _files.Clear();
+        foreach (var (fname, when) in files) _files.Add(new FileRow(fname, when));
+    }
+
+    void StopLive()
+    {
+        StopCarryOn();
+        if (_screenTimer is not null) { _screenTimer.Stop(); _screenTimer.Tick -= ScreenTick; _screenTimer = null; }
+        if (_input is not null) { _input.OwnerActed -= RestartCarryOn; _input.Dispose(); _input = null; }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        StopLive();
+    }
+}
