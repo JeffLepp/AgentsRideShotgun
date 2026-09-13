@@ -262,6 +262,11 @@ static class SettingsScenes
                 var text = (StackPanel)grid.Children[0]!;
                 return (TextBlock)text.Children[1];
             }
+            // The corner host reports what Windows really refused when it registered at startup (a
+            // running Deskweave or the corner gate may hold a combination), so start this check from
+            // a known "nothing taken" and put the real state back at the end.
+            var realTaken = ModuleEntry.ShortcutsTaken;
+            ModuleEntry.ReportShortcuts(cornerTaken: false, pauseTaken: false);
             view.UpdateLayout();
             TextBlock pauseError = ErrorUnder(pauseControl);
             TextBlock cornerError = ErrorUnder(cornerControl);
@@ -279,6 +284,7 @@ static class SettingsScenes
             view.UpdateLayout();
             Program.Check(!pauseError.IsVisible && !cornerError.IsVisible,
                 "Both shortcut-taken errors clear once ReportShortcuts reports neither taken");
+            ModuleEntry.ReportShortcuts(realTaken.Corner, realTaken.Pause);
         }
         finally
         {

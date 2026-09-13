@@ -39,6 +39,33 @@ public static class ModuleEntry
         ShortcutsTakenChanged?.Invoke();
     }
 
+    /// <summary>The tray's "Show the corner window". The corner window shows at once and then follows
+    /// its normal fade, even when Settings has it off. Raised on the UI thread.</summary>
+    public static event Action? ShowCornerRequested;
+
+    internal static void RequestShowCorner() => ShowCornerRequested?.Invoke();
+
+    /// <summary>The tray's "Pause every agent" / "Resume every agent", and the toast's Resume link.
+    /// The corner window owns pausing; it sets <see cref="AllPaused"/>. Raised on the UI thread.</summary>
+    public static event Action? PauseAllRequested;
+
+    internal static void RequestPauseAll() => PauseAllRequested?.Invoke();
+
+    /// <summary>True while Pause every agent holds every workspace. The tray reads it for its label.</summary>
+    public static bool AllPaused
+    {
+        get => _allPaused;
+        internal set
+        {
+            if (_allPaused == value) return;
+            _allPaused = value;
+            AllPausedChanged?.Invoke();
+        }
+    }
+    static bool _allPaused;
+
+    public static event Action? AllPausedChanged;
+
     /// <summary>
     /// The module now has a background runtime, and it is one clock. Without it a mission parked for
     /// an hour only woke if the owner happened to have this app open when the hour was up, which is
