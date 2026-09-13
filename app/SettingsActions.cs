@@ -6,7 +6,6 @@ using System.Windows;
 using System.Windows.Media;
 using HiveMind.AgentWorkspaces;
 using HiveMind.Product;
-using Microsoft.Win32;
 
 namespace Deskweave;
 
@@ -14,44 +13,28 @@ namespace Deskweave;
 /// Settings rows that are built and wired to the store but stay hidden until the behavior behind
 /// them exists (WAVE1.md C.3: Settings shows only controls something already obeys). The Wave 2
 /// slice that builds that behavior turns its flag on; <see cref="AllOnForScenes"/> forces every
-/// flag on for the length of one ui-probe scene, so 05 and 06 still show their full nav and pages.
+/// flag on for the length of one ui-probe scene, so 05, 06 and 15 still show their full pages.
 /// </summary>
 internal static class SettingsFeatures
 {
-    /// <summary>Agents > Workspaces: Where agents go, Running at once, Sleep when quiet. Wave 2
-    /// slice D, when it places and counts running workspaces.</summary>
-    internal static bool AgentScheduling;
-
-    /// <summary>Agents > Remind agents to test in Deskweave. Wave 2 slice D, when it writes that line
-    /// into the agents' global instructions.</summary>
-    internal static bool RemindAgents;
-
-    /// <summary>Control > Your desktop: Agents open things on your desktop. Wave 2 slice E, when it
-    /// wires the desktop handoff the corner window's "Needs you" sheet answers.</summary>
-    internal static bool DesktopRequests;
-
-    /// <summary>Browser &amp; accounts > Agent browser: Share sign-ins across workspaces, Browser,
-    /// Open the browser early. Wave 2 slice E, when it owns the agent browser.</summary>
-    internal static bool AgentBrowser;
-
-    /// <summary>Privacy &amp; safety > Pause commands after reading a web page. Wave 2 slice E,
-    /// alongside the agent browser it pauses.</summary>
-    internal static bool PauseAfterWebPage;
-
-    /// <summary>Browser &amp; accounts > Signed in: the account list with each account's scope, Add
-    /// account and Sign out. Wave 2 slice E, when it reads the agent browser's profile and fills
-    /// <see cref="SettingsActions.Accounts"/>, <see cref="SettingsActions.AddAccount"/> and
-    /// <see cref="SettingsActions.SignOut"/>.</summary>
+    /// <summary>Accounts > Signed in: the account list with each account's scope, Add account and
+    /// Sign out - the whole Accounts category, which leaves the nav while this is off. Wave 2 slice
+    /// E, when it reads the agent browser's profile and fills <see cref="SettingsActions.Accounts"/>,
+    /// <see cref="SettingsActions.AddAccount"/> and <see cref="SettingsActions.SignOut"/>.</summary>
     internal static bool Accounts;
 
-    /// <summary>The whole Notifications page. Wave 2 slice F, when it raises the alerts these
-    /// settings would otherwise only save.</summary>
-    internal static bool Notifications;
-
-    /// <summary>History &amp; screenshots > Save screenshots, Continuous every, Keep history for.
-    /// Wave 2 slice F, when it writes screenshots and prunes history by these settings. Space used,
-    /// Clear and Open logs folder already read the real evidence store, so they stay shown.</summary>
+    /// <summary>History &amp; privacy > Screenshots > Save screenshots. Wave 2 slice F, when it
+    /// writes screenshots by this setting. Storage, Clear and Delete all data already read the real
+    /// evidence store, so they stay shown either way.</summary>
     internal static bool History;
+
+    /// <summary>History &amp; privacy > Storage > Agent browser: Deskweave has no reliable way to
+    /// measure the agent browser profile yet. Wave 2 slice E, alongside the account list above.</summary>
+    internal static bool BrowserData;
+
+    /// <summary>History &amp; privacy > Storage > Made by agents in your projects: Deskweave has no
+    /// reliable way to find a workspace's project folder yet. Wave 2 slice F.</summary>
+    internal static bool ProjectFiles;
 
     /// <summary>Turns every flag above on, for the length of one <c>using</c> block, and puts each
     /// back the way it was on <see cref="IDisposable.Dispose"/>. A scene builds its page inside the
@@ -60,9 +43,9 @@ internal static class SettingsFeatures
     /// the flags go back to their real, mostly-off defaults.</summary>
     internal static IDisposable AllOnForScenes()
     {
-        var was = (AgentScheduling, RemindAgents, DesktopRequests, AgentBrowser, PauseAfterWebPage, Accounts, Notifications, History);
-        AgentScheduling = RemindAgents = DesktopRequests = AgentBrowser = PauseAfterWebPage = Accounts = Notifications = History = true;
-        return new Scope(() => (AgentScheduling, RemindAgents, DesktopRequests, AgentBrowser, PauseAfterWebPage, Accounts, Notifications, History) = was);
+        var was = (Accounts, History, BrowserData, ProjectFiles);
+        Accounts = History = BrowserData = ProjectFiles = true;
+        return new Scope(() => (Accounts, History, BrowserData, ProjectFiles) = was);
     }
 
     sealed class Scope(Action restore) : IDisposable
@@ -80,10 +63,47 @@ internal sealed record SettingsAccount(string Site, string Name, Color Tile)
     internal string Key => Site + "|" + Name;
 }
 
+/// <summary>One project workspace's own files, shown under "Made by agents in your projects"
+/// (reference 15) while <see cref="SettingsFeatures.ProjectFiles"/> is on. <see cref="Bytes"/> is
+/// null until Wave 2 can measure a real project folder; a scene supplies fixture rows instead.</summary>
+internal sealed record ProjectStorageEntry(string Name, string Path, long? Bytes);
+
+/// <summary>One kind of data Deskweave keeps, shown as a row in the Storage group (reference 15) and
+/// a segment of its meter, in this order. <see cref="Measure"/> is null-safe: null means the size is
+/// not known yet, drawn as a placeholder dash and left out of the total and the meter. <see cref="Clear"/>
+/// is a field on <see cref="SettingsActions"/>, so the gate can swap it for a harmless stand-in.</summary>
+internal sealed record StorageKind(string Label, string? Hint, string ClearNoun, Func<long?> Measure,
+    Func<bool> Visible, Func<bool> CanClear, string? DisabledTooltip, Action Clear,
+    string MeterBrush, double MeterOpacity);
+
+/// <summary>The Storage group's model (WAVE1B.md C.5): the four kinds Deskweave can size today, in
+/// meter order, and the per-project rows below them.</summary>
+internal static class SettingsStorage
+{
+    internal static IReadOnlyList<StorageKind> Kinds() =>
+    [
+        new("Screenshots and history", "Kept for 7 days", "screenshots and history",
+            () => SettingsActions.HistoryBytes(), () => true, () => true, null,
+            SettingsActions.ClearHistory, "AccentBrush", 1.0),
+        new("Agent browser", "Clearing signs agents out of every account", "agent browser data",
+            SettingsActions.BrowserDataBytes, () => SettingsFeatures.BrowserData, () => true, null,
+            SettingsActions.ClearBrowserData, "AccentBrush", 0.5),
+        new("Scratch files", null, "Scratch files",
+            () => SettingsActions.ScratchBytes(), () => true, () => !SettingsActions.ScratchRunning(), "Scratch is in use",
+            SettingsActions.ClearScratch, "FaintInkBrush", 1.0),
+        new("Logs", null, "logs",
+            () => SettingsActions.LogsBytes(), () => true, () => true, null,
+            SettingsActions.ClearLogs, "AsleepBrush", 1.0),
+    ];
+
+    internal static IReadOnlyList<ProjectStorageEntry> Projects() => SettingsActions.Projects();
+}
+
 /// <summary>
 /// What Settings does outside its own view: the Run key, agent configurations, the clipboard,
-/// Explorer, the browsers on this PC and deleting Deskweave's data. Each is a field so the UI gate
-/// can stand in for it, and nothing the gate runs reaches the owner's registry, agents or files.
+/// Explorer, deleting Deskweave's data, and measuring and clearing what it keeps. Each is a field so
+/// the UI gate can stand in for it, and nothing the gate runs reaches the owner's registry, agents,
+/// real files or a real quit.
 /// </summary>
 internal static class SettingsActions
 {
@@ -107,11 +127,13 @@ internal static class SettingsActions
         Process.Start(explorer)?.Dispose();
     };
 
-    internal static Func<IReadOnlyList<BrowserChoice>> InstalledBrowsers = FindBrowsers;
-
     internal static Func<IReadOnlyList<SettingsAccount>> Accounts = () => [];
     internal static Action? AddAccount;
     internal static Action<SettingsAccount>? SignOut;
+
+    /// <summary>Made by agents in your projects (Wave 2 slice F fills this in with real project
+    /// folders); a scene overrides it with fixture rows.</summary>
+    internal static Func<IReadOnlyList<ProjectStorageEntry>> Projects = () => [];
 
     internal static Action<IReadOnlyList<string>> DeleteAllData = DeleteEverything;
 
@@ -123,20 +145,24 @@ internal static class SettingsActions
     internal static string SetupText() => JsonSerializer.Serialize(WorkspaceConnections.AppConfiguration,
         new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
+    // --- Storage: sizes and clears (WAVE1B.md C.5) ------------------------------------------------
+
     /// <summary>Bytes of history: the step log and screenshots each workspace keeps in its evidence
-    /// folder (WorkspaceEvidence).</summary>
+    /// folder (WorkspaceEvidence). Read-only, so it needs no seam of its own.</summary>
     internal static long HistoryBytes()
     {
         long total = 0;
         foreach (string file in HistoryFiles())
-            try { total += new FileInfo(file).Length; }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            total += FileBytes(file);
         return total;
     }
 
-    /// <summary>Deletes the history files but keeps their folders, so a workspace that is running
-    /// goes on writing its log and screenshots where it was.</summary>
-    internal static void ClearHistory()
+    /// <summary>Clears the screenshots and step logs kept for every workspace, but keeps their
+    /// folders, so a workspace that is running goes on writing its log and screenshots where it was.
+    /// A field, so the gate can swap it for a harmless stand-in.</summary>
+    internal static Action ClearHistory = ClearHistoryReal;
+
+    static void ClearHistoryReal()
     {
         foreach (string file in HistoryFiles())
             try { File.Delete(file); }
@@ -159,35 +185,107 @@ internal static class SettingsActions
         return files;
     }
 
-    // The same places WorkspaceBrowser looks, one browser at a time: its App Paths entry, then the
-    // folders each installer uses.
-    static IReadOnlyList<BrowserChoice> FindBrowsers()
+    /// <summary>Deskweave has no reliable source for the agent browser profile's size yet (Wave 2
+    /// slice E); a scene overrides this with a fixture number.</summary>
+    internal static Func<long?> BrowserDataBytes = () => null;
+
+    /// <summary>A field, so the gate can swap it for a harmless stand-in; Wave 2 slice E fills in the
+    /// real clear once it owns the agent browser.</summary>
+    internal static Action ClearBrowserData = () => { };
+
+    // The Scratch workspace's own folder holds its sandbox redirects (appdata, local, temp,
+    // chrome-profile), its evidence (already counted above) and its workspace.json record, alongside
+    // whatever files the owner or an agent actually left in it. Only that last part is "Scratch
+    // files" - the rest is either machine state nobody asked to keep or counted under a different row.
+    static readonly string[] ScratchSkip = ["appdata", "local", "temp", "chrome-profile", "evidence", "last-frame.png", "workspace.json"];
+
+    internal static long ScratchBytes()
     {
-        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string files = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        string files86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-        var found = new List<BrowserChoice>(2);
-        if (Installed("chrome.exe", Path.Combine(files, "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(files86, "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(local, "Google", "Chrome", "Application", "chrome.exe")))
-            found.Add(BrowserChoice.Chrome);
-        if (Installed("msedge.exe", Path.Combine(files86, "Microsoft", "Edge", "Application", "msedge.exe"),
-            Path.Combine(files, "Microsoft", "Edge", "Application", "msedge.exe")))
-            found.Add(BrowserChoice.Edge);
-        return found;
+        string? folder = ScratchFolder();
+        if (folder is null) return 0;
+        long total = 0;
+        foreach (string entry in SafeEntries(folder))
+            if (!ScratchSkip.Contains(Path.GetFileName(entry), StringComparer.OrdinalIgnoreCase))
+                total += EntryBytes(entry);
+        return total;
     }
 
-    static bool Installed(string exe, params string[] folders)
+    internal static bool ScratchRunning() =>
+        ScratchWorkspace() is { } scratch && WorkspaceRuntime.Of(scratch.Id) is not null;
+
+    /// <summary>A field, so the gate can swap it for a harmless stand-in.</summary>
+    internal static Action ClearScratch = ClearScratchReal;
+
+    static void ClearScratchReal()
     {
-        foreach (RegistryKey root in new[] { Registry.CurrentUser, Registry.LocalMachine })
-            try
-            {
-                using RegistryKey? key = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + exe);
-                if (key?.GetValue(null) is string path && File.Exists(path.Trim('"'))) return true;
-            }
-            catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException) { }
-        return folders.Any(File.Exists);
+        string? folder = ScratchFolder();
+        if (folder is null) return;
+        foreach (string entry in SafeEntries(folder).ToArray())
+            if (!ScratchSkip.Contains(Path.GetFileName(entry), StringComparer.OrdinalIgnoreCase))
+                RemoveEntry(entry);
     }
+
+    static StoredWorkspace? ScratchWorkspace() => WorkspaceStore.All().FirstOrDefault(w => w.Name == "Scratch");
+
+    static string? ScratchFolder()
+    {
+        StoredWorkspace? scratch = ScratchWorkspace();
+        return scratch is null ? null : WorkspaceStore.FolderForDesktop(scratch.Id);
+    }
+
+    internal static long LogsBytes() => EntryBytes(ProductContext.Local("logs"));
+
+    /// <summary>A field, so the gate can swap it for a harmless stand-in.</summary>
+    internal static Action ClearLogs = ClearLogsReal;
+
+    static void ClearLogsReal()
+    {
+        string folder = ProductContext.Local("logs");
+        foreach (string entry in SafeEntries(folder).ToArray())
+            RemoveEntry(entry);
+    }
+
+    /// <summary>Under 1 MB in KB, under 1 GB in MB with no decimals, else GB with one decimal
+    /// (WAVE1B.md C.5).</summary>
+    internal static string FormatStorageBytes(long bytes)
+    {
+        const long Kb = 1024, Mb = Kb * 1024, Gb = Mb * 1024;
+        if (bytes < Mb) return Math.Round(bytes / (double)Kb, MidpointRounding.AwayFromZero).ToString("0") + " KB";
+        if (bytes < Gb) return Math.Round(bytes / (double)Mb, MidpointRounding.AwayFromZero).ToString("0") + " MB";
+        return (bytes / (double)Gb).ToString("0.0") + " GB";
+    }
+
+    static IEnumerable<string> SafeEntries(string folder)
+    {
+        try { return Directory.Exists(folder) ? Directory.EnumerateFileSystemEntries(folder) : []; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    static long FileBytes(string file)
+    {
+        try { return new FileInfo(file).Length; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
+    }
+
+    /// <summary>The recursive byte count of one file or folder. Never throws: a folder Windows will
+    /// not let Deskweave read counts as empty rather than failing the whole total.</summary>
+    static long EntryBytes(string entry)
+    {
+        try
+        {
+            if (Directory.Exists(entry))
+            {
+                long total = 0;
+                foreach (string file in Directory.EnumerateFiles(entry, "*", SearchOption.AllDirectories))
+                    total += FileBytes(file);
+                return total;
+            }
+            return File.Exists(entry) ? new FileInfo(entry).Length : 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
+    }
+
+    // --- Deleting everything --------------------------------------------------------------------
 
     static void DeleteEverything(IReadOnlyList<string> folders)
     {
@@ -209,19 +307,25 @@ internal static class SettingsActions
         foreach (string entry in Directory.EnumerateFileSystemEntries(folder).ToArray())
         {
             if (program is not null && program.StartsWith(entry + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
-            // A process that has only just stopped can hold a file for a moment.
-            for (int attempt = 0; attempt < 5; attempt++)
-            {
-                try
-                {
-                    if (Directory.Exists(entry)) Directory.Delete(entry, true);
-                    else File.Delete(entry);
-                    break;
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Thread.Sleep(200); }
-            }
+            RemoveEntry(entry);
         }
         try { Directory.Delete(folder); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Removes one file or folder, retrying briefly: a process that has only just stopped
+    /// can still hold a file open for a moment.</summary>
+    static void RemoveEntry(string entry)
+    {
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(entry)) Directory.Delete(entry, true);
+                else if (File.Exists(entry)) File.Delete(entry);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Thread.Sleep(200); }
+        }
     }
 }

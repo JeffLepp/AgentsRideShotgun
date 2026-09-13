@@ -15,20 +15,33 @@ public partial class SettingsView : UserControl
 {
     static readonly Dictionary<string, string> Titles = new(StringComparer.Ordinal)
     {
-        ["general"] = "General", ["agents"] = "Agents", ["control"] = "Control", ["browser"] = "Browser & accounts",
-        ["corner"] = "Corner window", ["alerts"] = "Notifications", ["history"] = "History & screenshots",
-        ["perf"] = "Performance", ["privacy"] = "Privacy & safety", ["about"] = "About",
+        ["general"] = "General", ["agents"] = "Agents", ["accounts"] = "Accounts", ["history"] = "History & privacy",
+    };
+
+    // Four categories replaced ten in the cut round (WAVE1B.md C.1): a caller that still passes one
+    // of the retired ids lands on the page that now holds what survived from it, rather than
+    // nowhere. Control's one surviving row (Pause every agent) moved to Agents; Corner window's one
+    // surviving row (Show the corner window) moved to General; Privacy & safety's one surviving row
+    // (Delete all Deskweave data) moved to History & privacy, alongside About's Licenses and data
+    // folder, which moved to General. Notifications and Performance kept nothing, so, like any other
+    // unknown id, they fall through to the plain default below.
+    static readonly Dictionary<string, string> LegacyCategory = new(StringComparer.Ordinal)
+    {
+        ["browser"] = "accounts",
+        ["control"] = "agents",
+        ["corner"] = "general",
+        ["privacy"] = "history",
+        ["about"] = "general",
     };
 
     // A category whose page can be entirely SettingsFeatures-gated:
     // once every row on it is hidden, the row it would show is only a bare
     // card, so the category itself leaves the nav until the flag it names turns on. History &
-    // screenshots is not here: Space used, Clear and Open logs folder always show, so its page and
-    // nav row are never empty.
+    // privacy is not here: Save screenshots may hide, but Storage and Delete all Deskweave data
+    // always show, so its page and nav row are never empty.
     static readonly Dictionary<string, Func<bool>> CategoryGate = new(StringComparer.Ordinal)
     {
-        ["alerts"] = () => SettingsFeatures.Notifications,
-        ["browser"] = () => SettingsFeatures.Accounts || SettingsFeatures.AgentBrowser,
+        ["accounts"] = () => SettingsFeatures.Accounts,
     };
 
     readonly List<Bound> _bound = [];
@@ -78,12 +91,15 @@ public partial class SettingsView : UserControl
                 item.Visibility = on() ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>Opens a category: general, agents, control, browser, corner, alerts, history,
-    /// perf, privacy or about.</summary>
+    /// <summary>Opens a category: general, agents, accounts or history. A retired id
+    /// (<see cref="LegacyCategory"/>) opens whatever page now holds its content; any other unknown
+    /// id opens General.</summary>
     public void Show(string category)
     {
         RefreshNavAvailability();
-        string id = Titles.ContainsKey(category) ? category : "general";
+        string id = Titles.ContainsKey(category) ? category
+            : LegacyCategory.TryGetValue(category, out string? mapped) && Titles.ContainsKey(mapped) ? mapped
+            : "general";
         Category = id;
         foreach (RadioButton item in Nav.Children) if ((string)item.Tag == id) item.IsChecked = true;
         TabToChecked(Nav.Children.OfType<RadioButton>().ToList());

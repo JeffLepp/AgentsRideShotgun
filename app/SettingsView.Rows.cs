@@ -274,17 +274,22 @@ public partial class SettingsView
     }
 
     /// <summary>A destructive or slow action that asks first: the row's control starts as one button
-    /// and turns into the question with a real Yes/Cancel, never a modal dialog the gate cannot see
-    /// past.</summary>
-    static ContentControl Confirm(string label, string prompt, Action action, bool danger)
+    /// (a plain <c>DeskButton</c>, or a <c>LinkButton</c> for a Storage kind's Clear) and turns into
+    /// the question with a real Yes/Cancel, never a modal dialog the gate cannot see past. The prompt
+    /// is read lazily, at the moment of asking, so a Storage row can name the size it holds right
+    /// then rather than the one it had when the page was built. <paramref name="enabled"/> and
+    /// <paramref name="disabledTooltip"/> are Scratch's own Clear disabled while its computer runs
+    /// (WAVE1B.md C.5); every other caller leaves them null, always enabled.</summary>
+    static ContentControl Confirm(string label, Func<string> prompt, Action action, bool danger,
+        string style = "DeskButton", Func<bool>? enabled = null, string? disabledTooltip = null)
     {
         var host = new ContentControl { Focusable = false, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Right };
         void Ask()
         {
-            var text = new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap, MaxWidth = 260, TextAlignment = TextAlignment.Right };
+            var text = new TextBlock { Text = prompt(), TextWrapping = TextWrapping.Wrap, MaxWidth = 260, TextAlignment = TextAlignment.Right };
             text.SetResourceReference(StyleProperty, "RowHint");
             var yes = new Button { Content = label, Margin = new Thickness(0, 0, 8, 0) };
-            yes.SetResourceReference(StyleProperty, "DeskButton");
+            yes.SetResourceReference(StyleProperty, style);
             if (danger) yes.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "DangerInkBrush");
             yes.Click += (_, _) => action();
             var no = new Button { Content = "Cancel" };
@@ -301,9 +306,12 @@ public partial class SettingsView
         void Ready()
         {
             var button = new Button { Content = label };
-            button.SetResourceReference(StyleProperty, "DeskButton");
+            button.SetResourceReference(StyleProperty, style);
             if (danger) button.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "DangerInkBrush");
             AutomationProperties.SetName(button, label);
+            bool on = enabled?.Invoke() ?? true;
+            button.IsEnabled = on;
+            button.ToolTip = !on ? disabledTooltip : null;
             button.Click += (_, _) => Ask();
             host.Content = button;
         }
@@ -311,12 +319,30 @@ public partial class SettingsView
         return host;
     }
 
-    static string FormatBytes(long bytes)
+    /// <summary>The 6 DIP meter above the Storage rows (reference .meter): a hairline track, radius
+    /// 3, one segment per <see cref="StorageKind"/> that has a known, positive size, each as wide as
+    /// its share of the total. Rebuilt whenever the sizes change, since a WPF Grid's star columns
+    /// cannot be re-weighted any other way.</summary>
+    static Border StorageMeter(Grid segments)
     {
-        string[] units = ["B", "KB", "MB", "GB"];
-        double value = bytes;
-        int unit = 0;
-        while (value >= 1024 && unit < units.Length - 1) { value /= 1024; unit++; }
-        return (unit == 0 ? value.ToString("0") : value.ToString("0.0")) + " " + units[unit];
+        var track = new Border { Height = 6, CornerRadius = new CornerRadius(3), ClipToBounds = true, Margin = new Thickness(0, 8, 0, 0), Child = segments };
+        track.SetResourceReference(Border.BackgroundProperty, "HairlineBrush");
+        return track;
+    }
+
+    static void FillStorageMeter(Grid segments, IReadOnlyList<StorageKind> kinds, IReadOnlyList<long?> measured)
+    {
+        segments.Children.Clear();
+        segments.ColumnDefinitions.Clear();
+        int column = 0;
+        for (int i = 0; i < kinds.Count; i++)
+        {
+            if (measured[i] is not { } bytes || bytes <= 0) continue;
+            segments.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(bytes, GridUnitType.Star) });
+            var fill = new Border { Opacity = kinds[i].MeterOpacity };
+            fill.SetResourceReference(Border.BackgroundProperty, kinds[i].MeterBrush);
+            Grid.SetColumn(fill, column++);
+            segments.Children.Add(fill);
+        }
     }
 }
