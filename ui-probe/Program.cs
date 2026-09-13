@@ -238,10 +238,22 @@ static class Program
         Check(File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"Theme\": \"Dark\"") && AppearanceManager.Dark,
             "An explicit theme persists and wins over Windows after reopening");
 
-        // Each Wave 1 slice adds its behavior checks in its own Scenes.*.cs file.
-        await HubScenes.Gate();
-        await CornerScenes.Gate();
-        await SettingsScenes.Gate();
+        // Each Wave 1 slice adds its behavior checks in its own Scenes.*.cs file. A named slice is
+        // useful while repairing one checker; ordinary validation leaves it unset and runs all.
+        string? slice = Environment.GetEnvironmentVariable("DESKWEAVE_UI_GATE_SLICE")?.Trim().ToLowerInvariant();
+        if (slice is not null and not ("hub" or "corner" or "settings"))
+            throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner or settings.");
+        if (slice is null or "hub") await HubScenes.Gate();
+        if (slice is null or "corner")
+        {
+            // Corner behavior is intentionally suppressed while any hub is visible. Leave the main
+            // gate window the same way a real owner does before relying on the corner window.
+            _window.Hide();
+            await Settle();
+            Check(!ModuleEntry.HubShowing, "The integrated gate leaves the hub before exercising the corner window");
+            await CornerScenes.Gate();
+        }
+        if (slice is null or "settings") await SettingsScenes.Gate();
     }
 
     internal static MainWindow Window => _window;

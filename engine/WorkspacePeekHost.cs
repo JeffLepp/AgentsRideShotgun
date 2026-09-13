@@ -213,7 +213,7 @@ internal static class WorkspacePeekHost
         TimeSpan fade = TimeSpan.FromSeconds(5);
         bool wanted = WorkspacePeekPolicy.Wanted(_settings.CornerShow, front is not null,
             ModuleEntry.HubShowing, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade);
-        // A hotkey summon's own grace period (held or within FadeAfterSeconds of the last activity)
+        // A tray summon's own grace period (held or within the fixed fade after the last activity)
         // has ended: stop treating it as summoned, or it would keep forcing ComesAndGoes-like timing
         // on a mode (Off, say) that means something else once a later Settings change picks it up.
         if (_summoned && !held && quiet >= fade) _summoned = false;
@@ -569,7 +569,7 @@ internal static class WorkspacePeekHost
             chosen = candidate;
             break;
         }
-        ModuleEntry.ReportShortcuts(false, !held);
+        ModuleEntry.ReportPauseShortcut(!held);
         if (chosen is not null && chosen != _settings.PauseHotkey)
             AppSettingsStore.Update(s => s with { PauseHotkey = chosen });
     }

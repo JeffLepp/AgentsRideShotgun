@@ -563,7 +563,7 @@ static class CornerScenes
             WorkspacePeekHost.Start();
             await Task.Delay(300);
             Program.Check(AppSettingsStore.Current.PauseHotkey == "Ctrl+Alt+Shift+P"
-                && !ModuleEntry.ShortcutsTaken.Pause,
+                && !ModuleEntry.PauseShortcutTaken,
                 "Pause takes and saves the first free fallback when Windows refuses the stored key");
         }
         finally

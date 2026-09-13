@@ -7,15 +7,7 @@ using System.Text.Json.Serialization;
 namespace HiveMind.AgentWorkspaces;
 
 public enum ThemeChoice { FollowWindows, Light, Dark }
-public enum CloseChoice { KeepRunning, Quit }
-public enum AgentPlacement { OnePerProject, OneShared, AskMe }
-public enum ControlMode { WorkAlongside, TakeTurns, FullStop }
-public enum DesktopOpen { AskFirst, Always, Never }
-public enum BrowserChoice { Auto, Chrome, Edge }
 public enum CornerShow { ComesAndGoes, Always, Off }
-public enum CornerPosition { BottomRight, BottomLeft, TopRight, WhereILeaveIt }
-public enum CornerSize { Small, Medium, Large }
-public enum CornerClick { UseItHere, OpenWorkspace }
 public enum ScreenshotMode { KeySteps, Continuous, Off }
 public enum PreviewSmoothness { Balanced, Smooth, BatterySaver }
 
@@ -32,41 +24,21 @@ public sealed record AppSettings
     // General
     public bool StartWithWindows { get; init; } = true;
     public ThemeChoice Theme { get; init; } = ThemeChoice.FollowWindows;
-    public CloseChoice CloseButton { get; init; } = CloseChoice.KeepRunning;
     // Check for updates and Send crash reports arrive with a release channel (MVP_SPEC, out of scope).
     /// <summary>The first-launch window was answered, with Start or Skip.</summary>
     public bool FirstRunDone { get; init; }
 
     // Agents
-    public bool RemindAgents { get; init; }
-    public AgentPlacement AgentsGo { get; init; } = AgentPlacement.OnePerProject;
-    /// <summary>0 is Auto: the engine's one per 3 GB of memory, 2 to 10. Otherwise 2 to 10.</summary>
-    public int RunningAtOnce { get; init; }
-    /// <summary>0 is Never.</summary>
-    public int SleepMinutes { get; init; } = 10;
-
-    // Control
-    public ControlMode Control { get; init; } = ControlMode.TakeTurns;
-    public int CarryOnSeconds { get; init; } = 20;
-    public DesktopOpen DesktopRequests { get; init; } = DesktopOpen.AskFirst;
     /// <summary>As "Ctrl+Alt+P". Empty registers nothing.</summary>
     public string PauseHotkey { get; init; } = "Ctrl+Alt+P";
-    public string CornerHotkey { get; init; } = "Ctrl+Alt+D";
 
-    // Browser & accounts
-    public bool ShareSignIns { get; init; } = true;
-    public BrowserChoice Browser { get; init; } = BrowserChoice.Auto;
-    public bool OpenBrowserEarly { get; init; } = true;
+    // Accounts
     /// <summary>An account, as "site|name", to the one workspace id it is kept for. An account
     /// that is not listed is available to all workspaces.</summary>
     public IReadOnlyDictionary<string, string> AccountScopes { get; init; } = ReadOnlyDictionary<string, string>.Empty;
 
     // Corner window
     public CornerShow CornerShow { get; init; } = CornerShow.ComesAndGoes;
-    public CornerPosition CornerPosition { get; init; } = CornerPosition.BottomRight;
-    public CornerSize CornerSize { get; init; } = CornerSize.Small;
-    public int FadeAfterSeconds { get; init; } = 5;
-    public CornerClick CornerClick { get; init; } = CornerClick.UseItHere;
     public bool CornerPinned { get; init; }
     /// <summary>Where the owner left it and how wide he grew it, in DIPs. Null until he moves or
     /// resizes it.</summary>
@@ -74,69 +46,31 @@ public sealed record AppSettings
     public double? CornerTop { get; init; }
     public double? CornerWidth { get; init; }
 
-    // Notifications
-    public bool NotifyNeedsYou { get; init; } = true;
-    public bool NotifyTestFinished { get; init; }
-    public bool NotifyOnlyWhenCornerCannot { get; init; } = true;
-    public bool NotifySound { get; init; }
-    public bool FollowDoNotDisturb { get; init; } = true;
-
     // History & screenshots
     public ScreenshotMode Screenshots { get; init; } = ScreenshotMode.KeySteps;
-    public int ContinuousSeconds { get; init; } = 2;
-    /// <summary>0 is Forever.</summary>
-    public int KeepHistoryDays { get; init; } = 7;
-
-    // Performance
-    public WorkspacePower NewWorkspaceSpeed { get; init; } = WorkspacePower.Fast;
-    public PreviewSmoothness Smoothness { get; init; } = PreviewSmoothness.Balanced;
-    public bool PausePreviewsOnBattery { get; init; } = true;
-
-    // Privacy & safety
-    public bool PauseAfterWebPage { get; init; } = true;
-    public WorkspaceMode Restrictions { get; init; } = WorkspaceMode.Free;
 
     /// <summary>Whatever was on disk, coerced to the choices Settings actually offers.</summary>
     internal AppSettings Sane()
     {
         var d = new AppSettings();
         static T Known<T>(T value, T fallback) where T : struct, Enum => Enum.IsDefined(value) ? value : fallback;
-        static int Pick(int value, int fallback, params int[] allowed) => allowed.Contains(value) ? value : fallback;
-        // Both shortcuts are rebindable, never removable, so a broken one goes back to its default.
+        // The Pause shortcut is rebindable, never removable, so a broken one goes back to its default.
         static string Key(string? text, string fallback) => WorkspaceHotkey.Parse(text, out _, out _) ? text!.Trim() : fallback;
         static double? Finite(double? value) => value is { } v && double.IsFinite(v) ? v : null;
         return this with
         {
             Schema = 1,
             Theme = Known(Theme, d.Theme),
-            CloseButton = Known(CloseButton, d.CloseButton),
-            AgentsGo = Known(AgentsGo, d.AgentsGo),
-            RunningAtOnce = RunningAtOnce is 0 or (>= 2 and <= 10) ? RunningAtOnce : 0,
-            SleepMinutes = Pick(SleepMinutes, d.SleepMinutes, 0, 5, 10, 30),
-            Control = Known(Control, d.Control),
-            CarryOnSeconds = Pick(CarryOnSeconds, d.CarryOnSeconds, 10, 20, 30, 60),
-            DesktopRequests = Known(DesktopRequests, d.DesktopRequests),
             PauseHotkey = Key(PauseHotkey, d.PauseHotkey),
-            CornerHotkey = Key(CornerHotkey, d.CornerHotkey),
-            Browser = Known(Browser, d.Browser),
             // A copy nobody else holds, so the only way to change a scope is Update.
             AccountScopes = new ReadOnlyDictionary<string, string>((AccountScopes ?? d.AccountScopes)
                 .Where(scope => scope.Key.Length > 0 && !string.IsNullOrEmpty(scope.Value))
                 .ToDictionary(scope => scope.Key, scope => scope.Value, StringComparer.Ordinal)),
             CornerShow = Known(CornerShow, d.CornerShow),
-            CornerPosition = Known(CornerPosition, d.CornerPosition),
-            CornerSize = Known(CornerSize, d.CornerSize),
-            FadeAfterSeconds = Pick(FadeAfterSeconds, d.FadeAfterSeconds, 3, 5, 10),
-            CornerClick = Known(CornerClick, d.CornerClick),
             CornerLeft = Finite(CornerLeft),
             CornerTop = Finite(CornerTop),
             CornerWidth = Finite(CornerWidth) is { } width ? Math.Clamp(width, 220, 1600) : null,
             Screenshots = Known(Screenshots, d.Screenshots),
-            ContinuousSeconds = Pick(ContinuousSeconds, d.ContinuousSeconds, 1, 2, 5),
-            KeepHistoryDays = Pick(KeepHistoryDays, d.KeepHistoryDays, 0, 1, 7, 30),
-            NewWorkspaceSpeed = Known(NewWorkspaceSpeed, d.NewWorkspaceSpeed),
-            Smoothness = Known(Smoothness, d.Smoothness),
-            Restrictions = Known(Restrictions, d.Restrictions),
         };
     }
 }

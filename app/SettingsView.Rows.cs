@@ -174,7 +174,7 @@ public partial class SettingsView
     /// records it, so two rows on the same page can refuse each other's combination. When
     /// <paramref name="taken"/> is given, "Another app is using this shortcut." shows under the row
     /// exactly while it reports true (reference: the same style as the Start with Windows error),
-    /// following <see cref="ModuleEntry.ShortcutsTakenChanged"/>. Show() replacing the page does not
+    /// following <see cref="ModuleEntry.PauseShortcutTakenChanged"/>. Show() replacing the page does not
     /// raise this row's Unloaded - Page and this view both stay connected to the same
     /// PresentationSource throughout, so nothing here is actually removed from a live tree - so the
     /// follower is unsubscribed explicitly through <c>_cleanup</c>, the same call Show() makes before
@@ -199,14 +199,14 @@ public partial class SettingsView
             var error = Styled("Another app is using this shortcut.", "RowError");
             void RefreshError() => error.Visibility = taken() ? Visibility.Visible : Visibility.Collapsed;
             RefreshError();
-            ModuleEntry.ShortcutsTakenChanged += RefreshError;
-            _cleanup.Add(() => ModuleEntry.ShortcutsTakenChanged -= RefreshError);
+            ModuleEntry.PauseShortcutTakenChanged += RefreshError;
+            _cleanup.Add(() => ModuleEntry.PauseShortcutTakenChanged -= RefreshError);
             var stack = new StackPanel();
             stack.Children.Add(RowText(label));
             stack.Children.Add(error);
             // Belt and suspenders for the one case _cleanup does not cover: this view itself torn
             // down (not just Show() moving to another page) while this row is still the one showing.
-            stack.Unloaded += (_, _) => ModuleEntry.ShortcutsTakenChanged -= RefreshError;
+            stack.Unloaded += (_, _) => ModuleEntry.PauseShortcutTakenChanged -= RefreshError;
             text = stack;
         }
         return (Row(text, shortcut), shortcut);

@@ -47,7 +47,7 @@ public partial class SettingsView : UserControl
     readonly List<Bound> _bound = [];
     readonly List<Action<AppSettings>> _followers = [];
     // Run and cleared each time Show() replaces the page, since a control built for one page (a
-    // shortcut row following ModuleEntry.ShortcutsTakenChanged) is not guaranteed an Unloaded event
+    // shortcut row following ModuleEntry.PauseShortcutTakenChanged) is not guaranteed an Unloaded event
     // just because Page.Content moved on to a different tree - Page itself, and this view, stay
     // loaded throughout, so nothing here is ever disconnected from a live PresentationSource.
     readonly List<Action> _cleanup = [];

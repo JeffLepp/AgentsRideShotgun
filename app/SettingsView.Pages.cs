@@ -105,7 +105,7 @@ public partial class SettingsView
             : Group(Row(RowText("No supported agent found on this PC")));
 
         var pause = ShortcutRow("Pause every agent", "Pause every agent", s => s.PauseHotkey,
-            (s, v) => s with { PauseHotkey = v }, () => ModuleEntry.ShortcutsTaken.Pause);
+            (s, v) => s with { PauseHotkey = v }, () => ModuleEntry.PauseShortcutTaken);
 
         var onThisPcSection = Section("On this PC", onThisPc);
         onThisPcSection.Margin = new Thickness(0, 0, 0, 21);

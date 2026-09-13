@@ -26,17 +26,17 @@ public static class ModuleEntry
 
     public static event Action? HubShowingChanged;
 
-    /// <summary>Which of the two shortcuts Windows refused because another app holds them. The corner
-    /// window reports it after each registration, on the UI thread; Settings shows it under the shortcut.</summary>
-    internal static (bool Corner, bool Pause) ShortcutsTaken { get; private set; }
+    /// <summary>Whether Windows refused the Pause shortcut because another app holds it. The corner
+    /// host reports it after registration; Settings shows it under the shortcut.</summary>
+    internal static bool PauseShortcutTaken { get; private set; }
 
-    internal static event Action? ShortcutsTakenChanged;
+    internal static event Action? PauseShortcutTakenChanged;
 
-    internal static void ReportShortcuts(bool cornerTaken, bool pauseTaken)
+    internal static void ReportPauseShortcut(bool taken)
     {
-        if (ShortcutsTaken == (cornerTaken, pauseTaken)) return;
-        ShortcutsTaken = (cornerTaken, pauseTaken);
-        ShortcutsTakenChanged?.Invoke();
+        if (PauseShortcutTaken == taken) return;
+        PauseShortcutTaken = taken;
+        PauseShortcutTakenChanged?.Invoke();
     }
 
     /// <summary>The tray's "Show the corner window". The corner window shows at once and then follows
