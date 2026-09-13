@@ -26,6 +26,19 @@ public static class ModuleEntry
 
     public static event Action? HubShowingChanged;
 
+    /// <summary>Which of the two shortcuts Windows refused because another app holds them. The corner
+    /// window reports it after each registration, on the UI thread; Settings shows it under the shortcut.</summary>
+    internal static (bool Corner, bool Pause) ShortcutsTaken { get; private set; }
+
+    internal static event Action? ShortcutsTakenChanged;
+
+    internal static void ReportShortcuts(bool cornerTaken, bool pauseTaken)
+    {
+        if (ShortcutsTaken == (cornerTaken, pauseTaken)) return;
+        ShortcutsTaken = (cornerTaken, pauseTaken);
+        ShortcutsTakenChanged?.Invoke();
+    }
+
     /// <summary>
     /// The module now has a background runtime, and it is one clock. Without it a mission parked for
     /// an hour only woke if the owner happened to have this app open when the hour was up, which is
