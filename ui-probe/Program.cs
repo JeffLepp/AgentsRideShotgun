@@ -82,7 +82,7 @@ static class Program
         Check(WorkspaceStore.All() is [{ Name: "Scratch" }] && !WorkspaceRuntime.AnyRunning,
             "Opening the empty app creates one Scratch workspace and starts no desktop");
         Check(_window.DisplayMode == "stack" && _window.Hub.Asleep.Any(e => e.Name == "Scratch"),
-            "The hub opens on the stack, with Scratch showing under Asleep");
+            "The hub opens on the stack, with Scratch showing under Recent");
         Check(_window.FindName("EmptyState") is null && _window.FindName("WorkspaceTiles") is null
             && _window.FindName("CompactButton") is null && _window.FindName("CollapseButton") is null
             && _window.FindName("HelpButton") is null && _window.FindName("SearchBox") is null
@@ -114,16 +114,15 @@ static class Program
 
         // A workspace the engine's own router creates (brief A.7: no + button; workspaces make
         // themselves), started with the store's speed and restrictions (brief A.11).
-        AppSettings settings = AppSettingsStore.Current;
         var created = WorkspaceStore.Create("Workspace 1");
-        created = WorkspaceStore.Update(created.Id, w => w with { Power = settings.NewWorkspaceSpeed, Mode = settings.Restrictions }) ?? created;
+        created = WorkspaceStore.Update(created.Id, w => w with { Power = WorkspacePower.Fast, Mode = WorkspaceMode.Free }) ?? created;
         WorkspaceRuntime.Start(created);
         await Settle();
         Check(WorkspaceRuntime.Of(created.Id) is not null, "A new workspace starts its own computer");
         Check(_window.Hub.Working.Any(e => e.Id == created.Id), "A running workspace shows under Working on the stack");
-        Check(WorkspaceStore.Find(created.Id)!.Power == AppSettingsStore.Current.NewWorkspaceSpeed
-            && WorkspaceStore.Find(created.Id)!.Mode == AppSettingsStore.Current.Restrictions,
-            "A new workspace is created with the store's new-workspace speed and restrictions");
+        Check(WorkspaceStore.Find(created.Id)!.Power == WorkspacePower.Fast
+            && WorkspaceStore.Find(created.Id)!.Mode == WorkspaceMode.Free,
+            "An automatically created workspace starts Fast and Free");
         WorkspaceRuntime.Of(created.Id)?.Dispose();
         await Settle();
         Check(WorkspaceRuntime.Of(created.Id) is null && _window.Hub.Asleep.Any(e => e.Id == created.Id),
@@ -147,7 +146,7 @@ static class Program
         InvokePrivate(_window, "AsleepRow_Click", new Button { Tag = scratchId }, new RoutedEventArgs());
         await Settle();
         Check(_window.DisplayMode == "wide" && _window.SelectedWorkspaceId == scratchId,
-            "Clicking an asleep row also opens that workspace in the wide window");
+            "Clicking a recent row also opens that workspace in the wide window");
         _window.ShowStack();
         await Settle();
 
@@ -251,53 +250,45 @@ static class Program
 
     static void CheckSettings()
     {
-        // Written out from MVP_SPEC Surfaces 4 rather than compared with the code's own defaults.
+        // Only choices that remain visible after the cut round belong in this default claim.
         AppSettings s = AppSettingsStore.Current;
-        Check(s.StartWithWindows && s.Theme == ThemeChoice.FollowWindows && s.CloseButton == CloseChoice.KeepRunning && !s.FirstRunDone
-            && !s.RemindAgents && s.AgentsGo == AgentPlacement.OnePerProject && s.RunningAtOnce == 0 && s.SleepMinutes == 10
-            && s.Control == ControlMode.TakeTurns && s.CarryOnSeconds == 20 && s.DesktopRequests == DesktopOpen.AskFirst
-            && s.PauseHotkey == "Ctrl+Alt+P" && s.CornerHotkey == "Ctrl+Alt+D"
-            && s.ShareSignIns && s.Browser == BrowserChoice.Auto && s.OpenBrowserEarly && s.AccountScopes.Count == 0
-            && s.CornerShow == CornerShow.ComesAndGoes && s.CornerPosition == CornerPosition.BottomRight && s.CornerSize == CornerSize.Small
-            && s.FadeAfterSeconds == 5 && s.CornerClick == CornerClick.UseItHere && !s.CornerPinned
+        Check(s.StartWithWindows && s.Theme == ThemeChoice.FollowWindows && !s.FirstRunDone
+            && s.PauseHotkey == "Ctrl+Alt+P" && s.AccountScopes.Count == 0
+            && s.CornerShow == CornerShow.ComesAndGoes && !s.CornerPinned
             && s.CornerLeft is null && s.CornerTop is null && s.CornerWidth is null
-            && s.NotifyNeedsYou && !s.NotifyTestFinished && s.NotifyOnlyWhenCornerCannot && !s.NotifySound && s.FollowDoNotDisturb
-            && s.Screenshots == ScreenshotMode.KeySteps && s.ContinuousSeconds == 2 && s.KeepHistoryDays == 7
-            && s.NewWorkspaceSpeed == WorkspacePower.Fast && s.Smoothness == PreviewSmoothness.Balanced && s.PausePreviewsOnBattery
-            && s.PauseAfterWebPage && s.Restrictions == WorkspaceMode.Free,
-            "Every setting starts at the MVP spec's default");
+            && s.Screenshots == ScreenshotMode.KeySteps,
+            "Every remaining choice starts at the MVP spec's default");
         AppSettings odd = new AppSettings
         {
-            CarryOnSeconds = 7, SleepMinutes = 3, Theme = (ThemeChoice)9, PauseHotkey = "P", CornerHotkey = "",
-            RunningAtOnce = 1, KeepHistoryDays = 2, CornerWidth = double.NaN, AccountScopes = null!
+            Theme = (ThemeChoice)9, PauseHotkey = "P", CornerWidth = double.NaN, AccountScopes = null!
         }.Sane();
-        Check(odd.CarryOnSeconds == 20 && odd.SleepMinutes == 10 && odd.Theme == ThemeChoice.FollowWindows
-            && odd.PauseHotkey == "Ctrl+Alt+P" && odd.CornerHotkey == "Ctrl+Alt+D" && odd.RunningAtOnce == 0 && odd.KeepHistoryDays == 7
+        Check(odd.Theme == ThemeChoice.FollowWindows && odd.PauseHotkey == "Ctrl+Alt+P"
             && odd.CornerWidth is null && odd.AccountScopes is { Count: 0 }, "A hand-edited settings file falls back to real choices");
         Check(s.AccountScopes is not Dictionary<string, string> && AppSettingsStore.Current.AccountScopes is not Dictionary<string, string>,
             "Account scopes cannot be changed behind the store's back");
         int heard = 0;
         void Heard(AppSettings _) => heard++;
         AppSettingsStore.Changed += Heard;
-        AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 10 });
+        AppSettingsStore.Update(settings => settings with { CornerPinned = true });
         AppSettingsStore.Changed -= Heard;
-        Check(heard == 1 && AppSettingsStore.Current.FadeAfterSeconds == 10
-            && File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"FadeAfterSeconds\": 10"),
+        Check(heard == 1 && AppSettingsStore.Current.CornerPinned
+            && File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"CornerPinned\": true"),
             "A settings change is saved and announced once");
-        List<int> seen = [];
+        List<ThemeChoice> seen = [];
         void First(AppSettings s)
         {
-            seen.Add(s.FadeAfterSeconds);
-            if (s.FadeAfterSeconds == 3) AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 10 });
+            seen.Add(s.Theme);
+            if (s.Theme == ThemeChoice.Light) AppSettingsStore.Update(settings => settings with { Theme = ThemeChoice.Dark });
         }
-        void Second(AppSettings s) => seen.Add(s.FadeAfterSeconds);
+        void Second(AppSettings s) => seen.Add(s.Theme);
         AppSettingsStore.Changed += First;
         AppSettingsStore.Changed += Second;
-        AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 3 });
+        AppSettingsStore.Update(settings => settings with { Theme = ThemeChoice.Light });
         AppSettingsStore.Changed -= First;
         AppSettingsStore.Changed -= Second;
-        Check(seen is [3, 10, 10], "A listener that changes a setting leaves every listener hearing each state once, in order");
-        AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 5 });
+        Check(seen is [ThemeChoice.Light, ThemeChoice.Dark, ThemeChoice.Dark],
+            "A listener that changes a setting leaves every listener hearing each state once, in order");
+        AppSettingsStore.Update(settings => settings with { Theme = ThemeChoice.FollowWindows, CornerPinned = false });
     }
 
     static async Task RunPanelRegressions(StoredWorkspace first, StoredWorkspace second, WorkspaceRuntime firstRuntime)

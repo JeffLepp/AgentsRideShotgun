@@ -122,7 +122,7 @@
                        TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
             <!-- No Take over / Hand back (brief A.3): clicking the screen is taking over, same as the
                  corner window. -->
-            <Button x:Name="FolderButton" Grid.Column="4" Style="{StaticResource IconButton}" Click="Folder_Click"
+            <Button x:Name="FolderButton" Grid.Column="4" Style="{StaticResource IconButton}" Click="Folder_Click" Margin="0,0,10,0"
                     ToolTip="Open folder" AutomationProperties.Name="Open workspace folder">
                 <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Folder}"/>
             </Button>

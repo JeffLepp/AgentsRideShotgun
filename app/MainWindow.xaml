@@ -201,7 +201,7 @@
                     <Border Grid.Column="0" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,1,0">
                         <ScrollViewer x:Name="SidebarScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Margin="8,10,8,10">
-                                <local:TrackedText Text="Working" TextFontSize="11" Margin="2,10,2,4" TextForeground="{DynamicResource FaintInkBrush}"
+                                <local:TrackedText Text="Working" TextFontSize="11" Margin="2,7,2,7" TextForeground="{DynamicResource FaintInkBrush}"
                                                    Visibility="{Binding Items.Count, ElementName=SidebarWorkingList, Converter={StaticResource CountToVisibility}}"/>
                                 <!-- ItemContainerStyle's bottom margin (measured against reference 04's row pitch,
                                      see artifacts/cut/edge-hub.ps1): the row template alone renders a shade short

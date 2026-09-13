@@ -28,7 +28,7 @@ internal sealed class FileRow(string name, string when) { public string Name => 
 
 /// <summary>
 /// A workspace in full (reference 04): header, the live screen, "What it did" and "Files". Its own
-/// preview loop follows the same Settings > Performance rules as the stack's working cards.
+/// preview loop picks its own rate like the stack's working cards.
 /// </summary>
 public partial class WorkspaceFullView : UserControl, IDisposable
 {
