@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
-using System.Windows.Input;
 using HiveMind.AgentWorkspaces;
 
 namespace Deskweave;
@@ -25,24 +24,17 @@ public partial class SettingsView
 
     /// <summary>The label (and optional "Default" tag) over an optional muted hint, as every row's
     /// left side is built (reference .srw .t).</summary>
-    static StackPanel RowText(string label, string? hint = null, Inline? tag = null)
+    static StackPanel RowText(string label, string? hint = null)
     {
         var stack = new StackPanel();
         var head = new TextBlock();
         head.SetResourceReference(StyleProperty, "RowLabel");
         head.Inlines.Add(new Run(label));
-        if (tag is not null) head.Inlines.Add(tag);
         stack.Children.Add(head);
         if (hint is not null) stack.Children.Add(Styled(hint, "RowHint"));
         return stack;
     }
 
-    static Run DefaultTag()
-    {
-        var run = new Run(" Default");
-        run.SetResourceReference(FrameworkContentElement.StyleProperty, "DefaultTag");
-        return run;
-    }
 
     /// <summary>One row in a card (reference .srw): optional leading icon, the text, and a control
     /// on the right with an 8 DIP gap. The hairline between rows is added by <see cref="Group"/>,
@@ -85,7 +77,6 @@ public partial class SettingsView
         var card = new Border();
         card.SetResourceReference(StyleProperty, "Card");
         var stack = new StackPanel();
-        stack.PreviewKeyDown += RadioArrowKeys;
         bool any = false;
         foreach (UIElement row in rows)
         {
@@ -103,22 +94,6 @@ public partial class SettingsView
         return card;
     }
 
-    // Arrow keys move the checked choice inside whichever radio group has focus (reference .radio),
-    // the same way MoveChoice already does for the category list. Left/Right are left alone, as
-    // there too, since these are vertical lists.
-    static void RadioArrowKeys(object sender, KeyEventArgs e)
-    {
-        if (e.Key is Key.Left or Key.Right) return;
-        if (e.Key is not (Key.Up or Key.Down or Key.Home or Key.End)) return;
-        if (Keyboard.FocusedElement is not RadioButton current) return;
-        var group = new List<RadioButton>();
-        foreach (UIElement child in ((StackPanel)sender).Children)
-        {
-            UIElement row = child is Border { Child: UIElement inner } ? inner : child;
-            if (row is RadioButton radio && radio.GroupName == current.GroupName) group.Add(radio);
-        }
-        if (group.Count > 1) MoveChoice(group, e);
-    }
 
     /// <summary>A section: an optional label (with an optional action button at its right, reference
     /// .lbl .btn) over one card, 22 DIP below the section before it.</summary>
@@ -194,42 +169,6 @@ public partial class SettingsView
         return box;
     }
 
-    /// <summary>A card's worth of radio choices (reference .radio), one per row, arrow keys and Tab
-    /// already wired the way the category list works.</summary>
-    RadioButton[] RadioRows<T>(string claim, string groupName,
-        (T Value, string Label, string? Hint, bool Default)[] options,
-        Func<AppSettings, T> read, Func<AppSettings, T, AppSettings> write) where T : notnull
-    {
-        var buttons = new RadioButton[options.Length];
-        for (int i = 0; i < options.Length; i++)
-        {
-            var (value, label, hint, isDefault) = options[i];
-            var button = new RadioButton
-            {
-                GroupName = groupName,
-                Tag = value,
-                Content = RowText(label, hint, isDefault ? DefaultTag() : null),
-            };
-            button.SetResourceReference(StyleProperty, "ChoiceRadio");
-            AutomationProperties.SetName(button, label);
-            buttons[i] = button;
-        }
-        foreach (RadioButton button in buttons)
-            button.Checked += (_, _) => { if (!_following) Write(s => write(s, (T)button.Tag!)); };
-        void Show(AppSettings s)
-        {
-            T current = read(s);
-            foreach (RadioButton button in buttons) button.IsChecked = Equals(button.Tag, current);
-            TabToChecked(buttons);
-        }
-        _followers.Add(Show);
-        _bound.Add(new Bound(claim, buttons[0], options.Select(o => (object)o.Value).ToList(),
-            s => read(s), (s, v) => write(s, (T)v),
-            v => { RadioButton? match = Array.Find(buttons, b => Equals(b.Tag, v)); if (match is not null) match.IsChecked = true; },
-            () => Array.Find(buttons, b => b.IsChecked == true)?.Tag,
-            Show));
-        return buttons;
-    }
 
     /// <summary>A rebindable shortcut row (reference .key): the row and the control that shows and
     /// records it, so two rows on the same page can refuse each other's combination. When
@@ -274,19 +213,28 @@ public partial class SettingsView
     }
 
     /// <summary>A destructive or slow action that asks first: the row's control starts as one button
-    /// and turns into the question with a real Yes/Cancel, never a modal dialog the gate cannot see
-    /// past.</summary>
-    static ContentControl Confirm(string label, string prompt, Action action, bool danger)
+    /// (a plain <c>DeskButton</c>, or a <c>LinkButton</c> for a Storage kind's Clear) and turns into
+    /// the question with a real Yes/Cancel, never a modal dialog the gate cannot see past. The prompt
+    /// is read lazily, at the moment of asking, so a Storage row can name the size it holds right
+    /// then rather than the one it had when the page was built. <paramref name="enabled"/> and
+    /// <paramref name="disabledTooltip"/> are Scratch's own Clear disabled while its computer runs
+    /// (WAVE1B.md C.5); every other caller leaves them null, always enabled.</summary>
+    static ContentControl Confirm(string label, Func<string> prompt, Action action, bool danger,
+        string style = "DeskButton", Func<bool>? enabled = null, string? disabledTooltip = null)
     {
         var host = new ContentControl { Focusable = false, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Right };
         void Ask()
         {
-            var text = new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap, MaxWidth = 260, TextAlignment = TextAlignment.Right };
+            var text = new TextBlock { Text = prompt(), TextWrapping = TextWrapping.Wrap, MaxWidth = 260, TextAlignment = TextAlignment.Right };
             text.SetResourceReference(StyleProperty, "RowHint");
             var yes = new Button { Content = label, Margin = new Thickness(0, 0, 8, 0) };
-            yes.SetResourceReference(StyleProperty, "DeskButton");
+            yes.SetResourceReference(StyleProperty, style);
             if (danger) yes.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "DangerInkBrush");
-            yes.Click += (_, _) => action();
+            yes.Click += (_, _) =>
+            {
+                if (enabled?.Invoke() ?? true) action();
+                Ready();
+            };
             var no = new Button { Content = "Cancel" };
             no.SetResourceReference(StyleProperty, "DeskButton");
             no.Click += (_, _) => Ready();
@@ -301,22 +249,65 @@ public partial class SettingsView
         void Ready()
         {
             var button = new Button { Content = label };
-            button.SetResourceReference(StyleProperty, "DeskButton");
+            button.SetResourceReference(StyleProperty, style);
             if (danger) button.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "DangerInkBrush");
             AutomationProperties.SetName(button, label);
-            button.Click += (_, _) => Ask();
+            bool on = enabled?.Invoke() ?? true;
+            button.IsEnabled = on;
+            button.ToolTip = !on ? disabledTooltip : null;
+            button.Click += (_, _) =>
+            {
+                if (enabled?.Invoke() ?? true) Ask();
+                else Ready();
+            };
             host.Content = button;
         }
         Ready();
         return host;
     }
 
-    static string FormatBytes(long bytes)
+    /// <summary>The 6 DIP meter above the Storage rows (reference .meter): a hairline track, radius
+    /// 3, one segment per <see cref="StorageKind"/> that has a known, positive size, each as wide as
+    /// its share of the total. Rebuilt whenever the sizes change, since a WPF Grid's star columns
+    /// cannot be re-weighted any other way.</summary>
+    static Border StorageMeter(Grid segments)
     {
-        string[] units = ["B", "KB", "MB", "GB"];
-        double value = bytes;
-        int unit = 0;
-        while (value >= 1024 && unit < units.Length - 1) { value /= 1024; unit++; }
-        return (unit == 0 ? value.ToString("0") : value.ToString("0.0")) + " " + units[unit];
+        var track = new Border { Height = 6, CornerRadius = new CornerRadius(3), ClipToBounds = true, Margin = new Thickness(0, 10, 0, 0), Child = segments };
+        segments.SizeChanged += (_, _) => segments.Clip = new System.Windows.Media.RectangleGeometry(
+            new Rect(0, 0, segments.ActualWidth, segments.ActualHeight), 3, 3);
+        track.SetResourceReference(Border.BackgroundProperty, "HairlineBrush");
+        return track;
+    }
+
+    static void FillStorageMeter(Grid segments, IReadOnlyList<StorageKind> kinds, IReadOnlyList<long?> measured)
+    {
+        segments.Children.Clear();
+        segments.ColumnDefinitions.Clear();
+        int[] percentages = StoragePercentages(measured);
+        int column = 0;
+        for (int i = 0; i < kinds.Count; i++)
+        {
+            if (percentages[i] == 0) continue;
+            segments.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(percentages[i], GridUnitType.Star) });
+            var fill = new Border { Opacity = kinds[i].MeterOpacity };
+            fill.SetResourceReference(Border.BackgroundProperty, kinds[i].MeterBrush);
+            Grid.SetColumn(fill, column++);
+            segments.Children.Add(fill);
+        }
+    }
+
+    // Whole percentages keep the meter stable; distribute leftover points by largest remainder
+    // so equal remainders keep kind order and every nonempty meter still totals exactly 100.
+    internal static int[] StoragePercentages(IReadOnlyList<long?> measured)
+    {
+        decimal total = measured.Sum(bytes => (decimal)Math.Max(0, bytes ?? 0));
+        var result = new int[measured.Count];
+        if (total == 0) return result;
+        decimal[] shares = measured.Select(bytes => Math.Max(0, bytes ?? 0) * 100m / total).ToArray();
+        for (int i = 0; i < shares.Length; i++) result[i] = (int)decimal.Floor(shares[i]);
+        foreach (int i in Enumerable.Range(0, shares.Length)
+            .OrderByDescending(i => shares[i] - result[i]).ThenBy(i => i).Take(100 - result.Sum()))
+            result[i]++;
+        return result;
     }
 }

@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:Deskweave"
              Focusable="True" IsTabStop="False" FocusVisualStyle="{x:Null}" UseLayoutRounding="True"
+             TextOptions.TextFormattingMode="Display"
              Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource InkBrush}"
              FontFamily="{DynamicResource SkinFontFamily}" FontSize="13">
     <!-- Settings (references 05, 06): the 264 DIP category list with "Workspaces" to go back, and
@@ -122,29 +123,11 @@
                     <RadioButton Tag="agents" AutomationProperties.Name="Agents">
                         <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Agents}"/><TextBlock Style="{StaticResource NavText}" Text="Agents"/></StackPanel>
                     </RadioButton>
-                    <RadioButton Tag="control" AutomationProperties.Name="Control">
-                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Hand}"/><TextBlock Style="{StaticResource NavText}" Text="Control"/></StackPanel>
+                    <RadioButton Tag="accounts" AutomationProperties.Name="Accounts">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Globe}"/><TextBlock Style="{StaticResource NavText}" Text="Accounts"/></StackPanel>
                     </RadioButton>
-                    <RadioButton Tag="browser" AutomationProperties.Name="Browser &amp; accounts">
-                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Globe}"/><TextBlock Style="{StaticResource NavText}" Text="Browser &amp; accounts"/></StackPanel>
-                    </RadioButton>
-                    <RadioButton Tag="corner" AutomationProperties.Name="Corner window">
-                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Pip}"/><TextBlock Style="{StaticResource NavText}" Text="Corner window"/></StackPanel>
-                    </RadioButton>
-                    <RadioButton Tag="alerts" AutomationProperties.Name="Notifications">
-                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Bell}"/><TextBlock Style="{StaticResource NavText}" Text="Notifications"/></StackPanel>
-                    </RadioButton>
-                    <RadioButton Tag="history" AutomationProperties.Name="History &amp; screenshots">
-                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Clock}"/><TextBlock Style="{StaticResource NavText}" Text="History &amp; screenshots"/></StackPanel>
-                    </RadioButton>
-                    <RadioButton Tag="perf" AutomationProperties.Name="Performance">
-                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Gauge}"/><TextBlock Style="{StaticResource NavText}" Text="Performance"/></StackPanel>
-                    </RadioButton>
-                    <RadioButton Tag="privacy" AutomationProperties.Name="Privacy &amp; safety">
-                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Shield}"/><TextBlock Style="{StaticResource NavText}" Text="Privacy &amp; safety"/></StackPanel>
-                    </RadioButton>
-                    <RadioButton Tag="about" AutomationProperties.Name="About" Margin="0">
-                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Info}"/><TextBlock Style="{StaticResource NavText}" Text="About"/></StackPanel>
+                    <RadioButton Tag="history" AutomationProperties.Name="History &amp; privacy" Margin="0">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Shield}"/><TextBlock Style="{StaticResource NavText}" Text="History &amp; privacy"/></StackPanel>
                     </RadioButton>
                 </StackPanel>
             </StackPanel>

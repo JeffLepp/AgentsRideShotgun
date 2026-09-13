@@ -6,27 +6,23 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Resources;
+using System.Windows.Threading;
 using HiveMind.AgentWorkspaces;
 using HiveMind.Product;
 
 namespace Deskweave;
 
-/// <summary>Every settings page (MVP_SPEC Surfaces 4). Control and Browser &amp; accounts match the
-/// references word for word; the rest follow the same look, since no reference draws them.</summary>
+/// <summary>Every settings page (MVP_SPEC Surfaces 4, cut to four categories 2026-09-13). Agents,
+/// Accounts and the Storage group of History &amp; privacy match their references word for word; General
+/// has no reference and follows the same look.</summary>
 public partial class SettingsView
 {
     FrameworkElement Build(string id) => id switch
     {
         "general" => General(),
         "agents" => Agents(),
-        "control" => Control(),
-        "browser" => Browser(),
-        "corner" => Corner(),
-        "alerts" => Alerts(),
-        "history" => History(),
-        "perf" => Performance(),
-        "privacy" => Privacy(),
-        "about" => About(),
+        "accounts" => Accounts(),
+        "history" => HistoryPrivacy(),
         _ => General(),
     };
 
@@ -52,52 +48,76 @@ public partial class SettingsView
             new Choice(ThemeChoice.Dark, "Dark"),
         ], s => s.Theme, (s, v) => s with { Theme = v });
 
-        var close = Dropdown("Close button", [
-            new Choice(CloseChoice.KeepRunning, "Keep running in the tray"),
-            new Choice(CloseChoice.Quit, "Quit"),
-        ], s => s.CloseButton, (s, v) => s with { CloseButton = v });
+        // On: CornerShow.ComesAndGoes (it comes and goes on its own). Off: CornerShow.Off (it never
+        // appears on its own; the tray still shows it, per ModuleEntry.ShowCornerRequested).
+        var cornerShow = Toggle("Show the corner window", s => s.CornerShow != CornerShow.Off,
+            (s, v) => s with { CornerShow = v ? CornerShow.ComesAndGoes : CornerShow.Off });
 
-        return Section(null, Group(
-            Row(startupText, startup),
-            Row(RowText("Theme"), theme),
-            Row(RowText("Close button"), close)));
-    }
+        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+        var versionRow = Row(RowText("Version"), Styled(version, "RowHint"));
 
-    FrameworkElement Agents()
-    {
-        var claude = AgentRow(WorkspaceConnections.AgentApp.ClaudeCode, "Claude Code", "C", Color.FromRgb(0x8A, 0x5A, 0x44));
-        var codex = AgentRow(WorkspaceConnections.AgentApp.Codex, "Codex", "X", Color.FromRgb(0x2B, 0x2F, 0x37));
-        var another = AnotherAgentRow();
-        var remind = RemindAgentsRow();
+        var licenseBody = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, Margin = new Thickness(14, 0, 14, 12) };
+        licenseBody.SetResourceReference(StyleProperty, "RowHint");
+        var licenses = new Button { Content = "Licenses" };
+        licenses.SetResourceReference(StyleProperty, "RowButton");
+        AutomationProperties.SetName(licenses, "Licenses");
+        licenses.Click += (_, _) =>
+        {
+            if (licenseBody.Visibility == Visibility.Visible) { licenseBody.Visibility = Visibility.Collapsed; return; }
+            if (licenseBody.Text.Length == 0) licenseBody.Text = ReadNotices();
+            licenseBody.Visibility = Visibility.Visible;
+        };
+        var licenseStack = new StackPanel();
+        licenseStack.Children.Add(licenses);
+        licenseStack.Children.Add(licenseBody);
 
-        var placement = Dropdown("Where agents go", [
-            new Choice(AgentPlacement.OnePerProject, "One per project"),
-            new Choice(AgentPlacement.OneShared, "One shared workspace"),
-            new Choice(AgentPlacement.AskMe, "Ask me"),
-        ], s => s.AgentsGo, (s, v) => s with { AgentsGo = v });
-
-        var running = new List<Choice> { new(0, "Auto") };
-        for (int count = 2; count <= 10; count++) running.Add(new Choice(count, count.ToString()));
-        var runningAtOnce = Dropdown("Running at once", running, s => s.RunningAtOnce, (s, v) => s with { RunningAtOnce = v });
-
-        var sleep = Dropdown("Sleep when quiet", [
-            new Choice(5, "5 minutes"), new Choice(10, "10 minutes"), new Choice(30, "30 minutes"), new Choice(0, "Never"),
-        ], s => s.SleepMinutes, (s, v) => s with { SleepMinutes = v });
-
-        var workspaces = Section("Workspaces", Group(
-            Row(RowText("Where agents go"), placement),
-            Row(RowText("Running at once"), runningAtOnce),
-            Row(RowText("Sleep when quiet"), sleep)));
-        // Every row in this group saves a value nothing reads yet (WAVE1.md C.3); the whole group,
-        // its label included, hides until Wave 2 slice D turns SettingsFeatures.AgentScheduling on.
-        workspaces.Visibility = SettingsFeatures.AgentScheduling ? Visibility.Visible : Visibility.Collapsed;
+        var openData = new Button { Content = "Open Deskweave data" };
+        openData.SetResourceReference(StyleProperty, "RowButton");
+        AutomationProperties.SetName(openData, "Open Deskweave data");
+        openData.Click += (_, _) => SettingsActions.OpenFolder(ProductContext.LocalRoot);
 
         return new StackPanel
         {
             Children =
             {
-                Section(null, Group(claude, codex, another, remind)),
-                workspaces,
+                Section(null, Group(
+                    Row(startupText, startup),
+                    Row(RowText("Theme"), theme),
+                    Row(RowText("Show the corner window"), cornerShow))),
+                Section(null, Group(versionRow, licenseStack, openData)),
+            },
+        };
+    }
+
+    FrameworkElement Agents()
+    {
+        (WorkspaceConnections.AgentApp App, string Name, string Letter, Color Tile)[] candidates =
+        [
+            (WorkspaceConnections.AgentApp.ClaudeCode, "Claude Code", "C", Color.FromRgb(0x8A, 0x5A, 0x44)),
+            (WorkspaceConnections.AgentApp.Codex, "Codex", "X", Color.FromRgb(0x2B, 0x2F, 0x37)),
+        ];
+        UIElement[] installedRows = candidates
+            .Where(a => SettingsActions.ReadAgent(a.App) != AgentState.NotInstalled)
+            .Select(a => (UIElement)AgentRow(a.App, a.Name, a.Letter, a.Tile))
+            .ToArray();
+        Border onThisPc = installedRows.Length > 0
+            ? Group(installedRows)
+            : Group(Row(RowText("No supported agent found on this PC")));
+
+        var pause = ShortcutRow("Pause every agent", "Pause every agent", s => s.PauseHotkey,
+            (s, v) => s with { PauseHotkey = v }, () => ModuleEntry.ShortcutsTaken.Pause);
+
+        var onThisPcSection = Section("On this PC", onThisPc);
+        onThisPcSection.Margin = new Thickness(0, 0, 0, 21);
+        var anotherAppSection = Section("Another app", Group(AnotherAgentRow()));
+        anotherAppSection.Margin = new Thickness(0, 0, 0, 21);
+        return new StackPanel
+        {
+            Children =
+            {
+                onThisPcSection,
+                anotherAppSection,
+                Section("Shortcut", Group(pause.Row)),
             },
         };
     }
@@ -154,59 +174,10 @@ public partial class SettingsView
         var button = new Button { Content = "Copy setup" };
         button.SetResourceReference(StyleProperty, "DeskButton");
         button.Click += (_, _) => SettingsActions.CopyText(SettingsActions.SetupText());
-        return Row(RowText("Another agent"), button);
+        return Row(RowText("Connect another agent", "For an agent Deskweave can't connect by itself"), button);
     }
 
-    FrameworkElement RemindAgentsRow()
-    {
-        var toggle = Toggle("Remind agents to test in Deskweave", s => s.RemindAgents, (s, v) => s with { RemindAgents = v });
-        var row = Row(RowText("Remind agents to test in Deskweave", "Adds one line to your agents' instructions"), toggle);
-        row.Visibility = SettingsFeatures.RemindAgents ? Visibility.Visible : Visibility.Collapsed;
-        return row;
-    }
-
-    FrameworkElement Control()
-    {
-        var choices = RadioRows("Control mode", "ControlMode",
-        [
-            (ControlMode.WorkAlongside, "Work alongside", "You and the agent both act. It re-checks the screen after you've touched it.", false),
-            (ControlMode.TakeTurns, "Take turns", "The agent waits while you're using it, then carries on where it was.", true),
-            (ControlMode.FullStop, "Full stop", "The agent is frozen until you hand it back.", false),
-        ], s => s.Control, (s, v) => s with { Control = v });
-
-        var carryOn = Dropdown("Carry on after you stop for", [
-            new Choice(10, "10 seconds"), new Choice(20, "20 seconds"), new Choice(30, "30 seconds"), new Choice(60, "60 seconds"),
-        ], s => s.CarryOnSeconds, (s, v) => s with { CarryOnSeconds = v });
-        var carryOnRow = Row(RowText("Carry on after you stop for"), carryOn);
-
-        var desktop = Dropdown("Agents open things on your desktop", [
-            new Choice(DesktopOpen.AskFirst, "Ask me first"), new Choice(DesktopOpen.Always, "Always"), new Choice(DesktopOpen.Never, "Never"),
-        ], s => s.DesktopRequests, (s, v) => s with { DesktopRequests = v });
-        var desktopRow = Row(RowText("Agents open things on your desktop", "A file or a link the agent wants you to see"), desktop);
-        // Saves a value the corner window's "Needs you" sheet does not read yet; the section (its
-        // label included) hides until Wave 2 slice E turns SettingsFeatures.DesktopRequests on.
-        var yourDesktop = Section("Your desktop", Group(desktopRow));
-        yourDesktop.Visibility = SettingsFeatures.DesktopRequests ? Visibility.Visible : Visibility.Collapsed;
-
-        var pause = ShortcutRow("Pause every agent", "Pause every agent", s => s.PauseHotkey, (s, v) => s with { PauseHotkey = v },
-            () => ModuleEntry.ShortcutsTaken.Pause);
-        var corner = ShortcutRow("Show the corner window", "Show the corner window", s => s.CornerHotkey, (s, v) => s with { CornerHotkey = v },
-            () => ModuleEntry.ShortcutsTaken.Corner);
-        pause.Control.Accepts = keys => !string.Equals(keys, corner.Control.Keys, StringComparison.OrdinalIgnoreCase);
-        corner.Control.Accepts = keys => !string.Equals(keys, pause.Control.Keys, StringComparison.OrdinalIgnoreCase);
-
-        return new StackPanel
-        {
-            Children =
-            {
-                Section("When you use a workspace", Group([.. choices, carryOnRow])),
-                yourDesktop,
-                Section("Shortcuts", Group(pause.Row, corner.Row)),
-            },
-        };
-    }
-
-    FrameworkElement Browser()
+    FrameworkElement Accounts()
     {
         var banner = new ContentControl();
         banner.SetResourceReference(StyleProperty, "Banner");
@@ -214,26 +185,16 @@ public partial class SettingsView
         // wraps to two lines and any shortfall in the per-line height doubles up, shrinking the banner.
         var bannerText = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18.85, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         bannerText.Inlines.Add(new Run("Local only.") { FontWeight = FontWeights.SemiBold });
-        bannerText.Inlines.Add(new Run(" Sign-ins live in Deskweave's own browser, on this PC. Nothing is uploaded, and your own Chrome is never touched."));
+        bannerText.Inlines.Add(new Run(" Sign-ins live in Deskweave's own browser, on this PC, and your own Chrome is never touched."));
         banner.Content = bannerText;
 
         var accountRows = SettingsFeatures.Accounts
             ? SettingsActions.Accounts().Select(AccountRow).Cast<UIElement>().ToArray()
             : [];
         var signedIn = Section("Signed in", Group(accountRows), AddAccountButton());
+        // The account list needs Wave 2 slice E; with it off there is nothing else on this page
+        // besides the banner, so the whole category leaves the nav (SettingsView.RefreshNavAvailability).
         signedIn.Visibility = SettingsFeatures.Accounts ? Visibility.Visible : Visibility.Collapsed;
-
-        var share = Toggle("Share sign-ins across workspaces", s => s.ShareSignIns, (s, v) => s with { ShareSignIns = v });
-        var shareRow = Row(RowText("Share sign-ins across workspaces", "Sign in once, every project can use it"), share);
-        var browserRow = Row(RowText("Browser"), BrowserDropdown());
-        var openEarly = Toggle("Open the browser early", s => s.OpenBrowserEarly, (s, v) => s with { OpenBrowserEarly = v });
-        var openEarlyRow = Row(RowText("Open the browser early", "Ready the moment an agent needs it"), openEarly);
-        // Every row here saves a value the agent browser does not read yet; the section (its label
-        // included) hides until Wave 2 slice E turns SettingsFeatures.AgentBrowser on. With it and
-        // Accounts both off, only the banner above is left, which is why the category itself leaves
-        // the nav (SettingsView.RefreshNavAvailability).
-        var agentBrowser = Section("Agent browser", Group(shareRow, browserRow, openEarlyRow));
-        agentBrowser.Visibility = SettingsFeatures.AgentBrowser ? Visibility.Visible : Visibility.Collapsed;
 
         return new StackPanel
         {
@@ -241,7 +202,6 @@ public partial class SettingsView
             {
                 new StackPanel { Margin = new Thickness(0, 0, 0, 22), Children = { banner } },
                 signedIn,
-                agentBrowser,
             },
         };
     }
@@ -255,7 +215,7 @@ public partial class SettingsView
         var content = new StackPanel { Orientation = Orientation.Horizontal };
         content.Children.Add(icon);
         content.Children.Add(new TextBlock { Text = "Add account", VerticalAlignment = VerticalAlignment.Center });
-        var button = new Button { Content = content };
+        var button = new Button { Content = content, MinWidth = 113 };
         button.SetResourceReference(StyleProperty, "DeskButton");
         AutomationProperties.SetName(button, "Add account");
         button.Click += (_, _) => SettingsActions.AddAccount?.Invoke();
@@ -291,7 +251,7 @@ public partial class SettingsView
                 return s with { AccountScopes = scopes };
             });
         };
-        var signOut = new Button { Content = "Sign out", Margin = new Thickness(8, 0, 0, 0) };
+        var signOut = new Button { Content = "Sign out", Margin = new Thickness(9, 0, 0, 0) };
         signOut.SetResourceReference(StyleProperty, "LinkButton");
         signOut.Click += (_, _) => SettingsActions.SignOut?.Invoke(account);
         var controls = new StackPanel { Orientation = Orientation.Horizontal };
@@ -300,201 +260,104 @@ public partial class SettingsView
         return Row(text, controls, tile);
     }
 
-    ComboBox BrowserDropdown()
-    {
-        var installed = SettingsActions.InstalledBrowsers();
-        var choices = installed.Select(b => new Choice(b, b == BrowserChoice.Chrome ? "Chrome" : "Edge")).ToList();
-        var box = new ComboBox { ItemsSource = choices, IsEnabled = choices.Count > 0 };
-        box.SetResourceReference(StyleProperty, "Dropdown");
-        AutomationProperties.SetName(box, "Browser");
-        BrowserChoice Effective(AppSettings s) => choices.Any(c => (BrowserChoice)c.Value == s.Browser)
-            ? s.Browser : choices.Count > 0 ? (BrowserChoice)choices[0].Value : BrowserChoice.Auto;
-        void Show(AppSettings s) => box.SelectedItem = choices.FirstOrDefault(c => (BrowserChoice)c.Value == Effective(s));
-        box.SelectionChanged += (_, _) =>
-        {
-            if (_following || box.SelectedItem is not Choice choice) return;
-            Write(s => s with { Browser = (BrowserChoice)choice.Value });
-        };
-        _followers.Add(Show);
-        if (choices.Count > 0)
-            _bound.Add(new Bound("Browser", box, choices.Select(c => c.Value).ToList(),
-                s => Effective(s), (s, v) => s with { Browser = (BrowserChoice)v },
-                v => box.SelectedItem = choices.FirstOrDefault(c => Equals(c.Value, v)),
-                () => (box.SelectedItem as Choice)?.Value, Show));
-        return box;
-    }
-
-    FrameworkElement Corner()
-    {
-        var show = Dropdown("Show", [
-            new Choice(CornerShow.ComesAndGoes, "Comes and goes"), new Choice(CornerShow.Always, "Always"), new Choice(CornerShow.Off, "Off"),
-        ], s => s.CornerShow, (s, v) => s with { CornerShow = v });
-        var position = Dropdown("Position", [
-            new Choice(CornerPosition.BottomRight, "Bottom right"), new Choice(CornerPosition.BottomLeft, "Bottom left"),
-            new Choice(CornerPosition.TopRight, "Top right"), new Choice(CornerPosition.WhereILeaveIt, "Where I leave it"),
-        ], s => s.CornerPosition, (s, v) => s with { CornerPosition = v });
-        var size = Dropdown("Size", [
-            new Choice(CornerSize.Small, "Small"), new Choice(CornerSize.Medium, "Medium"), new Choice(CornerSize.Large, "Large"),
-        ], s => s.CornerSize, (s, v) => s with { CornerSize = v });
-        var fade = Dropdown("Fade out after", [
-            new Choice(3, "3 seconds"), new Choice(5, "5 seconds"), new Choice(10, "10 seconds"),
-        ], s => s.FadeAfterSeconds, (s, v) => s with { FadeAfterSeconds = v });
-        var click = Dropdown("Clicking it", [
-            new Choice(CornerClick.UseItHere, "Use it right there"), new Choice(CornerClick.OpenWorkspace, "Open the workspace"),
-        ], s => s.CornerClick, (s, v) => s with { CornerClick = v });
-
-        return Section(null, Group(
-            Row(RowText("Show"), show),
-            Row(RowText("Position"), position),
-            Row(RowText("Size"), size),
-            Row(RowText("Fade out after"), fade),
-            Row(RowText("Clicking it"), click)));
-    }
-
-    FrameworkElement Alerts()
-    {
-        var needsYou = Toggle("When an agent needs you", s => s.NotifyNeedsYou, (s, v) => s with { NotifyNeedsYou = v });
-        var testFinished = Toggle("When a test finishes", s => s.NotifyTestFinished, (s, v) => s with { NotifyTestFinished = v });
-        var onlyHidden = Toggle("Only when the corner window can't show it", s => s.NotifyOnlyWhenCornerCannot, (s, v) => s with { NotifyOnlyWhenCornerCannot = v });
-        var sound = Toggle("Sound", s => s.NotifySound, (s, v) => s with { NotifySound = v });
-        var dnd = Toggle("Follow Windows Do not disturb", s => s.FollowDoNotDisturb, (s, v) => s with { FollowDoNotDisturb = v });
-
-        // Every control on this page saves a value nothing raises a notification from yet; the whole
-        // page hides until Wave 2 slice F turns SettingsFeatures.Notifications on, and with it the
-        // category leaves the nav (SettingsView.RefreshNavAvailability).
-        var section = Section(null, Group(
-            Row(RowText("When an agent needs you"), needsYou),
-            Row(RowText("When a test finishes"), testFinished),
-            Row(RowText("Only when the corner window can't show it", "Hidden, off, or a full-screen app"), onlyHidden),
-            Row(RowText("Sound"), sound),
-            Row(RowText("Follow Windows Do not disturb"), dnd)));
-        section.Visibility = SettingsFeatures.Notifications ? Visibility.Visible : Visibility.Collapsed;
-        return section;
-    }
-
-    FrameworkElement History()
+    FrameworkElement HistoryPrivacy()
     {
         var save = Dropdown("Save screenshots", [
             new Choice(ScreenshotMode.KeySteps, "Key steps"), new Choice(ScreenshotMode.Continuous, "Continuous"), new Choice(ScreenshotMode.Off, "Off"),
         ], s => s.Screenshots, (s, v) => s with { Screenshots = v });
-        var continuous = Dropdown("Continuous every", [
-            new Choice(1, "1 second"), new Choice(2, "2 seconds"), new Choice(5, "5 seconds"),
-        ], s => s.ContinuousSeconds, (s, v) => s with { ContinuousSeconds = v });
-        _followers.Add(s => continuous.IsEnabled = s.Screenshots == ScreenshotMode.Continuous);
-        var keep = Dropdown("Keep history for", [
-            new Choice(1, "1 day"), new Choice(7, "7 days"), new Choice(30, "30 days"), new Choice(0, "Forever"),
-        ], s => s.KeepHistoryDays, (s, v) => s with { KeepHistoryDays = v });
+        var saveRow = Row(RowText("Save screenshots", "They show up in What it did"), save);
+        // Save screenshots saves a value nothing writes by yet; the whole group (its label included)
+        // hides until Wave 2 slice F turns SettingsFeatures.History on. Storage and Delete all
+        // Deskweave data below always show, so this page and History & privacy in the nav are never
+        // left empty either way.
+        var screenshots = Section("Screenshots", Group(saveRow));
+        screenshots.Visibility = SettingsFeatures.History ? Visibility.Visible : Visibility.Collapsed;
+        screenshots.Margin = new Thickness(0, 0, 0, 21);
 
-        var spaceUsed = Styled(FormatBytes(SettingsActions.HistoryBytes()), "RowHint");
-        var spaceLabel = new StackPanel();
-        spaceLabel.Children.Add(RowText("Space used"));
-        spaceLabel.Children.Add(spaceUsed);
-        var clear = Confirm("Clear", "Clears the screenshots and step logs kept for every workspace.", () =>
+        IReadOnlyList<StorageKind> kinds = SettingsStorage.Kinds();
+        var totalText = Styled("— used", "StorageTotal");
+        var meterGrid = new Grid();
+        var meterStack = new StackPanel();
+        meterStack.Children.Add(totalText);
+        meterStack.Children.Add(StorageMeter(meterGrid));
+        var meterRow = new Border { Padding = new Thickness(14, 13, 14, 13), MinHeight = 50, Child = meterStack };
+
+        var sizeTexts = new TextBlock[kinds.Count];
+        var kindRows = new UIElement[kinds.Count];
+        for (int i = 0; i < kinds.Count; i++)
         {
-            SettingsActions.ClearHistory();
-            spaceUsed.Text = FormatBytes(SettingsActions.HistoryBytes());
-        }, danger: false);
+            StorageKind kind = kinds[i];
+            var sizeText = Styled("—", "StorageSize");
+            sizeTexts[i] = sizeText;
+            var clear = Confirm("Clear",
+                () => sizeText.Text == "—" ? "Clear " + kind.ClearNoun + "?" : "Clear " + sizeText.Text + " of " + kind.ClearNoun + "?",
+                () => { kind.Clear(); RefreshStorage(); },
+                danger: false, style: "LinkButton", enabled: kind.CanClear, disabledTooltip: kind.DisabledTooltip);
+            clear.Margin = new Thickness(9, 0, 0, 0);
+            var controls = new StackPanel { Orientation = Orientation.Horizontal };
+            controls.Children.Add(sizeText);
+            controls.Children.Add(clear);
+            var row = Row(RowText(kind.Label, kind.Hint), controls);
+            // Agent browser has no reliable size source yet (Wave 2 slice E); its row hides until
+            // SettingsFeatures.BrowserData turns on. The other three kinds always show.
+            row.Visibility = kind.Visible() ? Visibility.Visible : Visibility.Collapsed;
+            kindRows[i] = row;
+        }
+        var storage = Section("Storage", Group([meterRow, .. kindRows]));
+        storage.Margin = new Thickness(0, 0, 0, 20);
 
-        var openLogs = new Button { Content = "Open logs folder" };
-        openLogs.SetResourceReference(StyleProperty, "RowButton");
-        AutomationProperties.SetName(openLogs, "Open logs folder");
-        openLogs.Click += (_, _) => SettingsActions.OpenFolder(ProductContext.Local("logs"));
+        void RefreshStorage()
+        {
+            Task.Run(() =>
+            {
+                var measured = new long?[kinds.Count];
+                for (int i = 0; i < kinds.Count; i++) measured[i] = kinds[i].Visible() ? kinds[i].Measure() : null;
+                Dispatcher.BeginInvoke(() =>
+                {
+                    long total = 0;
+                    for (int i = 0; i < kinds.Count; i++)
+                    {
+                        sizeTexts[i].Text = measured[i] is { } bytes ? SettingsActions.FormatStorageBytes(bytes) : "—";
+                        if (measured[i] is { } known) total += known;
+                    }
+                    totalText.Text = SettingsActions.FormatStorageBytes(total) + " used";
+                    FillStorageMeter(meterGrid, kinds, measured);
+                });
+            });
+        }
+        RefreshStorage();
 
-        // Save screenshots, Continuous every and Keep history for save values nothing writes or
-        // prunes by yet; each hides until Wave 2 slice F turns SettingsFeatures.History on. Space
-        // used, Clear and Open logs folder already read and act on the real evidence store, so they
-        // stay shown - the group is never left empty, so it (and History & screenshots in the nav)
-        // never hides.
-        var saveRow = Row(RowText("Save screenshots"), save);
-        var continuousRow = Row(RowText("Continuous every"), continuous);
-        var keepRow = Row(RowText("Keep history for"), keep);
-        saveRow.Visibility = continuousRow.Visibility = keepRow.Visibility =
-            SettingsFeatures.History ? Visibility.Visible : Visibility.Collapsed;
+        var projectEntries = SettingsFeatures.ProjectFiles ? SettingsStorage.Projects() : [];
+        UIElement[] projectRows = projectEntries.Select(project =>
+        {
+            var sizeText = Styled(project.Bytes is { } bytes ? SettingsActions.FormatStorageBytes(bytes) : "—", "StorageSize");
+            var show = new Button { Content = "Show in Explorer", Margin = new Thickness(8, 0, 0, 0) };
+            show.SetResourceReference(StyleProperty, "LinkButton");
+            show.Click += (_, _) => SettingsActions.OpenFolder(project.Path);
+            var controls = new StackPanel { Orientation = Orientation.Horizontal };
+            controls.Children.Add(sizeText);
+            controls.Children.Add(show);
+            return (UIElement)Row(RowText(project.Name, project.Path), controls);
+        }).ToArray();
+        var projects = Section("Made by agents in your projects", Group(projectRows));
+        // No reliable way to find a workspace's project folder yet (Wave 2 slice F); hidden until
+        // SettingsFeatures.ProjectFiles is on and there is at least one row to show.
+        projects.Visibility = SettingsFeatures.ProjectFiles && projectRows.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        return Section(null, Group(
-            saveRow,
-            continuousRow,
-            keepRow,
-            Row(spaceLabel, clear),
-            openLogs));
-    }
-
-    FrameworkElement Performance()
-    {
-        var speed = Dropdown("New workspace speed", [
-            new Choice(WorkspacePower.Fast, "Fast"), new Choice(WorkspacePower.Light, "Light"),
-        ], s => s.NewWorkspaceSpeed, (s, v) => s with { NewWorkspaceSpeed = v });
-        var smoothness = Dropdown("Preview smoothness", [
-            new Choice(PreviewSmoothness.Balanced, "Balanced"), new Choice(PreviewSmoothness.Smooth, "Smooth"), new Choice(PreviewSmoothness.BatterySaver, "Battery saver"),
-        ], s => s.Smoothness, (s, v) => s with { Smoothness = v });
-        var battery = Toggle("Pause previews on battery", s => s.PausePreviewsOnBattery, (s, v) => s with { PausePreviewsOnBattery = v });
-
-        return Section(null, Group(
-            Row(RowText("New workspace speed", "Light keeps a hard limit on what a workspace can use"), speed),
-            Row(RowText("Preview smoothness"), smoothness),
-            Row(RowText("Pause previews on battery"), battery)));
-    }
-
-    FrameworkElement Privacy()
-    {
-        var pauseWeb = Toggle("Pause commands after reading a web page", s => s.PauseAfterWebPage, (s, v) => s with { PauseAfterWebPage = v });
-        // Saves a value nothing pauses on yet; hides until Wave 2 slice E turns
-        // SettingsFeatures.PauseAfterWebPage on. Workspace restrictions stays shown below it either
-        // way, so this page and Privacy & safety in the nav are never left empty.
-        var pauseWebRow = Row(RowText("Pause commands after reading a web page", "Web pages can carry instructions aimed at agents"), pauseWeb);
-        pauseWebRow.Visibility = SettingsFeatures.PauseAfterWebPage ? Visibility.Visible : Visibility.Collapsed;
-        var restrictions = Dropdown("Workspace restrictions", [
-            new Choice(WorkspaceMode.Free, "Free"), new Choice(WorkspaceMode.Secure, "Secure"),
-        ], s => s.Restrictions, (s, v) => s with { Restrictions = v });
-        var deleteRow = Row(RowText("Delete all Deskweave data"),
-            Confirm("Delete", "Deletes " + string.Join(" and ", SettingsActions.DataFolders) + ". This can't be undone.",
+        var deleteRow = Row(RowText("Delete all Deskweave data", "Stops every workspace, deletes Deskweave's data, and quits. Your projects stay."),
+            Confirm("Delete", () => "Delete all Deskweave data? This can't be undone.",
                 () => SettingsActions.DeleteAllData(SettingsActions.DataFolders), danger: true));
 
         return new StackPanel
         {
             Children =
             {
-                Section(null, Group(
-                    pauseWebRow,
-                    Row(RowText("Workspace restrictions"), restrictions))),
+                screenshots,
+                storage,
+                projects,
                 Section(null, Group(deleteRow)),
             },
         };
-    }
-
-    FrameworkElement About()
-    {
-        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
-        var versionRow = Row(RowText("Version"), Styled(version, "RowHint"));
-
-        var licenseBody = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, Margin = new Thickness(14, 0, 14, 12) };
-        licenseBody.SetResourceReference(StyleProperty, "RowHint");
-        var licenses = new Button { Content = "Licenses" };
-        licenses.SetResourceReference(StyleProperty, "RowButton");
-        AutomationProperties.SetName(licenses, "Licenses");
-        licenses.Click += (_, _) =>
-        {
-            if (licenseBody.Visibility == Visibility.Visible) { licenseBody.Visibility = Visibility.Collapsed; return; }
-            if (licenseBody.Text.Length == 0) licenseBody.Text = ReadNotices();
-            licenseBody.Visibility = Visibility.Visible;
-        };
-        var licenseStack = new StackPanel();
-        licenseStack.Children.Add(licenses);
-        licenseStack.Children.Add(licenseBody);
-
-        return Section(null, Group(
-            versionRow,
-            licenseStack,
-            DataFolderRow("Local data", ProductContext.LocalRoot),
-            DataFolderRow("Roaming data", ProductContext.RoamingRoot)));
-    }
-
-    FrameworkElement DataFolderRow(string label, string path)
-    {
-        var button = new Button { Content = "Open" };
-        button.SetResourceReference(StyleProperty, "DeskButton");
-        button.Click += (_, _) => SettingsActions.OpenFolder(path);
-        return Row(RowText(label, path), button);
     }
 
     static string ReadNotices()
