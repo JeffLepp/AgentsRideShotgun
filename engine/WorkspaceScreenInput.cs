@@ -60,6 +60,8 @@ public sealed class WorkspaceScreenInput : IDisposable
         ControlMode mode = AppSettingsStore.Current.Control;
         if (mode != ControlMode.WorkAlongside && plane.Driving != Driver.Owner)
         {
+            // The view has moved to another workspace: the one it held goes back first.
+            if (_held is { } previous && !ReferenceEquals(previous, plane)) HandBack();
             // Instant: the lease changes here and input the agent had queued is dropped.
             plane.OwnerTakes();
             _held = plane;
@@ -142,9 +144,10 @@ public sealed class WorkspaceScreenInput : IDisposable
         return x >= 0 && y >= 0 && x < width && y < height;
     }
 
+    /// <summary>The view is going: whatever it held goes back, so no agent waits on a closed window.</summary>
     public void Dispose()
     {
-        _quiet?.Stop();
+        HandBack();
         _screen.MouseDown -= MouseDown;
         _screen.MouseWheel -= MouseWheel;
         _screen.TextInput -= TextInput;

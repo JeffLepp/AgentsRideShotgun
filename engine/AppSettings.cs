@@ -178,9 +178,13 @@ public static class AppSettingsStore
                 saved = Write(next);
             }
             // One listener failing must not keep the change from the others; it is already saved.
+            // Each is handed the latest settings, so a listener that itself changed a setting
+            // cannot leave the ones after it looking at the older state.
             foreach (Action<AppSettings> listener in Changed?.GetInvocationList().Cast<Action<AppSettings>>() ?? [])
             {
-                try { listener(next); }
+                AppSettings latest;
+                lock (Gate) latest = _current ?? next;
+                try { listener(latest); }
                 catch (Exception failure) { Debug.WriteLine("A settings listener failed: " + failure); }
             }
             return saved;
@@ -191,7 +195,7 @@ public static class AppSettingsStore
     {
         try
         {
-            if (!System.IO.File.Exists(File) || new FileInfo(File).Length > 1_048_576) return new AppSettings().Sane();
+            if (!System.IO.File.Exists(File) || new FileInfo(File).Length > MaxBytes) return new AppSettings().Sane();
             AppSettings? read = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(File), Json);
             return read is { Schema: 1 } ? read.Sane() : new AppSettings().Sane();
         }
@@ -201,13 +205,18 @@ public static class AppSettingsStore
         }
     }
 
+    // The same bound both ways, so the store never writes a file it would refuse to read.
+    const int MaxBytes = 1_048_576;
+
     static bool Write(AppSettings settings)
     {
+        string json = JsonSerializer.Serialize(settings, Json);
+        if (System.Text.Encoding.UTF8.GetByteCount(json) > MaxBytes) return false;
         string temporary = File + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(File)!);
-            System.IO.File.WriteAllText(temporary, JsonSerializer.Serialize(settings, Json));
+            System.IO.File.WriteAllText(temporary, json);
             System.IO.File.Move(temporary, File, true);
             return true;
         }

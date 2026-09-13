@@ -61,7 +61,7 @@ public partial class App : Application
             _activationWait = ThreadPool.RegisterWaitForSingleObject(_activate,
                 (_, _) => Dispatcher.BeginInvoke(ShowWorkspace), null, Timeout.Infinite, false);
             StartWithWindows.Sync(AppSettingsStore.Current);
-            AppSettingsStore.Changed += StartWithWindows.Sync;
+            AppSettingsStore.Changed += settings => StartWithWindows.Sync(settings);
             // Started by Windows at sign-in: stay in the tray; the corner window still comes and goes.
             if (!e.Args.Contains(StartWithWindows.Background)) window.Show();
         }
