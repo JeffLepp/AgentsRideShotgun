@@ -251,6 +251,12 @@ static class SettingsScenes
                 && SettingsActions.FormatStorageBytes(1024 * 1024) == "1 MB"
                 && SettingsActions.FormatStorageBytes(1024L * 1024 * 1024) == "1.0 GB",
                 "Storage sizes use KB, MB and GB at their boundaries");
+            Program.Check(SettingsView.StoragePercentages([412, 268, 136, 34]).SequenceEqual([48, 32, 16, 4]),
+                "Storage meter rounds the reference kinds to whole percentages");
+            Program.Check(SettingsView.StoragePercentages([1, 1, 1]).SequenceEqual([34, 33, 33])
+                && SettingsView.StoragePercentages([null, 0, -1]).SequenceEqual([0, 0, 0])
+                && SettingsView.StoragePercentages([long.MaxValue, long.MaxValue]).SequenceEqual([50, 50]),
+                "Storage meter preserves its total and stable ties for empty and large sizes");
             await Task.Delay(250);
             Pump();
             Program.Check(Descendants<TextBlock>(view).Any(x => x.Text == "850 MB used"),

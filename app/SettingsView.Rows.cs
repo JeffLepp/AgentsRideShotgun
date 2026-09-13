@@ -283,15 +283,31 @@ public partial class SettingsView
     {
         segments.Children.Clear();
         segments.ColumnDefinitions.Clear();
+        int[] percentages = StoragePercentages(measured);
         int column = 0;
         for (int i = 0; i < kinds.Count; i++)
         {
-            if (measured[i] is not { } bytes || bytes <= 0) continue;
-            segments.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(bytes, GridUnitType.Star) });
+            if (percentages[i] == 0) continue;
+            segments.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(percentages[i], GridUnitType.Star) });
             var fill = new Border { Opacity = kinds[i].MeterOpacity };
             fill.SetResourceReference(Border.BackgroundProperty, kinds[i].MeterBrush);
             Grid.SetColumn(fill, column++);
             segments.Children.Add(fill);
         }
+    }
+
+    // Whole percentages keep the meter stable; distribute leftover points by largest remainder
+    // so equal remainders keep kind order and every nonempty meter still totals exactly 100.
+    internal static int[] StoragePercentages(IReadOnlyList<long?> measured)
+    {
+        decimal total = measured.Sum(bytes => (decimal)Math.Max(0, bytes ?? 0));
+        var result = new int[measured.Count];
+        if (total == 0) return result;
+        decimal[] shares = measured.Select(bytes => Math.Max(0, bytes ?? 0) * 100m / total).ToArray();
+        for (int i = 0; i < shares.Length; i++) result[i] = (int)decimal.Floor(shares[i]);
+        foreach (int i in Enumerable.Range(0, shares.Length)
+            .OrderByDescending(i => shares[i] - result[i]).ThenBy(i => i).Take(100 - result.Sum()))
+            result[i]++;
+        return result;
     }
 }
