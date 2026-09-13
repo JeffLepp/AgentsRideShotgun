@@ -1,0 +1,7 @@
+.venv
+.state
+artifacts
+dist
+**/__pycache__
+**/*.pyc
+.git

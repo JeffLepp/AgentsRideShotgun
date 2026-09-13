@@ -1,0 +1,16 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- State brushes are local aliases, so a cached panel/peek follows changes to the
+         application Color resources without rebuilding its view or workspace runtime.
+         AppearanceManager must replace TLiveColor, THoneyColor, TDangerColor,
+         TAccentColor and TDotOffColor on each skin change. Setting only the app's
+         AW* brush keys does not override these nearer aliases. Neutral surfaces and
+         text resolve Shell* brush resources from the application directly. -->
+    <SolidColorBrush x:Key="AWWorkingBrush" Color="{DynamicResource TLiveColor}"/>
+    <SolidColorBrush x:Key="AWWaitingBrush" Color="{DynamicResource THoneyColor}"/>
+    <SolidColorBrush x:Key="AWFailedBrush" Color="{DynamicResource TDangerColor}"/>
+    <SolidColorBrush x:Key="AWAccentBrush" Color="{DynamicResource TAccentColor}"/>
+    <SolidColorBrush x:Key="AWIdleBrush" Color="{DynamicResource TDotOffColor}"/>
+
+</ResourceDictionary>

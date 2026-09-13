@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <Company>Jefferson Kline</Company>
+    <Product>Deskweave</Product>
+    <Copyright>Copyright © 2026 Jefferson Kline</Copyright>
+    <Version>0.2.0</Version>
+    <FileVersion>0.2.0.0</FileVersion>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+</Project>

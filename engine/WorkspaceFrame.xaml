@@ -1,0 +1,22 @@
+<UserControl x:Class="HiveMind.AgentWorkspaces.WorkspaceFrame"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:HiveMind.AgentWorkspaces"
+             Focusable="False" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/HiveMind.AgentWorkspaces;component/Palette.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Border Background="{DynamicResource ShellSurfaceBrush}" BorderBrush="{DynamicResource ShellBorderBrush}"
+            BorderThickness="1" CornerRadius="8" Padding="2">
+        <Grid ClipToBounds="True">
+            <Grid x:Name="Drawn" Background="{DynamicResource ShellSurfaceBrush}"/>
+            <Border x:Name="Live" CornerRadius="6" Visibility="Collapsed">
+                <Border.Background><ImageBrush x:Name="LiveScreen" Stretch="UniformToFill"/></Border.Background>
+            </Border>
+        </Grid>
+    </Border>
+</UserControl>

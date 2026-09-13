@@ -1,0 +1,212 @@
+<Window x:Class="Deskweave.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Deskweave" Width="1280" Height="820" MinWidth="900" MinHeight="620"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize"
+        FontFamily="{DynamicResource SkinFontFamily}" Foreground="{DynamicResource ShellTextBrush}"
+        Background="{DynamicResource ShellCanvasBrush}"
+        TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
+        PreviewKeyDown="Window_PreviewKeyDown" SizeChanged="Window_SizeChanged"
+        StateChanged="Window_StateChanged" IsVisibleChanged="Window_IsVisibleChanged">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="48" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0"/>
+    </shell:WindowChrome.WindowChrome>
+    <Window.Resources>
+        <Style x:Key="RailAction" TargetType="Button" BasedOn="{StaticResource QuietButton}">
+            <Setter Property="Width" Value="36"/><Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,3"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/><Setter Property="FontSize" Value="15"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="DesktopTileAction" TargetType="Button" BasedOn="{StaticResource DeskButton}">
+            <Setter Property="Padding" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Background" Value="{DynamicResource ShellPanelBrush}"/>
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Frame" BorderBrush="{DynamicResource ShellBorderBrush}" BorderThickness="1"
+                            Background="{TemplateBinding Background}" CornerRadius="{DynamicResource SkinPanelRadius}">
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Frame" Property="Opacity" Value="0.86"/></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
+        </Style>
+        <DataTemplate x:Key="WorkspaceTileTemplate">
+            <Button Style="{StaticResource DesktopTileAction}" Click="WorkspaceTile_Click" Tag="{Binding Id}"
+                    Margin="0,0,14,16" VerticalAlignment="Top" Background="{DynamicResource ShellPreviewBrush}"
+                    ContextMenuOpening="WorkspaceTile_ContextMenuOpening" ToolTip="Right-click for actions"
+                    AutomationProperties.Name="{Binding OpenLabel}">
+                <Button.ContextMenu><ContextMenu/></Button.ContextMenu>
+                <Grid Height="{Binding PreviewHeight, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <Border CornerRadius="{DynamicResource SkinPanelRadius}">
+                        <Border.Background>
+                            <ImageBrush ImageSource="{Binding Preview}" Stretch="Uniform" RenderOptions.BitmapScalingMode="LowQuality"/>
+                        </Border.Background>
+                    </Border>
+                    <Border Background="{DynamicResource ShellPreviewOverlayBrush}" CornerRadius="4" Padding="8,4" Margin="8"
+                            HorizontalAlignment="Left" VerticalAlignment="Top">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="6" Height="6" Fill="{Binding StatusBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" MaxWidth="260" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding AgentsText}" Foreground="{Binding AgentsBrush}" Visibility="{Binding AgentsVisibility}"
+                                       FontSize="11" Margin="8,0,0,0" MaxWidth="150" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                    <Button Content="Start computer" Style="{StaticResource PrimaryButton}" Padding="17,9" Click="TileStart_Click"
+                            Tag="{Binding Id}" Visibility="{Binding StoppedVisibility}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            AutomationProperties.Name="{Binding StartLabel}"/>
+                </Grid>
+            </Button>
+        </DataTemplate>
+    </Window.Resources>
+    <Border BorderThickness="1" BorderBrush="{DynamicResource ShellBorderBrush}" Background="{DynamicResource ShellCanvasBrush}"
+            CornerRadius="{DynamicResource SkinWindowRadius}">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <Border BorderBrush="{DynamicResource ShellBorderBrush}" BorderThickness="0,0,0,1" Background="{DynamicResource ShellChromeBrush}">
+                <Grid x:Name="ChromeLayout" Margin="17,0,7,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel x:Name="BrandGroup" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Grid Width="18" Height="18" Margin="0,0,10,0">
+                            <Path Data="M1,1 L7,1 7,17 1,17 Z M10,1 L17,1 17,7 10,7 Z M10,10 L17,10 17,17 10,17 Z"
+                                  Fill="{DynamicResource ShellAccentBrush}"/>
+                        </Grid>
+                        <TextBlock Text="Deskweave" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel x:Name="ToolbarActions" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button x:Name="AppearanceButton" Style="{StaticResource QuietButton}" Padding="9,6" Margin="0,0,8,0"
+                                Click="Appearance_Click" ToolTip="Change appearance" AutomationProperties.Name="Change appearance">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE790;" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="AppearanceLabel" Text="Windows" FontSize="11" Margin="7,0,6,0"/>
+                                <TextBlock x:Name="AppearanceChevron" Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="8" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="CompactButton" Style="{StaticResource CaptionButton}" Content="&#xE8A7;" Click="Compact_Click" ToolTip="Compact monitor · Ctrl+Shift+M" AutomationProperties.Name="Toggle compact monitor"/>
+                        <Button x:Name="CollapseButton" Style="{StaticResource CaptionButton}" Content="&#xE70E;" Click="Collapse_Click" ToolTip="Collapse to a small bar" AutomationProperties.Name="Collapse or expand Deskweave"/>
+                        <Button x:Name="PinButton" Style="{StaticResource CaptionButton}" Content="&#xE718;" Click="Pin_Click" ToolTip="Keep this window on top" AutomationProperties.Name="Keep Deskweave on top"/>
+                        <Border x:Name="CaptionSeparator" Width="1" Height="15" Background="{DynamicResource ShellBorderBrush}" Margin="5,0"/>
+                    </StackPanel>
+                    <StackPanel x:Name="CaptionActions" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button x:Name="MinimizeButton" Style="{StaticResource CaptionButton}" Content="&#xE921;" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize Deskweave"/>
+                        <Button x:Name="MaximizeButton" Style="{StaticResource CaptionButton}" Content="&#xE922;" Click="Maximize_Click" ToolTip="Maximize or restore" AutomationProperties.Name="Maximize or restore Deskweave"/>
+                        <Button x:Name="CloseButton" Style="{StaticResource CaptionButton}" Content="&#xE8BB;" Click="Close_Click" ToolTip="Hide to notification area; work keeps running" AutomationProperties.Name="Hide Deskweave to notification area"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <Grid x:Name="ExpandedBody" Grid.Row="1">
+                <Grid.ColumnDefinitions><ColumnDefinition x:Name="SidebarColumn" Width="56"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border x:Name="Sidebar" BorderBrush="{DynamicResource ShellBorderBrush}" BorderThickness="0,0,1,0" Background="{DynamicResource ShellChromeBrush}">
+                    <Grid Margin="9,15,9,12">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <StackPanel>
+                            <Button x:Name="OverviewNav" Style="{StaticResource RailAction}" Content="&#xE80A;" Click="Overview_Click"
+                                    ToolTip="All workspaces · Ctrl+1" AutomationProperties.Name="All workspaces"/>
+                            <Button x:Name="RunningNav" Style="{StaticResource RailAction}" Content="&#xE768;" Click="Running_Click"
+                                    ToolTip="Running workspaces" AutomationProperties.Name="Show running workspaces"/>
+                            <Button x:Name="AttentionNav" Style="{StaticResource RailAction}" Content="&#xE7BA;" Click="Attention_Click"
+                                    ToolTip="Needs your attention" AutomationProperties.Name="Show workspaces needing attention"/>
+                            <Border Height="1" Margin="7,12" Background="{DynamicResource ShellBorderBrush}"/>
+                            <Button x:Name="FocusNav" Style="{StaticResource RailAction}" Content="&#xE7F4;" Click="Focus_Click" IsEnabled="False"
+                                    ToolTip="Open selected workspace · Ctrl+2" AutomationProperties.Name="Open selected workspace in focus view"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="2">
+                            <Button x:Name="ConnectNav" Style="{StaticResource RailAction}" Content="&#xE71B;" Click="Connect_Click"
+                                    ToolTip="Connect Claude Code, Codex or another agent" AutomationProperties.Name="Connect an outside agent"/>
+                            <Button x:Name="HelpButton" Style="{StaticResource RailAction}" Content="&#xE897;" Click="Help_Click"
+                                    ToolTip="Getting started · F1" AutomationProperties.Name="Getting started with Deskweave"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <Grid x:Name="MainArea" Grid.Column="1" Margin="22,19,8,0">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <Grid x:Name="PageHeader" Margin="0,0,14,16">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock x:Name="PageTitle" Text="Workspaces" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Button x:Name="BackButton" Content="←  All workspaces" Click="Overview_Click" Style="{StaticResource QuietButton}"
+                                Visibility="Collapsed" HorizontalAlignment="Left" Padding="0,8,12,8"/>
+                        <Grid x:Name="SearchArea" Grid.Column="1" Width="230" Margin="0,0,10,0">
+                            <TextBox x:Name="SearchBox" TextChanged="Search_Changed" Padding="29,7,9,7" FontSize="11"
+                                     AutomationProperties.Name="Search workspaces by name or mission"/>
+                            <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource ShellMutedBrush}" IsHitTestVisible="False"/>
+                            <TextBlock x:Name="SearchHint" Text="Search" FontSize="11" Margin="30,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource ShellHintBrush}" IsHitTestVisible="False"/>
+                        </Grid>
+                        <Button x:Name="NewButton" Grid.Column="2" Content="+  New workspace" Click="New_Click" Style="{StaticResource PrimaryButton}"
+                                Padding="13,8" AutomationProperties.Name="Create a workspace" ToolTip="New workspace · Ctrl+N"/>
+                    </Grid>
+                    <Border x:Name="RenameStrip" Grid.Row="1" Background="{DynamicResource ShellPanelBrush}" BorderBrush="{DynamicResource ShellBorderBrush}"
+                            BorderThickness="1" CornerRadius="{DynamicResource SkinPanelRadius}" Padding="12" Margin="0,0,14,18" Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="RenameBox" MaxLength="64" KeyDown="RenameBox_KeyDown" AutomationProperties.Name="Workspace name"/>
+                            <Button Grid.Column="1" x:Name="RenameButton" Content="Save" Style="{StaticResource PrimaryButton}" Click="Rename_Click"
+                                    Margin="10,0,0,0" AutomationProperties.Name="Save workspace name"/>
+                            <Button Grid.Column="2" Content="Cancel" Style="{StaticResource QuietButton}" Click="CancelRename_Click" Margin="5,0,0,0"/>
+                        </Grid>
+                    </Border>
+                    <Grid x:Name="OverviewContent" Grid.Row="2">
+                        <ScrollViewer x:Name="WorkspaceScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl x:Name="WorkspaceTiles" ItemTemplate="{StaticResource WorkspaceTileTemplate}" VerticalAlignment="Top" VerticalContentAlignment="Top">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" VerticalAlignment="Top"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <Grid x:Name="EmptyState" Margin="20,0,34,45" Visibility="Collapsed">
+                            <StackPanel MaxWidth="440" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Grid Width="118" Height="84" HorizontalAlignment="Center" Margin="0,0,0,28">
+                                    <Border BorderBrush="{DynamicResource ShellBorderBrush}" BorderThickness="1" Background="{DynamicResource ShellPanelBrush}"
+                                            CornerRadius="{DynamicResource SkinPanelRadius}" Margin="0,0,0,13">
+                                        <Grid>
+                                            <Border Height="14" VerticalAlignment="Top" BorderBrush="{DynamicResource ShellBorderBrush}" BorderThickness="0,0,0,1"/>
+                                            <TextBlock Text="+" FontSize="24" FontWeight="Light" Foreground="{DynamicResource ShellAccentBrush}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,9,0,0"/>
+                                        </Grid>
+                                    </Border>
+                                    <Path Data="M59,71 V82 M42,82 H76" Stroke="{DynamicResource ShellBorderBrush}" StrokeThickness="1.2"/>
+                                </Grid>
+                                <Button Content="New workspace" Style="{StaticResource PrimaryButton}" Click="New_Click" Padding="20,10"
+                                        HorizontalAlignment="Center" AutomationProperties.Name="Create your first workspace"/>
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock x:Name="NoMatches" Text="No matches" FontSize="14" Foreground="{DynamicResource ShellMutedBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                    </Grid>
+                    <ScrollViewer x:Name="FocusScroll" Grid.Row="2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled" Margin="0,0,14,16">
+                        <ContentControl x:Name="FocusSlot" MinHeight="510" VerticalContentAlignment="Stretch"/>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+            <Border x:Name="HelpPanel" Grid.Row="1" Background="{DynamicResource ShellPanelBrush}" BorderBrush="{DynamicResource ShellBorderBrush}"
+                    BorderThickness="1" CornerRadius="{DynamicResource SkinPanelRadius}" Padding="28" Width="510"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel>
+                        <Grid><TextBlock Text="Your workspace, explained" FontSize="22" FontWeight="SemiBold"/><Button Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource QuietButton}" HorizontalAlignment="Right" Click="CloseHelp_Click" AutomationProperties.Name="Close getting started" Padding="6"/></Grid>
+                        <TextBlock Text="A new workspace starts its computer straight away. Connect Claude Code or Codex from the link icon and their agents get workspaces of their own. Right-click a workspace and choose Agents to share it, keep it for one project folder, or keep it for one agent." Foreground="{DynamicResource ShellMutedBrush}" TextWrapping="Wrap" LineHeight="21" Margin="0,19,0,18"/>
+                        <TextBlock Text="Browsers have their own profile" FontWeight="SemiBold"/>
+                        <TextBlock Text="Browser work opens in the workspace with a separate Chrome profile. Sign in there when needed; your everyday tabs and saved logins stay in your usual browser." Foreground="{DynamicResource ShellMutedBrush}" TextWrapping="Wrap" LineHeight="20" Margin="0,7,0,18"/>
+                        <TextBlock Text="Stay in control" FontWeight="SemiBold"/>
+                        <TextBlock Text="Take control pauses the agent's input. Workspaces use your normal Windows file permissions. They are separate desktops, not virtual machines or a security sandbox." Foreground="{DynamicResource ShellMutedBrush}" TextWrapping="Wrap" LineHeight="20" Margin="0,7,0,18"/>
+                        <TextBlock Text="Shortcuts" FontWeight="SemiBold"/>
+                        <TextBlock Text="Ctrl+N new workspace · Ctrl+F search · Ctrl+1 overview · Ctrl+2 focus · Ctrl+Shift+M compact · F1 help. Right-click a workspace to start or stop its computer, rename it or delete it. Use the title-bar chevron to collapse. Closing the window hides it to the notification area; Quit ends running work." Foreground="{DynamicResource ShellMutedBrush}" TextWrapping="Wrap" LineHeight="20" Margin="0,7,0,18"/>
+                        <TextBlock Text="Make it yours" FontWeight="SemiBold"/>
+                        <TextBlock Text="Choose Windows, Mac or Linux in the appearance menu. All three use the same Windows desktops, files and agents." Foreground="{DynamicResource ShellMutedBrush}" TextWrapping="Wrap" LineHeight="20" Margin="0,7,0,21"/>
+                        <Grid>
+                            <Button Content="Got it" Style="{StaticResource PrimaryButton}" Click="CloseHelp_Click" HorizontalAlignment="Left" Padding="23,9"/>
+                            <Button Content="Quit Deskweave" Style="{StaticResource QuietButton}" Click="Quit_Click" HorizontalAlignment="Right" AutomationProperties.Name="Quit Deskweave"/>
+                        </Grid>
+                        <TextBlock Text="Deskweave 0.2.0 · Windows desktop application" FontSize="10" Foreground="{DynamicResource ShellMutedBrush}" Margin="0,18,0,0"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

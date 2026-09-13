@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Deskweave</AssemblyName>
+    <RootNamespace>Deskweave</RootNamespace>
+    <AssemblyTitle>Deskweave</AssemblyTitle>
+    <Description>Local Windows workspaces for your agents.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/Deskweave.ico</ApplicationIcon>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <RuntimeFrameworkVersion>10.0.11</RuntimeFrameworkVersion>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <ProjectReference Include="../engine/Deskweave.Engine.csproj" />
+    <InternalsVisibleTo Include="Deskweave.Probe" />
+    <InternalsVisibleTo Include="Deskweave.UiProbe" />
+    <Resource Include="Assets/Deskweave.ico" />
+  </ItemGroup>
+</Project>

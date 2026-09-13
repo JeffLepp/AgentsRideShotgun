@@ -1,0 +1,113 @@
+<UserControl x:Class="HiveMind.AgentWorkspaces.WorkspaceWidget"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:HiveMind.AgentWorkspaces"
+             xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+             Focusable="False" UseLayoutRounding="True"
+             TextOptions.TextFormattingMode="Display"
+             automation:AutomationProperties.Name="Computer workspaces">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/HiveMind.AgentWorkspaces;component/Palette.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- The card is the screen and nothing else. A title, a count, a name and a state label
+                 all said in words what the picture says by being there, and between them they took
+                 a third of the block's height off the only thing on it worth looking at. What is
+                 left of the button is a hairline of hover and focus around the frame. -->
+            <Style x:Key="WorkspaceCardButton" TargetType="Button">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Padding" Value="3"/>
+                <Setter Property="Margin" Value="2"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+                <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Surface" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="10" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <!-- A ring, not a fill: the frame covers the whole of the button's
+                                     inside, so a hover background would never be seen. -->
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource ShellBorderBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Surface" Property="Opacity" Value="0.82"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- The widget selects among these from its measured size and item count. One stored
+                 workspace gets the whole block; denser collections wrap into two or three columns. -->
+            <ItemsPanelTemplate x:Key="CardsOne">
+                <UniformGrid Columns="1"/>
+            </ItemsPanelTemplate>
+
+            <ItemsPanelTemplate x:Key="CardsTwo">
+                <UniformGrid Columns="2"/>
+            </ItemsPanelTemplate>
+
+            <ItemsPanelTemplate x:Key="CardsThree">
+                <UniformGrid Columns="3"/>
+            </ItemsPanelTemplate>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- Transparent rather than unpainted: the gap beside a card has to be hit-testable, or the
+         right-click that replaced the + button would only work on top of a workspace. -->
+    <Grid Margin="2" Background="Transparent">
+        <Grid.ContextMenu>
+            <ContextMenu Style="{DynamicResource AppContextMenuStyle}">
+                <MenuItem Header="New workspace" Click="NewWorkspace_Click"
+                          Style="{DynamicResource AppMenuItemStyle}"
+                          automation:AutomationProperties.Name="New workspace"/>
+            </ContextMenu>
+        </Grid.ContextMenu>
+
+        <ItemsControl x:Name="WorkspaceList" SizeChanged="WorkspaceList_SizeChanged"
+                      ItemsPanel="{StaticResource CardsOne}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type local:WorkspaceCard}">
+                    <Button Style="{StaticResource WorkspaceCardButton}"
+                            Click="Workspace_Click"
+                            ToolTip="{Binding AccessibleName}"
+                            automation:AutomationProperties.Name="{Binding AccessibleName}">
+                        <Viewbox Stretch="Uniform" StretchDirection="Both"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <local:WorkspaceFrame Width="320" Height="180" DataContext="{Binding}"
+                                                  Screen="{Binding Screen}"/>
+                        </Viewbox>
+                    </Button>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <StackPanel x:Name="EmptyState" Visibility="Collapsed"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    IsHitTestVisible="False">
+            <TextBlock Text="No workspaces yet" FontSize="11" FontWeight="SemiBold"
+                       HorizontalAlignment="Center"
+                       Foreground="{DynamicResource ShellTextBrush}"/>
+            <TextBlock Text="Right-click to add one" FontSize="9.5" Margin="0,3,0,0"
+                       HorizontalAlignment="Center"
+                       Foreground="{DynamicResource ShellMutedBrush}"/>
+        </StackPanel>
+    </Grid>
+</UserControl>

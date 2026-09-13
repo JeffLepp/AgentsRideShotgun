@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>HiveMind.AgentWorkspaces</RootNamespace>
+    <AssemblyName>HiveMind.AgentWorkspaces</AssemblyName>
+    <AssemblyTitle>Deskweave workspace engine</AssemblyTitle>
+    <Description>Local Windows desktops and agent control for Deskweave.</Description>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The usage tracker already reads this owner's plan limits from Anthropic's OAuth usage
+         endpoint, on a polling budget, for the dashboard block and the Meter app. A subscription
+         workspace shows the same percentages rather than a second reader of the same allowance.
+         The Meter app references it the same way. -->
+    <ProjectReference Include="..\dependencies\HiveMind.UsageTracker\HiveMind.UsageTracker.csproj" />
+    <ProjectReference Include="Bridge\Deskweave.WorkspaceBridge.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Deskweave" />
+    <InternalsVisibleTo Include="Deskweave.Probe" />
+    <InternalsVisibleTo Include="Deskweave.UiProbe" />
+    <InternalsVisibleTo Include="Deskweave.Tests" />
+    <!-- The probes drive real desktops and start real programs. They are built by the probe harness
+         in the scratch folder, never by the module, and they have no business in a shipped DLL. -->
+    <Compile Remove="measurements/**" />
+    <Compile Remove="Bridge/**" />
+  </ItemGroup>
+
+  <Target Name="WorkspaceBridgeFiles" AfterTargets="Build" BeforeTargets="GetCopyToOutputDirectoryItems;ComputeFilesToPublish">
+    <ItemGroup>
+      <WorkspaceBridgePayload Include="$(MSBuildProjectDirectory)\Bridge\bin\$(Configuration)\net10.0-windows\win-x64\**\*"
+                              Exclude="**\*.pdb" />
+      <ResolvedFileToPublish Include="@(WorkspaceBridgePayload)"
+                             RelativePath="Bridge\%(RecursiveDir)%(Filename)%(Extension)"
+                             CopyToPublishDirectory="PreserveNewest" />
+      <ContentWithTargetPath Include="@(WorkspaceBridgePayload)"
+                             TargetPath="Bridge\%(RecursiveDir)%(Filename)%(Extension)"
+                             CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WorkspaceBridgePayload)"
+          DestinationFiles="@(WorkspaceBridgePayload->'$(TargetDir)Bridge\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

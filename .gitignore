@@ -1,0 +1,7 @@
+# Local build products and validation captures are reproducible, not app source.
+**/bin/
+**/obj/
+out/
+artifacts/
+.vs/
+*.user
