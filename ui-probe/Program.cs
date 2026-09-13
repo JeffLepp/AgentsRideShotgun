@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -78,162 +79,166 @@ static class Program
         _window = new MainWindow { ShowActivated = false, Left = 20, Top = 20 };
         _window.Show();
         await Settle();
-        Check(WorkspaceStore.All().Count == 0 && !WorkspaceRuntime.AnyRunning,
-            "Opening the empty app creates no workspace or desktop");
-        Check(Find<FrameworkElement>("EmptyState").IsVisible, "First-run guidance is visible");
+        Check(WorkspaceStore.All() is [{ Name: "Scratch" }] && !WorkspaceRuntime.AnyRunning,
+            "Opening the empty app creates one Scratch workspace and starts no desktop");
+        Check(_window.DisplayMode == "stack" && _window.Hub.Asleep.Any(e => e.Name == "Scratch"),
+            "The hub opens on the stack, with Scratch showing under Asleep");
+        Check(_window.FindName("EmptyState") is null && _window.FindName("WorkspaceTiles") is null
+            && _window.FindName("CompactButton") is null && _window.FindName("CollapseButton") is null
+            && _window.FindName("HelpButton") is null && _window.FindName("SearchBox") is null
+            && _window.FindName("AppearanceButton") is null && _window.FindName("FocusSlot") is null,
+            "The icon rail, overview grid, compact/collapsed modes, search box, help panel and boss panel are gone");
         Check(AutomationProperties.GetName(Find<Button>("NewButton")).Length > 0,
-            "Create action has an accessible name");
+            "New workspace has an accessible name");
         Check(AppearanceManager.Choice == ThemeChoice.FollowWindows && AppearanceManager.Dark == AppearanceManager.WindowsIsDark(),
             "The theme follows Windows until Settings forces one");
-        Check(_window.FindName("AppearanceButton") is null, "The Windows/Mac/Linux skin picker is gone");
         CheckSettings();
-        Capture("01-empty.png");
+        Capture("01-stack.png");
         foreach (ThemeChoice theme in Themes)
         {
-            _window.SetTheme(theme);
+            AppearanceManager.Apply(theme);
             await Settle();
             Point close = Find<Button>("CloseButton").TransformToAncestor(_window).Transform(new Point());
             Check(close.X > _window.ActualWidth - 100, theme + " theme keeps the close action at the right");
-            Capture("theme-" + Lower(theme) + "-empty.png");
+            Capture("theme-" + Lower(theme) + "-stack.png");
         }
-        _window.SetTheme(ThemeChoice.Light);
-        _window.Width = 900;
-        _window.Height = 620;
+        AppearanceManager.Apply(ThemeChoice.Light);
         await Settle();
-        Check(InWindow(Find<Button>("NewButton")), "Create remains reachable at minimum full size");
-        Capture("02-narrow-empty.png");
-        _window.Width = 1280;
-        _window.Height = 820;
+
+        _window.Width = 320;
+        _window.Height = 480;
+        await Settle();
+        Check(InWindow(Find<Button>("NewButton")), "Create remains reachable at the stack's minimum size");
+        Capture("02-narrow-stack.png");
+        _window.Width = 340;
+        _window.Height = 804;
+        await Settle();
+
+        // New workspace: created, started, follows the store's speed and restrictions (brief A.11).
         Click("NewButton");
         await Settle();
-        Check(WorkspaceStore.All().Count == 1 && WorkspaceStore.All()[0].Name == "Workspace 1",
-            "One click creates a workspace with a default name");
-        Check(Find<FrameworkElement>("OverviewContent").IsVisible && Find<ItemsControl>("WorkspaceTiles").Items.Count == 1,
-            "Creating a workspace stays on the overview");
-        var created = WorkspaceStore.All()[0];
-        Check(WorkspaceRuntime.Of(created.Id) is not null,
-            "Creating a workspace starts its computer, so the new tile shows a real desktop");
-        var tile = (WorkspaceTile)Find<ItemsControl>("WorkspaceTiles").Items[0]!;
-        Check(tile.Running && tile.StoppedVisibility == Visibility.Collapsed && MenuItems(created.Id).Contains("Stop computer"),
-            "A running workspace hides the start button and offers Stop computer");
+        Check(WorkspaceStore.All().Any(w => w.Name == "Workspace 1"), "One click creates a workspace with a default name");
+        var created = WorkspaceStore.All().First(w => w.Name == "Workspace 1");
+        Check(WorkspaceRuntime.Of(created.Id) is not null, "A new workspace starts its own computer");
+        Check(_window.Hub.Working.Any(e => e.Id == created.Id), "A running workspace shows under Working on the stack");
+        Check(WorkspaceStore.Find(created.Id)!.Power == AppSettingsStore.Current.NewWorkspaceSpeed
+            && WorkspaceStore.Find(created.Id)!.Mode == AppSettingsStore.Current.Restrictions,
+            "A new workspace is created with the store's new-workspace speed and restrictions");
         _window.StopWorkspace(created.Id);
         await Settle();
-        Check(WorkspaceRuntime.Of(created.Id) is null && !tile.Running
-            && tile.StoppedVisibility == Visibility.Visible && MenuItems(created.Id).Contains("Start computer"),
-            "Stopping from the overview ends the desktop and offers to start it again");
+        Check(WorkspaceRuntime.Of(created.Id) is null && _window.Hub.Asleep.Any(e => e.Id == created.Id),
+            "Stopping a workspace's computer moves it from Working to Asleep");
         _window.StartWorkspace(created.Id);
         await Settle();
-        Check(WorkspaceRuntime.Of(created.Id) is not null && tile.Running,
-            "Starting from the overview brings the same workspace back up");
+        Check(WorkspaceRuntime.Of(created.Id) is not null && _window.Hub.Working.Any(e => e.Id == created.Id),
+            "Starting it again brings it back under Working");
+
+        // Clicking a card or row widens the window onto that workspace (brief A.5).
+        InvokePrivate(_window, "WorkingCard_Click", new Button { Tag = created.Id }, new RoutedEventArgs());
+        await Settle();
+        Check(_window.DisplayMode == "wide" && _window.SelectedWorkspaceId == created.Id,
+            "Clicking a working card widens the window onto that workspace");
+        Check(_window.Hub.Working.Any(e => e.Id == created.Id && e.Selected), "The sidebar marks the open workspace selected");
+        Capture("03-wide.png");
+        _window.ShowStack();
+        await Settle();
+
+        string scratchId = _window.Hub.Asleep.First(e => e.Name == "Scratch").Id;
+        InvokePrivate(_window, "AsleepRow_Click", new Button { Tag = scratchId }, new RoutedEventArgs());
+        await Settle();
+        Check(_window.DisplayMode == "wide" && _window.SelectedWorkspaceId == scratchId,
+            "Clicking an asleep row also opens that workspace in the wide window");
+        _window.ShowStack();
+        await Settle();
+
+        // The filter field (Ctrl+F opens it; Escape clears it): the stack's only search surface (brief A.3).
+        InvokePrivate(_window, "BeginFilter");
+        await Settle();
+        Check(Find<Border>("FilterHost").Visibility == Visibility.Visible, "The filter field can be opened");
+        Find<TextBox>("FilterBox").Text = "Workspace";
+        await Settle();
+        Check(Find<ItemsControl>("StackWorkingList").Items.Count == 1 && Find<ItemsControl>("StackAsleepList").Items.Count == 0,
+            "Typing in the filter narrows the stack to matching names");
+        RaiseKey(_window, Key.Escape);
+        await Settle();
+        Check(Find<Border>("FilterHost").Visibility == Visibility.Collapsed && Find<ItemsControl>("StackAsleepList").Items.Count == 1,
+            "Escape clears the filter and shows every workspace again");
+
+        // The gear opens Settings (brief A.7); Escape from a wide workspace returns to the stack (brief A.5).
+        Click("SettingsButton");
+        await Settle();
+        Check(_window.DisplayMode == "settings", "The gear button opens Settings in the wide window");
+        _window.ShowStack();
+        await Settle();
+
+        // Previews only run while the hub is on screen and not minimized (brief A.10); the corner
+        // window watches the same flag to know when to stay away.
+        Check(ModuleEntry.HubShowing, "The corner window stays away while the hub is on screen");
+        _window.WindowState = WindowState.Minimized;
+        await Settle();
+        Check(!ModuleEntry.HubShowing, "Minimizing lets the corner window return");
+        _window.WindowState = WindowState.Normal;
+        await Settle();
+        Check(ModuleEntry.HubShowing, "Restoring brings the hub back in front of the corner window");
+
+        // Reopening from the tray or the taskbar always lands on the stack, even from wide (brief A.5).
+        _window.ShowWide(created.Id);
+        await Settle();
+        _window.Hide();
+        await Settle();
+        _window.RestoreWorkspaceWindow();
+        await Settle();
+        Check(_window.DisplayMode == "stack" && _window.IsVisible, "Reopening from the tray returns to the stack");
+
+        // The engine asking for a specific workspace opens it in the wide window (brief A.8).
+        ModuleEntry.Selected = created.Id;
+        bool raised = false;
+        void OnOpen() => raised = true;
+        ModuleEntry.DashboardOpenRequested += OnOpen;
+        ModuleEntry.RequestDashboardOpen();
+        await Settle();
+        ModuleEntry.DashboardOpenRequested -= OnOpen;
+        Check(raised && _window.DisplayMode == "wide" && _window.SelectedWorkspaceId == created.Id,
+            "The corner window's open-in-hub opens that workspace in the wide window");
+        _window.ShowStack();
+        await Settle();
+
         _window.StopWorkspace(created.Id);
         await Settle();
-        Click("FocusNav");
-        await Settle();
-        Capture("03-focused.png");
-        _window.Width = 900;
-        _window.Height = 620;
-        await Settle();
-        Check(InWindow(Find<Button>("BackButton")), "Focus return action remains reachable at minimum size");
-        var focusedPanel = (AgentWorkspacesPanel)Find<ContentControl>("FocusSlot").Content;
-        var placeholder = (WorkspaceFrame)focusedPanel.FindName("ComputerFrame");
-        var transform = placeholder.TransformToAncestor(_window);
-        Check(Math.Abs(transform.Transform(new Point(1, 0)).X - transform.Transform(new Point()).X - 1) < 0.01,
-            "Stopped-desktop frame stays unscaled at minimum width");
-        Capture("03b-narrow-focus.png");
-        await CheckAppearances(focusedPanel);
-        _window.Width = 1280;
-        _window.Height = 820;
-        await Settle();
-        var research = WorkspaceStore.All()[0];
-        WorkspaceAccessStore.Write(research.Id, new WorkspaceAccessPolicy { PrewarmBrowser = false });
-        var runtime = WorkspaceRuntime.Start(research);
+        WorkspaceAccessStore.Write(created.Id, new WorkspaceAccessPolicy { PrewarmBrowser = false });
+        var runtime = WorkspaceRuntime.Start(WorkspaceStore.Find(created.Id)!);
         await Task.Delay(1500);
         var second = WorkspaceStore.Create("Build desk");
         WorkspaceStore.Create("Review desk");
-        Click("OverviewNav");
-        await Task.Delay(1800);
-        Check(Find<ItemsControl>("WorkspaceTiles").Items.Count == 3,
-            "Overview shows all three real fixture workspaces");
-        var tileContainer = (FrameworkElement)Find<ItemsControl>("WorkspaceTiles").ItemContainerGenerator.ContainerFromIndex(0);
-        Check(tileContainer.ActualHeight <= _window.PreviewHeight + 20,
-            "Monitor tiles are only their widescreen preview, no header or caption rows");
-        Capture("04-overview.png");
-        foreach (ThemeChoice theme in Themes)
-        {
-            _window.SetTheme(theme);
-            await Settle();
-            Check(ReferenceEquals(runtime, WorkspaceRuntime.Of(research.Id)) && WorkspaceStore.All().Count == 3,
-                theme + " theme keeps the running desktop and all saved workspaces");
-            Capture("theme-" + Lower(theme) + "-overview.png");
-        }
-        _window.SetTheme(ThemeChoice.Light);
-        Find<TextBox>("SearchBox").Text = "Build";
         await Settle();
-        Check(Find<ItemsControl>("WorkspaceTiles").Items.Count == 1, "Search filters workspace names");
-        Find<TextBox>("SearchBox").Text = "";
-        await Settle();
-        Click("CompactButton");
-        await Settle();
-        Check(_window.Width < 500 && _window.Height > 300, "Compact mode uses a small monitor window");
-        Check(ReferenceEquals(runtime, WorkspaceRuntime.Of(research.Id)),
-            "Compact mode preserves the same running desktop");
-        Check(InWindow(Find<Button>("CompactButton")), "Compact restore control remains reachable");
-        foreach (ThemeChoice theme in Themes)
-        {
-            _window.SetTheme(theme);
-            await Settle();
-            Check(InWindow(Find<Button>("CompactButton")), theme + " theme keeps the compact restore action in the window");
-            Capture("theme-" + Lower(theme) + "-compact.png");
-        }
-        _window.SetTheme(ThemeChoice.Light);
-        Capture("05-compact.png");
-        Click("CollapseButton");
-        await Settle();
-        Check(_window.Height < 140, "Collapse reduces the app to a small bar");
-        Check(!_window.PreviewLoopRunning, "Collapsed bar stops overview capture");
-        Check(InWindow(Find<Button>("CollapseButton")), "Collapsed expand control remains reachable");
-        Capture("06-collapsed.png");
-        _window.RestoreWorkspaceWindow();
-        await Settle();
-        Check(_window.Height > 300, "Tray restore expands the collapsed app");
-        Check(ReferenceEquals(runtime, WorkspaceRuntime.Of(research.Id)),
-            "Restore does not replace or restart the running desktop");
-        _window.WindowState = WindowState.Minimized;
-        await Task.Delay(1250);
-        Check(!_window.PreviewLoopRunning, "Minimizing stops overview capture");
-        Check(ReferenceEquals(runtime, WorkspaceRuntime.Of(research.Id)),
-            "Minimizing retains active work");
-        _window.WindowState = WindowState.Normal;
-        _window.RestoreWorkspaceWindow();
-        await Settle();
-        if (_window.DisplayMode != "full") Click("CompactButton");
-        _window.Width = 1280;
-        _window.Height = 820;
-        Click("OverviewNav");
-        await Settle();
-        Capture("07-restored.png");
-        await RunPanelRegressions(research, second, runtime);
+        await RunPanelRegressions(WorkspaceStore.Find(created.Id)!, second, runtime);
         await RunAgentRouting();
         runtime.Dispose();
-        Check(WorkspaceStore.Find(research.Id) is not null && WorkspaceStore.Find(second.Id) is not null,
+        Check(WorkspaceStore.Find(created.Id) is not null && WorkspaceStore.Find(second.Id) is not null,
             "Stopping the desktop retains stored workspaces");
-        _window.SetTheme(ThemeChoice.Dark);
+
+        // Window mode, selection and geometry persist; an explicit theme wins over Windows.
+        _window.ShowWide(created.Id);
+        _window.Width = 1100;
+        _window.Height = 700;
+        await Settle();
+        AppSettingsStore.Update(s => s with { Theme = ThemeChoice.Dark });
+        await Settle();
         _window.Dispose();
         var saved = ShellPreferences.Read();
-        Check(File.Exists(Path.Combine(_output, "shell.json")) && saved.Mode == "full" && saved.Full is not null,
-            "Window mode and geometry persist to the isolated app store");
+        Check(File.Exists(Path.Combine(_output, "shell.json")) && saved.Mode == "wide"
+            && saved.SelectedWorkspace == created.Id && saved.Wide is not null,
+            "Window mode, selection and geometry persist to the isolated app store");
         _window.Close();
         _window = new MainWindow { ShowActivated = false };
         _window.Show();
         await Settle();
-        Check(_window.DisplayMode == saved.Mode && Math.Abs(_window.ActualWidth - saved.Full!.Width) <= 2,
-            "A new app window restores saved mode and width");
+        Check(_window.DisplayMode == saved.Mode && _window.SelectedWorkspaceId == created.Id
+            && Math.Abs(_window.ActualWidth - saved.Wide!.Width) <= 2,
+            "A new app window restores the saved mode, selection and width");
         Check(File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"Theme\": \"Dark\"") && AppearanceManager.Dark,
             "An explicit theme persists and wins over Windows after reopening");
-        Click("HelpButton");
-        await Settle();
-        Check(Find<FrameworkElement>("HelpPanel").IsVisible, "Getting started and quit instructions remain available");
-        Capture("08-help.png");
+
         // Each Wave 1 slice adds its behavior checks in its own Scenes.*.cs file.
         await HubScenes.Gate();
         await CornerScenes.Gate();
@@ -241,41 +246,6 @@ static class Program
     }
 
     internal static MainWindow Window => _window;
-
-    static async Task CheckAppearances(AgentWorkspacesPanel panel)
-    {
-        InvokePanel(panel, "Speak", "You", "Appearance validation fixture.");
-        InvokePanel(panel, "Typing", "A streaming appearance fixture.");
-        var transcript = (StackPanel)panel.FindName("Transcript");
-        var message = transcript.Children.OfType<TextBlock>().Single(t => t.Text == "Appearance validation fixture.");
-        var streaming = transcript.Children.OfType<TextBlock>().Single(t => t.Text == "A streaming appearance fixture.");
-        var speaker = transcript.Children.OfType<TextBlock>().First(t => t.Text == "You");
-        var divider = transcript.Children.OfType<Border>().Last();
-        foreach (ThemeChoice skin in Themes)
-        {
-            _window.SetTheme(skin);
-            await Settle();
-            Check(ReferenceEquals(panel, Find<ContentControl>("FocusSlot").Content),
-                skin + " theme retains the same focused workspace panel");
-            Check(ColorOf(message.Foreground) == ResourceColor("ShellTextBrush")
-                && ColorOf(streaming.Foreground) == ResourceColor("ShellTextBrush")
-                && ColorOf(speaker.Foreground) == ResourceColor("ShellMutedBrush")
-                && ColorOf(divider.Background) == ResourceColor("ShellDividerBrush"),
-                skin + " appearance updates existing transcript text and divider colors");
-            foreach (string background in new[] { "ShellSurfaceBrush", "ShellPanelBrush", "ShellChipBrush" })
-                foreach (string foreground in new[] { "ShellTextBrush", "ShellMutedBrush" })
-                    if (Contrast(ResourceColor(foreground), ResourceColor(background)) < 4.5)
-                        throw new InvalidOperationException(skin + " has insufficient " + foreground + " contrast on " + background);
-            Check(Contrast(ResourceColor("OnAccentBrush"), ResourceColor("ShellAccentBrush")) >= 4.5
-                && Contrast(ResourceColor("OnAccentBrush"), ResourceColor("ShellAccentHoverBrush")) >= 4.5,
-                skin + " body, secondary text and primary-button colors meet 4.5:1 contrast");
-            var startButton = (Button)panel.FindName("StartButton");
-            Check(ColorOf(startButton.Foreground) == ResourceColor("OnAccentBrush"),
-                skin + " actual primary control follows the current on-accent ink");
-            Capture("theme-" + Lower(skin) + "-focus.png");
-        }
-        _window.SetTheme(ThemeChoice.Light);
-    }
 
     static string Lower(ThemeChoice theme) => theme.ToString().ToLowerInvariant();
 
@@ -328,16 +298,6 @@ static class Program
         AppSettingsStore.Changed -= Second;
         Check(seen is [3, 10, 10], "A listener that changes a setting leaves every listener hearing each state once, in order");
         AppSettingsStore.Update(settings => settings with { FadeAfterSeconds = 5 });
-    }
-
-    static Color ColorOf(Brush brush) => ((SolidColorBrush)brush).Color;
-    static Color ResourceColor(string key) => ColorOf((Brush)Application.Current.FindResource(key));
-    static double Contrast(Color first, Color second)
-    {
-        static double Channel(byte value) { double normalized = value / 255d; return normalized <= 0.04045 ? normalized / 12.92 : Math.Pow((normalized + 0.055) / 1.055, 2.4); }
-        static double Luminance(Color color) => .2126 * Channel(color.R) + .7152 * Channel(color.G) + .0722 * Channel(color.B);
-        double a = Luminance(first), b = Luminance(second);
-        return (Math.Max(a, b) + .05) / (Math.Min(a, b) + .05);
     }
 
     static async Task RunPanelRegressions(StoredWorkspace first, StoredWorkspace second, WorkspaceRuntime firstRuntime)
@@ -453,10 +413,10 @@ static class Program
         WorkspaceRuntime? sharedRuntime = WorkspaceRuntime.Of(shared.Id);
         Check(!acquired.TryGetProperty("isError", out _) && sharedRuntime?.Access?.Controller == "probe-agent",
             "An agent's first workspace tool lands it in the shared workspace, started for it, under its own name");
-        Click("OverviewNav");
+        _window.ShowStack();
         await Settle();
-        Check(Find<ItemsControl>("WorkspaceTiles").Items.OfType<WorkspaceTile>().Single(t => t.Id == shared.Id).AgentsText == "Probe-agent",
-            "The hub tile names the agent working in it");
+        Check(_window.Hub.Working.Any(e => e.Id == shared.Id && e.AgentText == "Probe-agent"),
+            "The hub names the agent working in a workspace");
         Capture("09-agent-working.png");
         sharedRuntime!.Plane!.OwnerTakes();
         Task<JsonElement> paused = Call("tools/call", new { name = "wait", arguments = new { seconds = 1 } });
@@ -477,11 +437,19 @@ static class Program
     static void InvokePanel(AgentWorkspacesPanel panel, string method, params object?[] args) =>
         typeof(AgentWorkspacesPanel).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(panel, args);
 
+    /// <summary>Calls a private instance member on <paramref name="target"/> - the same reflection
+    /// pattern as <see cref="InvokePanel"/>, for members on the window itself (a data-templated card
+    /// or row has no name of its own to find and click, and a filter field opened by keyboard has no
+    /// button to click either).</summary>
+    static void InvokePrivate(object target, string method, params object?[] args) =>
+        target.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, args);
+
+    static void RaiseKey(UIElement target, Key key) => target.RaiseEvent(new KeyEventArgs(
+        Keyboard.PrimaryDevice, PresentationSource.FromVisual(target), 0, key) { RoutedEvent = UIElement.PreviewKeyDownEvent });
+
     static T Find<T>(string name) where T : class =>
         _window.FindName(name) as T ?? throw new InvalidOperationException("Missing control " + name);
     static void Click(string name) => Find<Button>(name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-    static string[] MenuItems(string id) =>
-        _window.CreateWorkspaceMenu(id).Items.OfType<MenuItem>().Select(item => (string)item.Header).ToArray();
     static Task Settle() => Task.Delay(300);
 
     static bool InWindow(FrameworkElement element)

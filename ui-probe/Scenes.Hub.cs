@@ -1,4 +1,3 @@
-using System.IO;
 using System.Windows;
 using HiveMind.AgentWorkspaces;
 
@@ -68,7 +67,11 @@ static class HubScenes
     /// <summary>Behavior checks for the hub, run at the end of the UI gate.</summary>
     internal static async Task Gate()
     {
-        using var settings = AppSettingsStore.UseFileForTests(Path.GetTempFileName());
+        // Program.Run() already scopes AppSettingsStore for the whole gate; a second scope here
+        // would throw "already active" when this runs as part of that gate rather than alone.
+        // It also leaves ShellPreferences on whatever mode its own persistence check saved last,
+        // so start this scene from the same blank slate a fresh install would see.
+        new ShellPreferences().Save();
         var window = new MainWindow { ShowActivated = false, Left = SceneContext.OffScreen.X, Top = SceneContext.OffScreen.Y };
         try
         {
