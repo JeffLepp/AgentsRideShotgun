@@ -111,6 +111,8 @@ static class FirstRunScenes
                 await PressStart(open.Window);
                 Program.Check(asked is [(WorkspaceConnections.AgentApp.Codex, true)],
                     "Trying again retries only the agent that refused; the one that connected is left alone");
+                Program.Check(Switches(open.Window)[1].IsEnabled && !Switches(open.Window)[0].IsEnabled,
+                    "The switch comes back on the row that refused, so the owner can leave that agent out instead");
                 open.Window.Close();
             }
             Program.Check(AppSettingsStore.Current.ConnectAgents,

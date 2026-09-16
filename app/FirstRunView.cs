@@ -461,8 +461,9 @@ public sealed class FirstRunWindow : Window
         }
         WorkspaceConnections.KeepUp();
         if (_rows.All(row => row.Error.Visibility != Visibility.Visible)) { Close(); return; }
-        // Recovery, not a dead end: one more try for the rows that said why, and closing still
-        // leaves what did connect connected.
+        // Recovery, not a dead end: one more try for the rows that said why, their switch back so
+        // the owner can leave one out instead, and closing still keeps whatever did connect.
+        foreach (var (_, toggle, error) in _rows) toggle.IsEnabled = error.Visibility == Visibility.Visible;
         _started = false;
         _start.Content = TryAgainLabel;
         _start.IsEnabled = true;
