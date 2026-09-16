@@ -33,8 +33,8 @@ internal static class FirstRunConnections
             string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             string realClaude = Path.Combine(profile, ".claude.json");
             string realCodex = Path.Combine(profile, ".codex");
-            DateTime claudeStamp = Stamp(realClaude);
-            DateTime codexStamp = Stamp(realCodex);
+            string claudeEntry = OwnEntry(realClaude);
+            string codexEntry = OwnEntry(Path.Combine(realCodex, "config.toml"));
             Check(!Same(claudeFile, realClaude) && !Same(codexHome, realCodex)
                 && WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode) == false
                 && WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex) == false,
@@ -62,10 +62,30 @@ internal static class FirstRunConnections
             Check(Entries(claudeFile) == 1 && Entries(codexFile) == 1,
                 "Four launches leave exactly one Deskweave entry in each agent's configuration");
 
+            // A replacement that fails: the old entry is already out, so the one line has to say
+            // so. Claiming nothing changed would hide a connection the owner no longer has.
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", "refuse");
+            string? refusedReplacement = Set(WorkspaceConnections.AgentApp.ClaudeCode, true);
+            Check(refusedReplacement is { } gone && gone.Contains("came out with it", StringComparison.Ordinal)
+                && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode) && Entries(claudeFile) == 0,
+                "A replacement that fails says the earlier entry came out with it, not that nothing changed");
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is { } nothing
+                && nothing.EndsWith("Nothing else was changed.", StringComparison.Ordinal) && Entries(claudeFile) == 0,
+                "A connection that fails with no entry to replace says nothing else changed, and nothing did");
+
+            // A command that exits 0 and writes nothing has connected nothing, whatever it says.
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", "silent");
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is not null
+                && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode),
+                "An agent command that exits without writing the entry is not reported as connected");
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", null);
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is null && Entries(claudeFile) == 1,
+                "Connecting again after a refusal puts the one entry back");
+
             // An agent installed after consent is connected on its own, without a second prompt.
             File.Delete(codexFile);
             WorkspaceConnections.Locate = app => app == WorkspaceConnections.AgentApp.Codex ? null : Environment.ProcessPath;
-            AppSettingsStore.Update(s => s with { ConnectAgents = true, FirstRunDone = true });
+            AppSettingsStore.Update(s => s with { ConnectAgents = true, FirstRunDone = true, AgentsOff = [] });
             WorkspaceConnections.KeepUpEvery = TimeSpan.FromSeconds(1);
             WorkspaceConnections.KeepUp();
             Thread.Sleep(1500);
@@ -74,7 +94,23 @@ internal static class FirstRunConnections
             WorkspaceConnections.Locate = _ => Environment.ProcessPath;
             Check(Until(() => WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex)) && Entries(codexFile) == 1,
                 "After Start, an agent installed later is connected by itself, once, with no second prompt");
+
+            // Turned off in Settings, with the loop still running because the other agent has left
+            // this PC and is still worth waiting for. It has to leave the one the owner took out.
+            Check(Set(WorkspaceConnections.AgentApp.Codex, false) is null && Entries(codexFile) == 0,
+                "Turning an agent off in Settings takes Deskweave out of its configuration");
+            Set(WorkspaceConnections.AgentApp.ClaudeCode, false);
+            WorkspaceConnections.Locate = app => app == WorkspaceConnections.AgentApp.ClaudeCode ? null : Environment.ProcessPath;
+            WorkspaceConnections.Remember(WorkspaceConnections.AgentApp.Codex, false);
+            WorkspaceConnections.KeepUp();
+            Thread.Sleep(2500);
+            Check(!WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex) && Entries(codexFile) == 0,
+                "An agent the owner turned off is never connected again by the keep-up loop");
+            WorkspaceConnections.Remember(WorkspaceConnections.AgentApp.Codex, true);
+            Check(Until(() => WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex)) && Entries(codexFile) == 1,
+                "Turning it back on in Settings lets the keep-up loop connect it again, once");
             WorkspaceConnections.StopKeepingUp();
+            WorkspaceConnections.Locate = _ => Environment.ProcessPath;
 
             // Without Start nothing keeps up: closing first launch really does change nothing.
             File.Delete(codexFile);
@@ -93,12 +129,13 @@ internal static class FirstRunConnections
                 && WorkspaceMcp.Scope.Contains("builds, unit tests", StringComparison.Ordinal),
                 "A connected agent is told to use Deskweave for windows by itself, and not for code, builds, tests or file work");
 
-            Check(Stamp(realClaude) == claudeStamp && Stamp(realCodex) == codexStamp,
-                "The owner's own Claude Code and Codex configuration is untouched by every check above");
+            Check(OwnEntry(realClaude) == claudeEntry && OwnEntry(Path.Combine(realCodex, "config.toml")) == codexEntry,
+                "Deskweave's entry in the owner's own Claude Code and Codex configuration is exactly as it was");
         }
         finally
         {
             WorkspaceConnections.StopKeepingUp();
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", null);
             WorkspaceConnections.Locate = wasLocate;
             WorkspaceConnections.KeepUpEvery = TimeSpan.FromMinutes(10);
             Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", wasClaude);
@@ -109,11 +146,30 @@ internal static class FirstRunConnections
         static IReadOnlyList<(WorkspaceConnections.AgentApp App, string Why)> Connect() =>
             WorkspaceConnections.Connect(WorkspaceConnections.Supported).GetAwaiter().GetResult();
 
-        static bool Same(string a, string b) => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+        static string? Set(WorkspaceConnections.AgentApp app, bool on) =>
+            WorkspaceConnections.SetConnected(app, on, default).GetAwaiter().GetResult();
 
-        // Missing stays missing: a path that does not exist reads as the same sentinel both times.
-        static DateTime Stamp(string path) => File.Exists(path) ? File.GetLastWriteTimeUtc(path)
-            : Directory.Exists(path) ? Directory.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+        static bool Same(string a, string b) => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Deskweave's own entry in one of the owner's real configuration files, as its text, or nothing
+    /// when it has none. It is the only part of that file these checks could ever write, and a whole
+    /// file would be the wrong thing to compare: an agent session of the owner's own rewrites its
+    /// history while the probe runs, which says nothing about Deskweave.
+    /// </summary>
+    static string OwnEntry(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return "";
+            if (path.EndsWith(".toml", StringComparison.OrdinalIgnoreCase))
+                return string.Concat(Table(File.ReadAllLines(path), ours: true));
+            using var json = JsonDocument.Parse(File.ReadAllText(path));
+            return json.RootElement.TryGetProperty("mcpServers", out JsonElement servers)
+                && servers.TryGetProperty(WorkspaceConnections.AppName, out JsonElement ours) ? ours.GetRawText() : "";
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return "unreadable"; }
     }
 
     static bool Until(Func<bool> ready)
@@ -161,10 +217,14 @@ internal static class FirstRunConnections
         {
             if (!File.Exists(path)) return 0;
             if (claude) Save(path, Without(Read(path)));
-            else File.WriteAllLines(path, Trimmed(File.ReadAllLines(path)));
+            else File.WriteAllLines(path, Table(File.ReadAllLines(path), ours: false));
             return 0;
         }
         if (args[1] != "add") return 2;
+        // Standing in for an agent command that will not take the entry, or says it did and wrote
+        // nothing. The probe asks for it in the environment; without it every add is a real write.
+        if (Environment.GetEnvironmentVariable("DESKWEAVE_STUB") is { Length: > 0 } how)
+            return how == "refuse" ? 3 : 0;
         string[] command = [.. args.SkipWhile(a => a != "--").Skip(1)];
         if (command.Length == 0) return 2;
         if (claude)
@@ -181,7 +241,7 @@ internal static class FirstRunConnections
             Save(path, document);
             return 0;
         }
-        List<string> lines = [.. File.Exists(path) ? Trimmed(File.ReadAllLines(path)) : []];
+        List<string> lines = [.. File.Exists(path) ? Table(File.ReadAllLines(path), ours: false) : []];
         lines.Add("[mcp_servers." + WorkspaceConnections.AppName + "]");
         lines.Add("command = " + Quoted(command[0]));
         lines.Add("args = [" + string.Join(", ", command.Skip(1).Select(Quoted)) + "]");
@@ -201,14 +261,14 @@ internal static class FirstRunConnections
 
     static void Save(string path, JsonObject document) => File.WriteAllText(path, document.ToJsonString());
 
-    /// <summary>A TOML file without its [mcp_servers.deskweave] table.</summary>
-    static IEnumerable<string> Trimmed(string[] lines)
+    /// <summary>A TOML file's [mcp_servers.deskweave] table, or everything but it.</summary>
+    static IEnumerable<string> Table(string[] lines, bool ours)
     {
         bool inside = false;
         foreach (string line in lines)
         {
             if (line.TrimStart().StartsWith('[')) inside = line.Trim() == "[mcp_servers." + WorkspaceConnections.AppName + "]";
-            if (!inside) yield return line;
+            if (inside == ours) yield return line;
         }
     }
 }

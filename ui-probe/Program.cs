@@ -240,6 +240,7 @@ static class Program
 
         // Each Wave 1 slice adds its behavior checks in its own Scenes.*.cs file. A named slice is
         // useful while repairing one checker; ordinary validation leaves it unset and runs all.
+        string ownerAgents = OwnerAgentEntries();
         string? slice = Environment.GetEnvironmentVariable("DESKWEAVE_UI_GATE_SLICE")?.Trim().ToLowerInvariant();
         if (slice is not null and not ("hub" or "corner" or "settings" or "firstrun"))
             throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner, settings or firstrun.");
@@ -255,6 +256,41 @@ static class Program
         }
         if (slice is null or "settings") await SettingsScenes.Gate();
         if (slice is null or "firstrun") await FirstRunScenes.Gate();
+        Check(OwnerAgentEntries() == ownerAgents,
+            "The gate left Deskweave's entry in the owner's own Claude Code and Codex configuration alone");
+    }
+
+    /// <summary>
+    /// Deskweave's own entry in the owner's real agent configuration, as text. Nothing in the gate
+    /// may write it: a stand-in that misses one path would connect the owner's agents to a debug
+    /// build for real, and this is where that shows up. The rest of those files belongs to his own
+    /// agent sessions, which rewrite their history while the gate runs, so only the entry is read.
+    /// </summary>
+    static string OwnerAgentEntries()
+    {
+        string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Entry(Path.Combine(profile, ".claude.json")) + "|" + Entry(Path.Combine(profile, ".codex", "config.toml"));
+
+        static string Entry(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return "";
+                if (path.EndsWith(".toml", StringComparison.OrdinalIgnoreCase))
+                {
+                    bool inside = false;
+                    return string.Concat(File.ReadLines(path).Where(line =>
+                    {
+                        if (line.TrimStart().StartsWith('[')) inside = line.Trim() == "[mcp_servers.deskweave]";
+                        return inside;
+                    }));
+                }
+                using var json = JsonDocument.Parse(File.ReadAllText(path));
+                return json.RootElement.TryGetProperty("mcpServers", out JsonElement servers)
+                    && servers.TryGetProperty(WorkspaceConnections.AppName, out JsonElement ours) ? ours.GetRawText() : "";
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return "unreadable"; }
+        }
     }
 
     internal static MainWindow Window => _window;
@@ -266,17 +302,19 @@ static class Program
         // Only choices that remain visible after the cut round belong in this default claim.
         AppSettings s = AppSettingsStore.Current;
         Check(s.StartWithWindows && s.Theme == ThemeChoice.FollowWindows && !s.FirstRunDone && !s.ConnectAgents
-            && s.PauseHotkey == "Ctrl+Alt+P" && s.AccountScopes.Count == 0
+            && s.AgentsOff.Count == 0 && s.PauseHotkey == "Ctrl+Alt+P" && s.AccountScopes.Count == 0
             && s.CornerShow == CornerShow.ComesAndGoes && !s.CornerPinned
             && s.CornerLeft is null && s.CornerTop is null && s.CornerWidth is null
             && s.Screenshots == ScreenshotMode.KeySteps,
             "Every remaining choice starts at the MVP spec's default");
         AppSettings odd = new AppSettings
         {
-            Theme = (ThemeChoice)9, PauseHotkey = "P", CornerWidth = double.NaN, AccountScopes = null!
+            Theme = (ThemeChoice)9, PauseHotkey = "P", CornerWidth = double.NaN, AccountScopes = null!,
+            AgentsOff = ["Codex", "Codex", "SomeAgentThisBuildNeverHeardOf"],
         }.Sane();
         Check(odd.Theme == ThemeChoice.FollowWindows && odd.PauseHotkey == "Ctrl+Alt+P"
-            && odd.CornerWidth is null && odd.AccountScopes is { Count: 0 }, "A hand-edited settings file falls back to real choices");
+            && odd.CornerWidth is null && odd.AccountScopes is { Count: 0 }
+            && odd.AgentsOff is ["Codex"], "A hand-edited settings file falls back to real choices");
         Check(s.AccountScopes is not Dictionary<string, string> && AppSettingsStore.Current.AccountScopes is not Dictionary<string, string>,
             "Account scopes cannot be changed behind the store's back");
         int heard = 0;
@@ -481,6 +519,31 @@ static class Program
         if (!condition) throw new InvalidOperationException(claim);
         Passed.Add(claim);
     }
+
+    /// <summary>
+    /// Stands in for the three engine fields every agent path shares: where an agent's command is,
+    /// whether its configuration already names Deskweave, and the one call that writes it. First
+    /// launch, Settings and the keep-up loop all read and write through these, so a scene answers
+    /// for all three at once and none of them reaches the owner's own agents. Put them back with
+    /// the handle this gives.
+    /// </summary>
+    internal static IDisposable AgentSeams()
+    {
+        var (locate, connected, set) =
+            (WorkspaceConnections.Locate, WorkspaceConnections.IsConnected, WorkspaceConnections.SetConnected);
+        return new Restore(() =>
+            (WorkspaceConnections.Locate, WorkspaceConnections.IsConnected, WorkspaceConnections.SetConnected)
+                = (locate, connected, set));
+    }
+
+    /// <summary>What is on this PC, as the three states a row shows.</summary>
+    internal static void Agents(Func<WorkspaceConnections.AgentApp, AgentState> state)
+    {
+        WorkspaceConnections.Locate = app => state(app) == AgentState.NotInstalled ? null : "agent.exe";
+        WorkspaceConnections.IsConnected = app => state(app) == AgentState.Connected;
+    }
+
+    internal sealed class Restore(Action action) : IDisposable { public void Dispose() => action(); }
 
     static void Report(Exception? failure) => File.WriteAllText(Path.Combine(_output, "ui-report.json"),
         JsonSerializer.Serialize(new

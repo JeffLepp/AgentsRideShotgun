@@ -109,13 +109,20 @@ internal static class SettingsActions
 {
     internal static Func<AppSettings, bool> SyncStartup = StartWithWindows.Sync;
 
-    internal static Func<WorkspaceConnections.AgentApp, AgentState> ReadAgent = app =>
+    /// <summary>What an agent row shows. Not a seam of its own: it reads the two engine fields
+    /// (<see cref="WorkspaceConnections.Locate"/>, <see cref="WorkspaceConnections.IsConnected"/>)
+    /// that first launch, Settings and the keep-up loop all share, so a probe stands in once.</summary>
+    internal static AgentState ReadAgent(WorkspaceConnections.AgentApp app) =>
         !WorkspaceConnections.IsInstalled(app) ? AgentState.NotInstalled
         : WorkspaceConnections.IsConnected(app) ? AgentState.Connected : AgentState.Found;
 
-    /// <summary>Adds or removes Deskweave in the agent's own configuration. Null, or why it could not.</summary>
-    internal static Func<WorkspaceConnections.AgentApp, bool, Task<string?>> Connect =
-        (app, on) => WorkspaceConnections.SetConnected(app, on);
+    /// <summary>The owner asked for this agent, by a switch here or on first launch: remember the
+    /// answer, so nothing connects one he turned off, then do it. Null, or why it could not.</summary>
+    internal static Task<string?> Connect(WorkspaceConnections.AgentApp app, bool on)
+    {
+        WorkspaceConnections.Remember(app, on);
+        return WorkspaceConnections.SetConnected(app, on, default);
+    }
 
     internal static Action<string> CopyText = Clipboard.SetText;
 

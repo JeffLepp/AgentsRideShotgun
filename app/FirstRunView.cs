@@ -451,6 +451,10 @@ public sealed class FirstRunWindow : Window
         // Consent first: it is what the press means, and it is what connects an agent installed
         // later even if the one on this PC refuses right now.
         AppSettingsStore.Update(s => s with { ConnectAgents = true, FirstRunDone = true });
+        // A switch left off is the owner saying no to that agent: remembered, so nothing connects
+        // it later either. The ones left on are remembered by the connection itself.
+        foreach (var (app, toggle, _) in _rows)
+            if (toggle.IsChecked != true) WorkspaceConnections.Remember(app, false);
         foreach (var (app, toggle, error) in _rows)
         {
             if (toggle.IsChecked != true || !_connected.Add(app)) continue;

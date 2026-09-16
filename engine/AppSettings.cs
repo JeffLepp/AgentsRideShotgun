@@ -35,6 +35,13 @@ public sealed record AppSettings
     /// </summary>
     public bool ConnectAgents { get; init; }
 
+    /// <summary>
+    /// The supported agents the owner said no to, by name: a switch left off on first launch, or
+    /// one turned off in Settings later. They are never connected by themselves. Everything else
+    /// supported is, once Start was pressed, including an agent installed after it.
+    /// </summary>
+    public IReadOnlyList<string> AgentsOff { get; init; } = [];
+
     // Agents
     /// <summary>As "Ctrl+Alt+P". Empty registers nothing.</summary>
     public string PauseHotkey { get; init; } = "Ctrl+Alt+P";
@@ -77,6 +84,9 @@ public sealed record AppSettings
             CornerLeft = Finite(CornerLeft),
             CornerTop = Finite(CornerTop),
             CornerWidth = Finite(CornerWidth) is { } width ? Math.Clamp(width, 220, 1600) : null,
+            // Whatever is on disk: only names this build still knows, each once.
+            AgentsOff = [.. (AgentsOff ?? d.AgentsOff).Where(a => Enum.TryParse<WorkspaceConnections.AgentApp>(a, out _))
+                .Distinct(StringComparer.Ordinal)],
             Screenshots = Known(Screenshots, d.Screenshots),
         };
     }

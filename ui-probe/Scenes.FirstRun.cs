@@ -9,7 +9,7 @@ namespace Deskweave.UiProbe;
 
 /// <summary>
 /// First launch: reference 07. Every check here goes through the
-/// same seams Settings uses (<see cref="SettingsActions.ReadAgent"/>, <see cref="SettingsActions.Connect"/>),
+/// engine fields first launch, Settings and the keep-up loop all share (<see cref="Program.AgentSeams"/>),
 /// so the gate never reaches a real agent's command or the owner's own configuration.
 /// </summary>
 static class FirstRunScenes
@@ -17,7 +17,8 @@ static class FirstRunScenes
     [Scene("first-launch", "07-first-launch", 240, 44, 520, 560)]
     static async Task<FrameworkElement> FirstLaunch(SceneContext scene)
     {
-        using IDisposable found = Detect(_ => AgentState.Found);
+        using IDisposable seams = Program.AgentSeams();
+        Program.Agents(_ => AgentState.Found);
         var window = scene.Own(new FirstRunWindow
         {
             WindowStartupLocation = WindowStartupLocation.Manual,
@@ -32,23 +33,31 @@ static class FirstRunScenes
 
     internal static async Task Gate()
     {
-        var readAgent = SettingsActions.ReadAgent;
-        var connect = SettingsActions.Connect;
+        IDisposable seams = Program.AgentSeams();
         AppSettings before = AppSettingsStore.Current;
+        TimeSpan keepUpEvery = WorkspaceConnections.KeepUpEvery;
+        Dispatcher ui = Dispatcher.CurrentDispatcher;
         try
         {
             List<(WorkspaceConnections.AgentApp App, bool On)> asked = [];
-            // A fresh PC for each check: nothing answered, no consent, and no connection asked for yet.
+            // Start hands the keep-up loop the same seams, and it runs on its own thread from the
+            // moment consent is recorded. What that loop does is the engine probe's to check; these
+            // checks are about the window, so they count only what the window itself asked for.
+            WorkspaceConnections.KeepUpEvery = TimeSpan.FromHours(1);
+            void Ask(WorkspaceConnections.AgentApp app, bool on) { if (ui.CheckAccess()) asked.Add((app, on)); }
+            // A fresh PC for each check: nothing answered, no consent, no agent refused, and no
+            // connection asked for yet.
             void Reset()
             {
+                WorkspaceConnections.StopKeepingUp();
                 asked.Clear();
-                AppSettingsStore.Update(s => s with { FirstRunDone = false, ConnectAgents = false });
+                AppSettingsStore.Update(s => s with { FirstRunDone = false, ConnectAgents = false, AgentsOff = [] });
             }
-            SettingsActions.Connect = (app, on) => { asked.Add((app, on)); return Task.FromResult<string?>(null); };
+            WorkspaceConnections.SetConnected = (app, on, _) => { Ask(app, on); return Task.FromResult<string?>(null); };
 
             // Both agents here: a row each, switch already on, and nothing written yet.
             Reset();
-            SettingsActions.ReadAgent = _ => AgentState.Found;
+            Program.Agents(_ => AgentState.Found);
             using (Shown open = Open())
             {
                 Program.Check(Labels(open.Window).Contains("Claude Code") && Labels(open.Window).Contains("Codex"),
@@ -91,12 +100,17 @@ static class FirstRunScenes
             }
             Program.Check(asked is [(WorkspaceConnections.AgentApp.ClaudeCode, true)],
                 "An agent switched off on first launch is not connected");
+            Program.Check(WorkspaceConnections.TurnedOff(WorkspaceConnections.AgentApp.Codex)
+                && !WorkspaceConnections.Missing(WorkspaceConnections.AgentApp.Codex),
+                "An agent switched off on first launch stays off: nothing connects it later either");
+            Program.Check(!WorkspaceConnections.TurnedOff(WorkspaceConnections.AgentApp.ClaudeCode),
+                "The agent left switched on is not remembered as one the owner refused");
 
             // One agent refuses: its own line, the window stays, and a second press retries only it.
             Reset();
-            SettingsActions.Connect = (app, on) =>
+            WorkspaceConnections.SetConnected = (app, on, _) =>
             {
-                asked.Add((app, on));
+                Ask(app, on);
                 return Task.FromResult(app == WorkspaceConnections.AgentApp.Codex ? "Codex did not accept the connection. Nothing else was changed." : null);
             };
             using (Shown open = Open())
@@ -113,15 +127,21 @@ static class FirstRunScenes
                     "Trying again retries only the agent that refused; the one that connected is left alone");
                 Program.Check(Switches(open.Window)[1].IsEnabled && !Switches(open.Window)[0].IsEnabled,
                     "The switch comes back on the row that refused, so the owner can leave that agent out instead");
-                open.Window.Close();
+                asked.Clear();
+                Switches(open.Window)[1].IsChecked = false;
+                await PressStart(open.Window);
+                Program.Check(asked.Count == 0 && WorkspaceConnections.TurnedOff(WorkspaceConnections.AgentApp.Codex),
+                    "Trying again with the refusing agent switched off connects nothing and remembers it off");
+                Program.Check(!WorkspaceConnections.Missing(WorkspaceConnections.AgentApp.Codex),
+                    "The agent the owner gave up on is not put back by the keep-up loop either");
             }
             Program.Check(AppSettingsStore.Current.ConnectAgents,
                 "Consent holds even when an agent refused, so it is connected on its own later");
 
             // With nothing supported installed there is nothing to set up.
             Reset();
-            SettingsActions.Connect = (app, on) => { asked.Add((app, on)); return Task.FromResult<string?>(null); };
-            SettingsActions.ReadAgent = _ => AgentState.NotInstalled;
+            WorkspaceConnections.SetConnected = (app, on, _) => { Ask(app, on); return Task.FromResult<string?>(null); };
+            Program.Agents(_ => AgentState.NotInstalled);
             using (Shown open = Open())
             {
                 Program.Check(Switches(open.Window).Count == 0 && Words(open.Window).Contains("No supported agent found on this PC"),
@@ -130,10 +150,15 @@ static class FirstRunScenes
             }
             Program.Check(asked.Count == 0 && AppSettingsStore.Current.ConnectAgents,
                 "Start with nothing installed still records consent, so an agent installed later connects itself");
+            Program.Check(WorkspaceConnections.Supported.All(app => !WorkspaceConnections.TurnedOff(app)),
+                "Start with nothing installed refuses nothing: an empty PC is not an answer about any agent");
+            Program.Agents(_ => AgentState.Found);
+            Program.Check(WorkspaceConnections.Supported.All(WorkspaceConnections.Missing),
+                "A supported agent installed after Start is one the keep-up loop connects");
 
             // One agent here, one not: the missing one has no row at all.
             Reset();
-            SettingsActions.ReadAgent = app => app == WorkspaceConnections.AgentApp.ClaudeCode ? AgentState.Found : AgentState.NotInstalled;
+            Program.Agents(app => app == WorkspaceConnections.AgentApp.ClaudeCode ? AgentState.Found : AgentState.NotInstalled);
             using (Shown open = Open())
                 Program.Check(Labels(open.Window).Contains("Claude Code") && !Labels(open.Window).Contains("Codex"),
                     "An agent that is not on this PC has no row on first launch");
@@ -146,8 +171,10 @@ static class FirstRunScenes
         }
         finally
         {
-            SettingsActions.ReadAgent = readAgent;
-            SettingsActions.Connect = connect;
+            // Before the seams go back, so nothing is left connecting the owner's own agents.
+            WorkspaceConnections.StopKeepingUp();
+            WorkspaceConnections.KeepUpEvery = keepUpEvery;
+            seams.Dispose();
             AppSettingsStore.Update(_ => before);
         }
     }
@@ -181,15 +208,6 @@ static class FirstRunScenes
         Pump();
         if (window.IsVisible) window.UpdateLayout();
     }
-
-    static IDisposable Detect(Func<WorkspaceConnections.AgentApp, AgentState> state)
-    {
-        var was = SettingsActions.ReadAgent;
-        SettingsActions.ReadAgent = state;
-        return new Restore(() => SettingsActions.ReadAgent = was);
-    }
-
-    sealed class Restore(Action action) : IDisposable { public void Dispose() => action(); }
 
     // The card's own rows, told apart from the title bar's close button by their style.
     static List<CheckBox> Switches(DependencyObject root) => [.. Descendants<CheckBox>(root)];

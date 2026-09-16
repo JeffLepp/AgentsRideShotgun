@@ -53,8 +53,12 @@ internal static class WorkspaceConnections
 
     internal static bool IsInstalled(AgentApp app) => Locate(app) is not null;
 
-    /// <summary>Whether the app's own configuration has Deskweave in it. Reads the file, never writes it.</summary>
-    internal static bool IsConnected(AgentApp app)
+    /// <summary>Whether the app's own configuration has Deskweave in it. A field for the same reason
+    /// <see cref="Locate"/> is one: first launch, Settings and <see cref="KeepUp"/> all read through
+    /// it, so a probe answers for every one of them at once. The default reads the file, never writes it.</summary>
+    internal static Func<AgentApp, bool> IsConnected = ReadConnected;
+
+    static bool ReadConnected(AgentApp app)
     {
         string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         try
@@ -79,9 +83,13 @@ internal static class WorkspaceConnections
 
     /// <summary>
     /// Adds or removes Deskweave in one agent app's configuration, through that app's own command.
-    /// Returns why it could not, or null. No model runs and nothing else in the configuration moves.
+    /// Returns why it could not, or null. The one call that writes an agent's configuration, and a
+    /// field so a probe stands in for every caller at once: first launch, Settings and the keep-up
+    /// loop all come through here. No model runs and nothing else in the configuration moves.
     /// </summary>
-    internal static async Task<string?> SetConnected(AgentApp app, bool connect, CancellationToken cancel = default)
+    internal static Func<AgentApp, bool, CancellationToken, Task<string?>> SetConnected = Change;
+
+    static async Task<string?> Change(AgentApp app, bool connect, CancellationToken cancel)
     {
         string name = DisplayName(app);
         string? cli = Locate(app);
@@ -91,11 +99,19 @@ internal static class WorkspaceConnections
         using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         bound.CancelAfter(TimeSpan.FromSeconds(30));
         // Replace, never duplicate: an entry from an older Deskweave comes out first.
-        if (IsConnected(app)) await Run(cli, ["mcp", "remove", .. scope, AppName], bound.Token, null).ConfigureAwait(false);
+        bool had = IsConnected(app);
+        if (had) await Run(cli, ["mcp", "remove", .. scope, AppName], bound.Token, null).ConfigureAwait(false);
         if (!connect) return IsConnected(app) ? $"{name} kept its Deskweave entry. Remove it in {name}'s MCP settings." : null;
         var added = await Run(cli, ["mcp", "add", .. scope, AppName, "--", Bridge, "--workspace", WorkspaceAccessStore.RouterTicket],
             bound.Token, null).ConfigureAwait(false);
-        return added.Code == 0 ? null : $"{name} did not accept the connection. Nothing else was changed.";
+        // What the configuration says now, not what the command claimed: one that exits 0 without
+        // writing the entry has connected nothing.
+        if (added.Code == 0 && IsConnected(app)) return null;
+        return had && !IsConnected(app)
+            // The old entry came out for the replacement and the new one did not go in. Saying
+            // nothing changed would be a lie, and it would hide a connection that is gone.
+            ? $"{name} did not accept the connection, and its earlier Deskweave entry came out with it. Connect it again in Settings."
+            : $"{name} did not accept the connection. Nothing else was changed.";
     }
 
     /// <summary>
@@ -112,6 +128,23 @@ internal static class WorkspaceConnections
         return refused;
     }
 
+    /// <summary>
+    /// The owner's answer for one agent, from a switch on first launch or in Settings. Off is what
+    /// is kept: everything supported is connected once Start was pressed, so the only thing worth
+    /// remembering is an agent he said no to, and nothing connects that one behind his back.
+    /// </summary>
+    internal static void Remember(AgentApp app, bool on) => AppSettingsStore.Update(s => s with
+    {
+        AgentsOff = on ? [.. s.AgentsOff.Where(off => off != app.ToString())]
+            : s.AgentsOff.Contains(app.ToString()) ? s.AgentsOff : [.. s.AgentsOff, app.ToString()],
+    });
+
+    /// <summary>Whether the owner turned this agent off, on first launch or in Settings.</summary>
+    internal static bool TurnedOff(AgentApp app) => AppSettingsStore.Current.AgentsOff.Contains(app.ToString());
+
+    /// <summary>An agent the keep-up loop should still connect: on this PC, not connected, not refused.</summary>
+    internal static bool Missing(AgentApp app) => IsInstalled(app) && !IsConnected(app) && !TurnedOff(app);
+
     /// <summary>How often a PC with a supported agent still missing is looked at again.</summary>
     internal static TimeSpan KeepUpEvery = TimeSpan.FromMinutes(10);
 
@@ -120,8 +153,9 @@ internal static class WorkspaceConnections
     /// <summary>
     /// The owner pressed Start once, so an agent installed later is connected without being asked
     /// again (MVP_SPEC, Behavior). Looks now and then every <see cref="KeepUpEvery"/>, and stops
-    /// itself once every supported agent is connected, so the ordinary PC pays nothing. Off the UI
-    /// thread: finding an agent's command walks folders. Does nothing without consent.
+    /// itself once no supported agent is still missing, so the ordinary PC pays nothing. Off the UI
+    /// thread: finding an agent's command walks folders. Does nothing without consent, and never
+    /// touches an agent the owner turned off.
     /// </summary>
     internal static void KeepUp()
     {
@@ -134,16 +168,19 @@ internal static class WorkspaceConnections
             {
                 do
                 {
-                    // Consent can be withdrawn while this waits; an agent turned off in Settings
-                    // stays off because nothing here removes an entry, only adds a missing one.
+                    // Both answers can change while this waits: consent can be withdrawn, and an
+                    // agent can be turned off in Settings. Either one is read again every pass.
                     if (!AppSettingsStore.Current.ConnectAgents) continue;
-                    await Connect(Supported.Where(app => IsInstalled(app) && !IsConnected(app)), stop.Token).ConfigureAwait(false);
-                    if (Supported.All(IsConnected)) return;
+                    await Connect(Supported.Where(Missing), stop.Token).ConfigureAwait(false);
+                    // Only an answer ends this, not an empty PC: every supported agent is either
+                    // connected or turned off. One that is not installed yet is what it waits for.
+                    if (Supported.All(app => IsConnected(app) || TurnedOff(app))) return;
                 }
                 while (await clock.WaitForNextTickAsync(stop.Token).ConfigureAwait(false));
             }
             catch (OperationCanceledException) { }   // the app is closing
-            finally { stop.Dispose(); }
+            // Leaves the field empty for the next KeepUp, unless StopKeepingUp already took it.
+            finally { Interlocked.CompareExchange(ref _keepingUp, null, stop); stop.Dispose(); }
         }, stop.Token);
     }
 
@@ -205,7 +242,7 @@ internal static class WorkspaceConnections
     internal static async Task RemoveOwnedConnections()
     {
         foreach (AgentApp app in Enum.GetValues<AgentApp>())
-            if (IsConnected(app)) await SetConnected(app, false).ConfigureAwait(false);
+            if (IsConnected(app)) await SetConnected(app, false, default).ConfigureAwait(false);
         if (!Directory.Exists(WorkspaceAccessStore.Root)) return;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         foreach (string folder in Directory.EnumerateDirectories(WorkspaceAccessStore.Root))

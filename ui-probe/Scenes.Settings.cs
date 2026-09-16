@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -17,7 +18,7 @@ static class SettingsFixtures
     internal static IDisposable Use(SceneContext scene, string category)
     {
         IDisposable flags = SettingsFeatures.AllOnForScenes();
-        var agents = SettingsActions.ReadAgent;
+        IDisposable agents = Program.AgentSeams();
         var accounts = SettingsActions.Accounts;
         var history = SettingsActions.HistoryBytes;
         var browser = SettingsActions.BrowserDataBytes;
@@ -25,7 +26,7 @@ static class SettingsFixtures
         var logs = SettingsActions.LogsBytes;
         var projects = SettingsActions.Projects;
         var running = SettingsActions.ScratchRunning;
-        SettingsActions.ReadAgent = _ => AgentState.Connected;
+        Program.Agents(_ => AgentState.Connected);
         SettingsActions.Accounts = () =>
         [
             new SettingsAccount("Google", "you@gmail.com", Color.FromRgb(0x4A, 0x7B, 0xF7)),
@@ -53,7 +54,7 @@ static class SettingsFixtures
         }
         return new Restore(() =>
         {
-            SettingsActions.ReadAgent = agents;
+            agents.Dispose();
             SettingsActions.Accounts = accounts;
             SettingsActions.HistoryBytes = history;
             SettingsActions.BrowserDataBytes = browser;
@@ -108,8 +109,7 @@ static class SettingsScenes
     internal static async Task Gate()
     {
         var sync = SettingsActions.SyncStartup;
-        var readAgent = SettingsActions.ReadAgent;
-        var connect = SettingsActions.Connect;
+        IDisposable agentSeams = Program.AgentSeams();
         var copy = SettingsActions.CopyText;
         var open = SettingsActions.OpenFolder;
         var accounts = SettingsActions.Accounts;
@@ -125,12 +125,14 @@ static class SettingsScenes
         var clearLogs = SettingsActions.ClearLogs;
         var delete = SettingsActions.DeleteAllData;
         ThemeChoice themeBefore = AppSettingsStore.Current.Theme;
+        AppSettings agentsBefore = AppSettingsStore.Current;
         bool shortcutBefore = ModuleEntry.PauseShortcutTaken;
         bool opened = false, cleared = false, deleted = false, copied = false, startupSynced = false;
         bool scratchIsRunning = false;
         SettingsActions.SyncStartup = _ => { startupSynced = true; return true; };
-        SettingsActions.ReadAgent = _ => AgentState.Connected;
-        SettingsActions.Connect = (_, _) => Task.FromResult<string?>(null);
+        List<(WorkspaceConnections.AgentApp App, bool On)> asked = [];
+        Program.Agents(_ => AgentState.Connected);
+        WorkspaceConnections.SetConnected = (app, on, _) => { asked.Add((app, on)); return Task.FromResult<string?>(null); };
         SettingsActions.CopyText = _ => copied = true;
         SettingsActions.OpenFolder = _ => opened = true;
         SettingsActions.Accounts = () => [];
@@ -207,18 +209,46 @@ static class SettingsScenes
             ShowSettled(view, "agents");
             Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "Claude Code")
                 && Descendants<TextBlock>(view).Any(x => TextOf(x) == "Codex"), "Installed agents appear");
-            SettingsActions.ReadAgent = app => app == WorkspaceConnections.AgentApp.ClaudeCode ? AgentState.Found : AgentState.NotInstalled;
+            Program.Agents(app => app == WorkspaceConnections.AgentApp.ClaudeCode ? AgentState.Found : AgentState.NotInstalled);
             ShowSettled(view, "agents");
             Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "Found on this PC")
                 && !Descendants<TextBlock>(view).Any(x => TextOf(x) == "Codex"), "Agents without an installation have no row");
-            SettingsActions.ReadAgent = _ => AgentState.NotInstalled;
+            Program.Agents(_ => AgentState.NotInstalled);
             ShowSettled(view, "agents");
             Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "No supported agent found on this PC"),
                 "Agents explains when neither supported app is installed");
-            SettingsActions.ReadAgent = _ => AgentState.Connected;
+            Program.Agents(_ => AgentState.Connected);
             ShowSettled(view, "agents");
             FindButton(view, "Copy setup").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Program.Check(copied, "Copy setup reaches clipboard seam");
+
+            // A switch here is the owner's answer, the same as one on first launch: an agent he
+            // turns off stays off, and the loop that connects agents installed later leaves it.
+            HashSet<WorkspaceConnections.AgentApp> connected = [.. WorkspaceConnections.Supported];
+            Program.Agents(app => connected.Contains(app) ? AgentState.Connected : AgentState.Found);
+            WorkspaceConnections.SetConnected = (app, on, _) =>
+            {
+                asked.Add((app, on));
+                if (on) connected.Add(app); else connected.Remove(app);
+                return Task.FromResult<string?>(null);
+            };
+            AppSettingsStore.Update(s => s with { AgentsOff = [], ConnectAgents = true });
+            ShowSettled(view, "agents");
+            CheckBox claude = Descendants<CheckBox>(view)
+                .First(box => AutomationProperties.GetName(box) == "Claude Code connected");
+            asked.Clear();
+            claude.IsChecked = false;
+            Pump();
+            Program.Check(asked is [(WorkspaceConnections.AgentApp.ClaudeCode, false)]
+                && WorkspaceConnections.TurnedOff(WorkspaceConnections.AgentApp.ClaudeCode),
+                "An agent turned off in Settings is remembered off, not only disconnected");
+            Program.Check(!WorkspaceConnections.Missing(WorkspaceConnections.AgentApp.ClaudeCode),
+                "Nothing reconnects an agent turned off in Settings, however long Deskweave runs");
+            claude.IsChecked = true;
+            Pump();
+            Program.Check(connected.Contains(WorkspaceConnections.AgentApp.ClaudeCode)
+                && !WorkspaceConnections.TurnedOff(WorkspaceConnections.AgentApp.ClaudeCode),
+                "Turning it back on in Settings connects it and lets Deskweave keep it up again");
             Bound pause = view.BoundControls.Single(b => b.Label == "Pause every agent");
             AppSettingsStore.Update(s => s with { PauseHotkey = "Ctrl+Alt+F12" });
             Pump();
@@ -296,8 +326,9 @@ static class SettingsScenes
         {
             ModuleEntry.ReportPauseShortcut(shortcutBefore);
             SettingsActions.SyncStartup = sync;
-            SettingsActions.ReadAgent = readAgent;
-            SettingsActions.Connect = connect;
+            agentSeams.Dispose();
+            AppSettingsStore.Update(s => s with
+                { AgentsOff = agentsBefore.AgentsOff, ConnectAgents = agentsBefore.ConnectAgents });
             SettingsActions.CopyText = copy;
             SettingsActions.OpenFolder = open;
             SettingsActions.Accounts = accounts;
