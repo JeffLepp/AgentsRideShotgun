@@ -48,20 +48,69 @@ internal static class WorkspaceAccessStore
     }
     internal static void Write(string id, WorkspaceAccessPolicy policy) =>
         WriteJson(Path.Combine(Folder(id), "access.json"), policy);
-    internal static void Publish(string id, WorkspacePipeServer server) => WriteJson(Connection(id),
-        new { schema = 1, pipe = server.Name, capability = server.Capability });
+    internal static void Publish(string id, WorkspacePipeServer server) => WriteJson(Connection(id), Ticket(server));
     internal static void Withdraw(string id)
     {
         try { File.Delete(Connection(id)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
+    /// <summary>Removes a workspace's ticket only while it still names this server, or nothing live.</summary>
+    internal static void Withdraw(string id, WorkspacePipeServer? server) => WithdrawTicket(Connection(id), server);
     /// <summary>The one ticket every connected agent's bridge reads. Its path is what goes in their configuration.</summary>
     internal static string RouterTicket => Path.Combine(Root, "router.json");
-    internal static void PublishRouter(WorkspacePipeServer server) =>
-        WriteJson(RouterTicket, new { schema = 1, pipe = server.Name, capability = server.Capability });
-    internal static void WithdrawRouter()
+    internal static void PublishRouter(WorkspacePipeServer server) => WriteJson(RouterTicket, Ticket(server));
+    internal static void WithdrawRouter(WorkspacePipeServer server) => WithdrawTicket(RouterTicket, server);
+
+    static object Ticket(WorkspacePipeServer server) => new { schema = 1, pipe = server.Name, capability = server.Capability };
+
+    /// <summary>The pipe a ticket names, or null when there is no readable ticket.</summary>
+    internal static string? TicketPipe(string path)
     {
-        try { File.Delete(RouterTicket); }
+        try
+        {
+            if (!File.Exists(path) || new FileInfo(path).Length > 4096) return null;
+            using var ticket = JsonDocument.Parse(File.ReadAllText(path));
+            return ticket.RootElement.TryGetProperty("pipe", out JsonElement pipe) && pipe.ValueKind == JsonValueKind.String
+                && pipe.GetString() is { } name && name.StartsWith("Deskweave.Workspace.", StringComparison.Ordinal) ? name : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// Whether a ticket has to be written for this server: it is missing, unreadable, or names a pipe
+    /// nobody serves any more. A ticket naming another live pipe is left alone, so two Deskweaves on
+    /// one account (two Windows sessions) never take turns overwriting each other's.
+    /// </summary>
+    internal static bool NeedsTicket(string path, WorkspacePipeServer server) =>
+        TicketPipe(path) is not { } pipe || pipe != server.Name && !WorkspacePipeServer.Exists(pipe);
+
+    /// <summary>
+    /// Connection tickets left by a Deskweave that stopped without withdrawing them: a crash, a
+    /// killed process, a restart. A bridge reading one would wait on a pipe nobody serves. Runs at
+    /// startup, when nothing of this process's own can be among them.
+    /// </summary>
+    internal static int SweepStale()
+    {
+        int removed = 0;
+        try
+        {
+            if (!Directory.Exists(Root)) return 0;
+            var tickets = Directory.EnumerateDirectories(Root).Select(folder => Path.Combine(folder, "connection.json")).Append(RouterTicket);
+            foreach (string ticket in tickets)
+            {
+                if (!File.Exists(ticket) || TicketPipe(ticket) is { } pipe && WorkspacePipeServer.Exists(pipe)) continue;
+                try { File.Delete(ticket); removed++; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return removed;
+    }
+
+    static void WithdrawTicket(string path, WorkspacePipeServer? server)
+    {
+        if (TicketPipe(path) is { } pipe && pipe != server?.Name && WorkspacePipeServer.Exists(pipe)) return;
+        try { File.Delete(path); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
     static void WriteJson(string path, object value)

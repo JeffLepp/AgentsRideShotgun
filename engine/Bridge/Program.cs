@@ -1,103 +1,282 @@
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using HiveMind.AgentWorkspaces;
 
 // stdout belongs exclusively to MCP. The host-issued capability arrives through the child
-// environment, never a persisted provider configuration or an argument to this bridge.
+// environment or a connection ticket, never a persisted provider configuration or an argument.
+const string NotOpen = "Deskweave isn't open.";
+const string NotAnswering = "Deskweave isn't answering.";
+const string Closed = "Deskweave closed while this was running.";
+const string Mismatched = "This MCP entry doesn't match the Deskweave on this PC. Connect the agent again from Deskweave's Settings.";
+
 string? capability = Environment.GetEnvironmentVariable("DESKWEAVE_WORKSPACE_PIPE_KEY");
 Environment.SetEnvironmentVariable("DESKWEAVE_WORKSPACE_PIPE_KEY", null);
-string pipeName;
-try
-{
-    if (args.Length == 2 && args[0] == "--workspace" && Path.IsPathFullyQualified(args[1]))
-    {
-        var file = new FileInfo(args[1]);
-        if (!file.Exists || file.Length > 4096) throw new IOException();
-        using var ticket = JsonDocument.Parse(File.ReadAllText(file.FullName));
-        if (ticket.RootElement.GetProperty("schema").GetInt32() != 1) return 2;
-        pipeName = ticket.RootElement.GetProperty("pipe").GetString() ?? "";
-        capability = ticket.RootElement.GetProperty("capability").GetString();
-    }
-    else if (args.Length == 1) pipeName = args[0];
-    else return 2;
-}
-catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
-    or KeyNotFoundException or InvalidOperationException)
-{
-    await Console.Error.WriteLineAsync("Deskweave isn't running. Open Deskweave, then restart this MCP connection.");
-    return 1;
-}
-if (!pipeName.StartsWith("Deskweave.Workspace.", StringComparison.Ordinal)) return 2;
-if (string.IsNullOrEmpty(capability)) return 2;
-using var stop = new CancellationTokenSource();
-using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
-    PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-try
-{
-    await pipe.ConnectAsync(10000, stop.Token);
-    await WorkspacePipeProtocol.Write(pipe, capability, 256, stop.Token);
-    if (await WorkspacePipeProtocol.Read(pipe, 256, stop.Token) != "workspace-pipe/1") return 3;
-    // Where the agent is working, so Deskweave can give each project its own workspace. Claude
-    // Code names its project; other clients start their servers in theirs.
-    string cwd = Environment.GetEnvironmentVariable("CLAUDE_PROJECT_DIR") is { Length: > 0 } project
-        ? project : Environment.CurrentDirectory;
-    await WorkspacePipeProtocol.Write(pipe, "{\"jsonrpc\":\"2.0\",\"method\":\"deskweave/context\",\"params\":{\"cwd\":\""
-        + JsonEncodedText.Encode(cwd) + "\"}}", WorkspacePipeProtocol.MaxRequestBytes, stop.Token);
-    Task input = Input();
-    Task output = Output();
-    Task finished = await Task.WhenAny(input, output);
-    // The provider's EOF or the host's disconnect ends this adapter. Console stdin can have a
-    // non-cancellable read on Windows; waiting for both pumps would keep an orphan bridge alive.
-    await finished;
-    stop.Cancel();
-    pipe.Dispose();
-    return 0;
-}
-catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException
-    or OperationCanceledException or ObjectDisposedException)
-{
-    await Console.Error.WriteLineAsync("Deskweave isn't reachable. Open Deskweave, then restart this MCP connection.");
-    return 1;
-}
+string? ticket = null;
+string fixedPipe = "";
+if (args.Length == 2 && args[0] == "--workspace" && Path.IsPathFullyQualified(args[1])) ticket = args[1];
+else if (args.Length == 1 && args[0].StartsWith("Deskweave.Workspace.", StringComparison.Ordinal)
+    && !string.IsNullOrEmpty(capability)) fixedPipe = args[0];
+else return await Say(Mismatched, 2);
 
-async Task Input()
+// Where the agent is working, so Deskweave can give each project its own workspace. Claude Code
+// names its project; other clients start their servers in theirs.
+string cwd = Environment.GetEnvironmentVariable("CLAUDE_PROJECT_DIR") is { Length: > 0 } project
+    ? project : Environment.CurrentDirectory;
+string context = "{\"jsonrpc\":\"2.0\",\"method\":\"deskweave/context\",\"params\":{\"cwd\":\""
+    + JsonEncodedText.Encode(cwd) + "\"}}";
+
+var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+var output = new Lock();
+string? hello = null;
+
+// A short wait covers a Deskweave that is starting at the same moment, as both do at sign-in. Past
+// that, the client hears one line rather than a long hang it may give up on first.
+(Link? link, string why) = await Open(TimeSpan.FromSeconds(2));
+if (link is null) return await Say(why switch
+{
+    NotOpen => why + " Open Deskweave, then reconnect this MCP server.",
+    NotAnswering => why + " Restart Deskweave, then reconnect this MCP server.",
+    _ => why,
+}, why == Mismatched ? 2 : 1);
+if (link.Send(context, new(null, "deskweave/context", Discard: true)) is { } sent) await sent;
+
+try
 {
     using var reader = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false, true));
     var buffer = new char[4096];
     var line = new StringBuilder();
-    while (!stop.IsCancellationRequested)
+    while (true)
     {
-        int read = await reader.ReadAsync(buffer, stop.Token);
-        if (read == 0) return;
+        int read = await reader.ReadAsync(buffer);
+        // The provider closed its end: this session is over, whatever Deskweave is doing.
+        if (read == 0) return 0;
         for (int i = 0; i < read; i++)
         {
             char next = buffer[i];
-            if (next == '\n')
-            {
-                if (line.Length > 0)
-                    await WorkspacePipeProtocol.Write(pipe, line.ToString().TrimEnd('\r'),
-                        WorkspacePipeProtocol.MaxRequestBytes, stop.Token);
-                line.Clear();
-            }
-            else
+            if (next != '\n')
             {
                 if (line.Length >= WorkspacePipeProtocol.MaxRequestBytes)
-                    throw new InvalidDataException("Workspace request exceeds its limit.");
+                    return await Say("An MCP request was larger than Deskweave accepts.", 1);
                 line.Append(next);
+                continue;
             }
+            string message = line.ToString().TrimEnd('\r');
+            line.Clear();
+            if (message.Length > 0) await Forward(message);
         }
     }
 }
+finally { link?.Dispose(); }
 
-async Task Output()
+// One request from the agent. Deskweave closing or restarting mid-session does not end the session:
+// the next request finds it again, and until then each request is answered with one line.
+async Task Forward(string message)
 {
-    using var writer = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
-    while (!stop.IsCancellationRequested)
+    Expect expect = Read(message);
+    if (expect.Method == "initialize") hello = message;
+    if (link is null || link.Broken)
     {
-        string? json = await WorkspacePipeProtocol.Read(pipe, WorkspacePipeProtocol.MaxResponseBytes, stop.Token);
-        if (json is null) return;
-        if (json.Length > 0) await writer.WriteLineAsync(json.AsMemory(), stop.Token);
+        link?.Dispose();
+        (link, why) = await Open(TimeSpan.FromSeconds(1));
+        if (link is not null)
+        {
+            // A new session on Deskweave's side: it hears where the agent works and who it is again.
+            if (link.Send(context, new(null, "deskweave/context", Discard: true)) is { } sending) await sending;
+            if (hello is not null && expect.Method != "initialize"
+                && link.Send(hello, Read(hello) with { Discard = true }) is { } greeting) await greeting;
+        }
+    }
+    if (link?.Send(message, expect) is { } forwarding) await forwarding;
+    else Unreachable(expect, link is null ? why : Closed);
+}
+
+void Unreachable(Expect expect, string reason)
+{
+    if (expect.Id is null || expect.Discard) return;
+    string text = reason switch
+    {
+        NotAnswering => reason + " Ask the owner to restart Deskweave, then try again.",
+        Mismatched => reason,
+        _ => reason + " Ask the owner to open Deskweave, then try again.",
+    };
+    string reply = expect.Method == "tools/call"
+        ? "{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+            + JsonEncodedText.Encode(text) + "\"}],\"isError\":true}}"
+        : "{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"error\":{\"code\":-32000,\"message\":\"" + JsonEncodedText.Encode(text) + "\"}}";
+    Write(reply);
+}
+
+void Write(string json)
+{
+    lock (output) stdout.WriteLine(json);
+}
+
+static Expect Read(string message)
+{
+    try
+    {
+        using var json = JsonDocument.Parse(message);
+        if (json.RootElement.ValueKind != JsonValueKind.Object) return new(null, "", false);
+        string method = json.RootElement.TryGetProperty("method", out JsonElement m) && m.ValueKind == JsonValueKind.String
+            ? m.GetString() ?? "" : "";
+        string? id = json.RootElement.TryGetProperty("id", out JsonElement raw)
+            && raw.ValueKind is JsonValueKind.Number or JsonValueKind.String ? raw.GetRawText() : null;
+        return new(id, method, false);
+    }
+    catch (JsonException) { return new(null, "", false); }
+}
+
+// Finds the pipe the ticket names and joins it. The ticket is read again on every attempt: a
+// Deskweave that restarted serves a new pipe under a new ticket.
+async Task<(Link?, string)> Open(TimeSpan patience)
+{
+    long until = Environment.TickCount64 + (long)patience.TotalMilliseconds;
+    while (true)
+    {
+        (string pipeName, string? key, string reason) = ticket is null ? (fixedPipe, capability, NotOpen) : Ticket(ticket);
+        if (reason == Mismatched) return (null, reason);
+        if (key is not null && Served(pipeName))
+        {
+            var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            try
+            {
+                using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await pipe.ConnectAsync(bound.Token);
+                await WorkspacePipeProtocol.Write(pipe, key, 256, bound.Token);
+                if (await WorkspacePipeProtocol.Read(pipe, 256, bound.Token) == "workspace-pipe/1")
+                    return (new Link(pipe, Write, Unreachable), "");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException
+                or OperationCanceledException or InvalidDataException or DecoderFallbackException) { }
+            pipe.Dispose();
+            reason = NotAnswering;
+        }
+        if (Environment.TickCount64 >= until) return (null, reason);
+        await Task.Delay(200);
+    }
+}
+
+// Deskweave writes a ticket whole or not at all, so one it cannot read is not a half-written one:
+// it is from a different version, and waiting will not change it.
+static (string Pipe, string? Key, string Reason) Ticket(string path)
+{
+    try
+    {
+        var file = new FileInfo(path);
+        if (!file.Exists) return ("", null, NotOpen);
+        if (file.Length > 4096) return ("", null, Mismatched);
+        using var json = JsonDocument.Parse(File.ReadAllText(file.FullName));
+        JsonElement root = json.RootElement;
+        string pipe = root.GetProperty("pipe").GetString() ?? "";
+        string? key = root.GetProperty("capability").GetString();
+        return root.GetProperty("schema").GetInt32() == 1 && pipe.StartsWith("Deskweave.Workspace.", StringComparison.Ordinal)
+            && !string.IsNullOrEmpty(key) ? (pipe, key, NotOpen) : ("", null, Mismatched);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return ("", null, NotOpen); }
+    catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
+    { return ("", null, Mismatched); }
+}
+
+// Asks Windows whether anyone serves the pipe, without connecting: a ticket left by a Deskweave
+// that crashed names a pipe that is gone, and waiting on it only delays the answer.
+static bool Served(string pipe)
+{
+    if (pipe.Length == 0) return false;
+    if (WaitNamedPipe(@"\\.\pipe\" + pipe, 1)) return true;
+    return Marshal.GetLastWin32Error() is not (2 or 123 or 161);
+}
+
+static async Task<int> Say(string line, int code)
+{
+    await Console.Error.WriteLineAsync(line);
+    return code;
+}
+
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "WaitNamedPipeW")]
+static extern bool WaitNamedPipe(string name, uint timeoutMs);
+
+/// <summary>What the agent is waiting for from one request: its id as written, and whether anyone reads the reply.</summary>
+sealed record Expect(string? Id, string Method, bool Discard);
+
+/// <summary>
+/// One connection to Deskweave. Deskweave answers every request frame with exactly one frame, in
+/// order, an empty one for a notification, so replies are matched by position. When the pipe goes,
+/// every request still waiting is answered at once instead of being left to time out.
+/// </summary>
+sealed class Link : IDisposable
+{
+    readonly NamedPipeClientStream _pipe;
+    readonly Queue<Expect> _waiting = new();
+    readonly Action<string> _write;
+    readonly Action<Expect, string> _unreachable;
+    readonly CancellationTokenSource _stop = new();
+    bool _broken;
+
+    internal Link(NamedPipeClientStream pipe, Action<string> write, Action<Expect, string> unreachable)
+    {
+        (_pipe, _write, _unreachable) = (pipe, write, unreachable);
+        _ = Task.Run(Pump);
+    }
+
+    internal bool Broken { get { lock (_waiting) return _broken; } }
+
+    /// <summary>Sends one message, or returns null when the connection is already gone.</summary>
+    internal Task? Send(string message, Expect expect)
+    {
+        lock (_waiting)
+        {
+            if (_broken) return null;
+            _waiting.Enqueue(expect);
+        }
+        return Deliver(message);
+    }
+
+    async Task Deliver(string message)
+    {
+        try { await WorkspacePipeProtocol.Write(_pipe, message, WorkspacePipeProtocol.MaxRequestBytes, _stop.Token); }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException
+            or InvalidDataException) { Break(); }
+    }
+
+    async Task Pump()
+    {
+        try
+        {
+            while (await WorkspacePipeProtocol.Read(_pipe, WorkspacePipeProtocol.MaxResponseBytes, _stop.Token) is { } json)
+            {
+                Expect? expect;
+                lock (_waiting) _waiting.TryDequeue(out expect);
+                if (json.Length > 0 && expect?.Discard != true) _write(json);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException
+            or InvalidDataException or DecoderFallbackException) { }
+        Break();
+    }
+
+    void Break()
+    {
+        Expect[] left;
+        lock (_waiting)
+        {
+            if (_broken) return;
+            _broken = true;
+            left = [.. _waiting];
+            _waiting.Clear();
+        }
+        _stop.Cancel();
+        _pipe.Dispose();
+        foreach (Expect expect in left) _unreachable(expect, "Deskweave closed while this was running.");
+    }
+
+    public void Dispose()
+    {
+        lock (_waiting) _broken = true;
+        _stop.Cancel();
+        _pipe.Dispose();
     }
 }

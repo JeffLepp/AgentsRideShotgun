@@ -82,6 +82,23 @@ internal static class FirstRunConnections
             Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is null && Entries(claudeFile) == 1,
                 "Connecting again after a refusal puts the one entry back");
 
+            // An entry under Deskweave's name that runs something else: an older install, a moved
+            // folder, a probe build. The owner's own configuration had one pointing at a gate's
+            // fixture, and Settings called it connected while every agent call failed.
+            WriteStale(claudeFile, codexFile, root);
+            Check(WorkspaceConnections.Supported.All(app => WorkspaceConnections.HasEntry(app)
+                    && !WorkspaceConnections.IsConnected(app) && WorkspaceConnections.Missing(app)),
+                "An entry that runs another bridge or ticket counts as stale, not connected");
+            Check(Connect().Count == 0 && WorkspaceConnections.Supported.All(WorkspaceConnections.IsConnected)
+                && Entries(claudeFile) == 1 && Entries(codexFile) == 1 && Pointed(claudeFile) && Pointed(codexFile)
+                && File.ReadAllText(claudeFile).Contains("another.exe", StringComparison.Ordinal)
+                && File.ReadAllText(codexFile).Contains("[mcp_servers.another]", StringComparison.Ordinal),
+                "Connecting replaces a stale entry with one for this Deskweave and leaves the agent's other servers alone");
+            File.WriteAllLines(codexFile, ["[mcp_servers.deskweave]", "command = '" + WorkspaceConnections.Bridge + "'",
+                "args = [\"--workspace\", '" + WorkspaceAccessStore.RouterTicket + "']"]);
+            Check(WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex),
+                "An entry in the literal-string form Codex itself writes counts as connected, so nothing rewrites it");
+
             // An agent installed after consent is connected on its own, without a second prompt.
             File.Delete(codexFile);
             WorkspaceConnections.Locate = app => app == WorkspaceConnections.AgentApp.Codex ? null : Environment.ProcessPath;
@@ -94,6 +111,15 @@ internal static class FirstRunConnections
             WorkspaceConnections.Locate = _ => Environment.ProcessPath;
             Check(Until(() => WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex)) && Entries(codexFile) == 1,
                 "After Start, an agent installed later is connected by itself, once, with no second prompt");
+
+            // The loop mends an entry that went stale, as one a moved Deskweave leaves behind would be.
+            WorkspaceConnections.StopKeepingUp();
+            WriteStale(claudeFile, codexFile, root);
+            WorkspaceConnections.KeepUp();
+            Check(Until(() => WorkspaceConnections.Supported.All(WorkspaceConnections.IsConnected))
+                && Entries(claudeFile) == 1 && Entries(codexFile) == 1 && Pointed(claudeFile) && Pointed(codexFile),
+                "After Start, the keep-up loop replaces stale entries by itself, once each");
+            WorkspaceConnections.StopKeepingUp();
 
             // Turned off in Settings, with the loop still running because the other agent has left
             // this PC and is still worth waiting for. It has to leave the one the owner took out.
@@ -170,6 +196,26 @@ internal static class FirstRunConnections
                 && servers.TryGetProperty(WorkspaceConnections.AppName, out JsonElement ours) ? ours.GetRawText() : "";
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return "unreadable"; }
+    }
+
+    /// <summary>
+    /// Stale Deskweave entries in both agents' own formats, beside a server that is not Deskweave's:
+    /// Claude Code's JSON, and Codex's TOML with the literal strings Codex writes.
+    /// </summary>
+    static void WriteStale(string claudeFile, string codexFile, string root)
+    {
+        string bridge = Path.Combine(root, "moved", "Bridge", "Deskweave.WorkspaceBridge.exe");
+        string ticket = Path.Combine(root, "moved", "agent-workspaces.access", "router.json");
+        File.WriteAllText(claudeFile, JsonSerializer.Serialize(new
+        {
+            mcpServers = new Dictionary<string, object>
+            {
+                ["another"] = new { type = "stdio", command = "another.exe", args = Array.Empty<string>() },
+                [WorkspaceConnections.AppName] = new { type = "stdio", command = bridge, args = new[] { "--workspace", ticket }, env = new { } },
+            },
+        }));
+        File.WriteAllLines(codexFile, ["[mcp_servers.another]", "command = 'another.exe'", "",
+            "[mcp_servers.deskweave]", "command = '" + bridge + "'", "args = [\"--workspace\", '" + ticket + "']"]);
     }
 
     static bool Until(Func<bool> ready)

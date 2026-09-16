@@ -46,11 +46,12 @@ internal sealed class WorkspaceExternalAccess : IDisposable
             _control.ConfigureWebContentBlocking(policy.BlockProgramsAfterWebContent);
             if (!policy.Enabled)
             {
+                WorkspacePipeServer? closing = _server;
                 _server?.Dispose();
                 _server = null;
                 _clients.Clear();
                 ReleaseDriver();
-                WorkspaceAccessStore.Withdraw(_id);
+                WorkspaceAccessStore.Withdraw(_id, closing);
             }
             else if (_server is null)
             {
@@ -61,6 +62,16 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         }
         if (!policy.Enabled || !policy.DesktopRequests) Handoffs.CancelPending();
         Notify();
+    }
+    /// <summary>Puts this workspace's ticket back when something removed it while access is on.</summary>
+    internal void KeepTicket()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _server is null || !WorkspaceAccessStore.NeedsTicket(WorkspaceAccessStore.Connection(_id), _server)) return;
+            try { WorkspaceAccessStore.Publish(_id, _server); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
     }
     /// <summary>One more agent in this workspace, through its own pipe or handed over by the router.</summary>
     internal WorkspacePipePeer Attach()
@@ -189,10 +200,11 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
+            WorkspacePipeServer? closing = _server;
             _server?.Dispose();
             _server = null;
             ReleaseDriver();
-            WorkspaceAccessStore.Withdraw(_id);
+            WorkspaceAccessStore.Withdraw(_id, closing);
         }
         Handoffs.CancelPending();
         Handoffs.Changed -= Notify;

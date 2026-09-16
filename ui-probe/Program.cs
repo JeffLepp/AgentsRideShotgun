@@ -29,6 +29,10 @@ static class Program
         bool mvp = args.Length is 2 or 3 && args[0] == "--mvp";
         _output = Path.GetFullPath(mvp ? args[1] : args.Single());
         Directory.CreateDirectory(_output);
+        // The scenes stand in for every agent seam; if one is ever missed, what it writes lands here and
+        // not in the owner's own configuration, which is what the gate-1 run did.
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", Path.Combine(_output, "agents", "claude"));
+        Environment.SetEnvironmentVariable("CODEX_HOME", Path.Combine(_output, "agents", "codex"));
         // ponytail: one probe at a time on this PC, so parallel worktrees don't fight over the screen,
         // focus and CPU timings. Never released by hand; closing it at exit hands the turn on.
         using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");

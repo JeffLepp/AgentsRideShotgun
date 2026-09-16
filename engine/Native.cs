@@ -531,6 +531,9 @@ static partial class Native
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool GetNamedPipeClientProcessId(nint pipe, out uint clientProcessId);
 
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern bool WaitNamedPipe(string name, uint timeoutMs);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern nint OpenProcess(uint access, bool inherit, int processId);
 

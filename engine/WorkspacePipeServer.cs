@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
 namespace HiveMind.AgentWorkspaces;
@@ -42,6 +43,18 @@ internal sealed class WorkspacePipeServer : IDisposable
         PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly
         | (first ? PipeOptions.FirstPipeInstance : PipeOptions.None), 4096, 4096);
 
+    /// <summary>
+    /// Whether a pipe by this name is served right now, without connecting to it. A connection
+    /// ticket naming a pipe that is gone belongs to a Deskweave that stopped without withdrawing it.
+    /// </summary>
+    internal static bool Exists(string name)
+    {
+        if (Native.WaitNamedPipe(@"\\.\pipe\" + name, 1)) return true;
+        // Every instance busy still means someone serves it; only "not found" means nobody does.
+        int error = Marshal.GetLastWin32Error();
+        return error is not (2 or 123 or 161);   // ERROR_FILE_NOT_FOUND, ERROR_INVALID_NAME, ERROR_BAD_PATHNAME
+    }
+
     async Task Serve()
     {
         NamedPipeServerStream? listener = _first;
@@ -49,9 +62,21 @@ internal sealed class WorkspacePipeServer : IDisposable
         {
             while (!_stop.IsCancellationRequested)
             {
-                await listener.WaitForConnectionAsync(_stop.Token).ConfigureAwait(false);
+                try { await listener.WaitForConnectionAsync(_stop.Token).ConfigureAwait(false); }
+                catch (IOException) when (!_stop.IsCancellationRequested)
+                {
+                    // A client that left before it was accepted: a bridge killed while connecting, a
+                    // health check. It used to end this loop, and the app went on advertising a pipe
+                    // nobody answered. The next instance goes up before this one comes down, so the
+                    // name never disappears from under a bridge checking for it.
+                    var dropped = listener;
+                    try { listener = await Replacement().ConfigureAwait(false); }
+                    finally { dropped.Dispose(); }
+                    continue;
+                }
                 var accepted = listener;
-                listener = Create();
+                try { listener = await Replacement().ConfigureAwait(false); }
+                catch { accepted.Dispose(); throw; }
                 if (_clients.Count >= _limit) { accepted.Dispose(); continue; }
                 _clients[accepted] = Task.CompletedTask;
                 Task client = Task.Run(() => Talk(accepted));
@@ -66,6 +91,19 @@ internal sealed class WorkspacePipeServer : IDisposable
             listener?.Dispose();
             foreach (var client in _clients.Keys) client.Dispose();
             await Task.WhenAll(_clients.Values).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The next listening instance. A refusal from Windows is waited out, not fatal.</summary>
+    async Task<NamedPipeServerStream> Replacement()
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try { return Create(); }
+            catch (IOException) when (!_stop.IsCancellationRequested)
+            {
+                await Task.Delay(attempt < 50 ? 100 : 1000, _stop.Token).ConfigureAwait(false);
+            }
         }
     }
 

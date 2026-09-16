@@ -57,6 +57,10 @@ internal static class Program
         // Chrome creates deep profile subdirectories. Keep the fixture beside the report folder
         // within artifacts rather than nesting another long identity beneath its descriptive name.
         string fixture = Path.Combine(Path.GetDirectoryName(output)!, "f-" + Guid.NewGuid().ToString("N")[..8]);
+        // Anything in this process that reaches an agent's own command, through a seam a check forgot,
+        // writes into the fixture. The shell that started the probe may name the owner's real roots.
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", Path.Combine(fixture, "agents", "claude"));
+        Environment.SetEnvironmentVariable("CODEX_HOME", Path.Combine(fixture, "agents", "codex"));
         var claims = new List<string>();
         var observedProcesses = new List<int>();
         string? failure = null;
@@ -78,6 +82,8 @@ internal static class Program
             Check(AgentDesktop.NameFor("probe") == "Deskweave-probe"
                 && !AgentDesktop.NameFor("probe").StartsWith(originalName), "Desktop namespace is independent of HiveMind");
             using var scope = WorkspaceStore.UseRootForTests(Path.Combine(fixture, "w"));
+            // The connection checks change consent and switches; they did that in the owner's own settings.
+            using var settings = AppSettingsStore.UseFileForTests(Path.Combine(fixture, "settings.json"));
             Check(WorkspaceAccessStore.Root == WorkspaceStore.Root + ".access"
                 && WorkspaceAccessStore.ResultsRoot == WorkspaceStore.Root + ".results", "Fixture scopes workspace, access, and result stores together");
             string nonce = Guid.NewGuid().ToString("N")[..8];
@@ -178,6 +184,7 @@ internal static class Program
                 "Restart opens the same saved workspace folder with the result intact");
             WorkspaceRuntime.Rest();
             FirstRunConnections.Run(Path.Combine(fixture, "agents"), Check);
+            LiveRouter.Run(Check);
         }
         catch (Exception ex) { failure = ex.ToString(); }
         finally

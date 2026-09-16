@@ -134,14 +134,80 @@ internal sealed class WorkspaceRouter : IDisposable
 {
     static WorkspaceRouter? _current;
     readonly WorkspacePipeServer _server;
+    readonly Lock _gate = new();
+    FileSystemWatcher? _watcher;
+    Timer? _retry;
+    bool _disposed;
+
+    /// <summary>How soon a ticket that could not be written is tried again. Nothing runs otherwise.</summary>
+    internal static TimeSpan RetryEvery = TimeSpan.FromSeconds(5);
 
     WorkspaceRouter()
     {
         // A program running inside a workspace cannot reach this, the same rule the per-workspace
         // pipes keep: web content that got a command run must not be able to drive a desktop.
         _server = new WorkspacePipeServer(() => new Session().Peer, maxClients: 32, rejectClientProcess: InsideAWorkspace);
-        try { WorkspaceAccessStore.PublishRouter(_server); }
-        catch { _server.Dispose(); throw; }
+        Keep();
+    }
+
+    /// <summary>The pipe this router serves, for the probes.</summary>
+    internal static string? Pipe => _current?._server.Name;
+
+    /// <summary>
+    /// Keeps the router's ticket, and each running workspace's, naming a pipe that answers for as long
+    /// as the app is open. Runs at start and whenever something in the ticket folder changes; only
+    /// while a write keeps failing does it try again on a clock. A ticket that went missing while
+    /// the app was open used to stay missing, and every agent was told Deskweave was not running.
+    /// </summary>
+    void Keep()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            try
+            {
+                if (WorkspaceAccessStore.NeedsTicket(WorkspaceAccessStore.RouterTicket, _server))
+                    WorkspaceAccessStore.PublishRouter(_server);
+                _watcher ??= Watch();
+                _retry?.Dispose();
+                _retry = null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                _watcher?.Dispose();
+                _watcher = null;
+                _retry ??= new Timer(_ => Keep(), null, RetryEvery, RetryEvery);
+            }
+        }
+        Dispatcher? ui = Application.Current?.Dispatcher;
+        if (ui is null) KeepWorkspaceTickets();
+        else if (!ui.HasShutdownStarted) ui.BeginInvoke(KeepWorkspaceTickets);
+    }
+
+    static void KeepWorkspaceTickets()
+    {
+        foreach (WorkspaceRuntime runtime in WorkspaceRuntime.Running) runtime.Access?.KeepTicket();
+    }
+
+    FileSystemWatcher Watch()
+    {
+        var watcher = new FileSystemWatcher(WorkspaceAccessStore.Root, "*.json")
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
+        };
+        watcher.Deleted += (_, _) => Keep();
+        watcher.Renamed += (_, _) => Keep();
+        watcher.Changed += (_, _) => Keep();
+        // The folder itself went, or Windows dropped events: look again with a new watcher.
+        watcher.Error += (_, _) =>
+        {
+            lock (_gate) { if (ReferenceEquals(_watcher, watcher)) _watcher = null; }
+            watcher.Dispose();
+            Keep();
+        };
+        watcher.EnableRaisingEvents = true;
+        return watcher;
     }
 
     /// <summary>
@@ -153,6 +219,8 @@ internal sealed class WorkspaceRouter : IDisposable
     internal static void Start()
     {
         if (_current is not null) return;
+        // A Deskweave that crashed or was killed left tickets naming pipes nobody serves.
+        WorkspaceAccessStore.SweepStale();
         try { _current = new WorkspaceRouter(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
@@ -165,7 +233,16 @@ internal sealed class WorkspaceRouter : IDisposable
 
     public void Dispose()
     {
-        WorkspaceAccessStore.WithdrawRouter();
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _watcher?.Dispose();
+            _watcher = null;
+            _retry?.Dispose();
+            _retry = null;
+        }
+        WorkspaceAccessStore.WithdrawRouter(_server);
         _server.Dispose();
     }
 

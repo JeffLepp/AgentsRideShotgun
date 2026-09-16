@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 
 namespace HiveMind.AgentWorkspaces;
@@ -53,12 +54,23 @@ internal static class WorkspaceConnections
 
     internal static bool IsInstalled(AgentApp app) => Locate(app) is not null;
 
-    /// <summary>Whether the app's own configuration has Deskweave in it. A field for the same reason
-    /// <see cref="Locate"/> is one: first launch, Settings and <see cref="KeepUp"/> all read through
-    /// it, so a probe answers for every one of them at once. The default reads the file, never writes it.</summary>
-    internal static Func<AgentApp, bool> IsConnected = ReadConnected;
+    /// <summary>Whether the app's own configuration has a working Deskweave entry in it. A field for
+    /// the same reason <see cref="Locate"/> is one: first launch, Settings and <see cref="KeepUp"/> all
+    /// read through it, so a probe answers for every one of them at once. The default reads the file,
+    /// never writes it.</summary>
+    internal static Func<AgentApp, bool> IsConnected = app => ReadEntry(app) == Entry.Current;
 
-    static bool ReadConnected(AgentApp app)
+    /// <summary>Whether the app's configuration has anything under Deskweave's name, working or not.</summary>
+    internal static bool HasEntry(AgentApp app) => ReadEntry(app) != Entry.None;
+
+    /// <summary>
+    /// What an agent app's configuration holds under Deskweave's name. Stale is an entry that runs
+    /// some other bridge or ticket: an older install, a moved folder, a test build. Counting one as
+    /// connected left the agent pointed at a pipe nobody serves, with nothing ever replacing it.
+    /// </summary>
+    internal enum Entry { None, Current, Stale }
+
+    static Entry ReadEntry(AgentApp app)
     {
         string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         try
@@ -67,18 +79,92 @@ internal static class WorkspaceConnections
             {
                 string codex = Path.Combine(Environment.GetEnvironmentVariable("CODEX_HOME") is { Length: > 0 } home
                     ? home : Path.Combine(profile, ".codex"), "config.toml");
-                return File.Exists(codex) && File.ReadLines(codex)
-                    .Any(line => line.Trim() is "[mcp_servers.deskweave]" or "[mcp_servers.\"deskweave\"]");
+                if (!File.Exists(codex)) return Entry.None;
+                var table = new StringBuilder();
+                bool inside = false, found = false;
+                foreach (string line in File.ReadLines(codex))
+                {
+                    string trimmed = line.Trim();
+                    if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+                    {
+                        inside = trimmed is "[mcp_servers.deskweave]" or "[mcp_servers.\"deskweave\"]";
+                        found |= inside;
+                        continue;
+                    }
+                    if (inside) table.AppendLine(line);
+                }
+                if (!found) return Entry.None;
+                string text = table.ToString();
+                return Runs(TomlStrings(text, "command").FirstOrDefault(), TomlStrings(text, "args")) ? Entry.Current : Entry.Stale;
             }
             string claude = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } folder
                 ? Path.Combine(folder, ".claude.json") : Path.Combine(profile, ".claude.json");
-            if (!File.Exists(claude)) return false;
+            if (!File.Exists(claude)) return Entry.None;
             using var stream = File.OpenRead(claude);
             using var document = JsonDocument.Parse(stream);
-            return document.RootElement.TryGetProperty("mcpServers", out JsonElement servers)
-                && servers.ValueKind == JsonValueKind.Object && servers.TryGetProperty(AppName, out _);
+            if (!document.RootElement.TryGetProperty("mcpServers", out JsonElement servers)
+                || servers.ValueKind != JsonValueKind.Object || !servers.TryGetProperty(AppName, out JsonElement entry)) return Entry.None;
+            string? command = entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("command", out JsonElement c)
+                && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+            List<string> args = entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("args", out JsonElement a)
+                && a.ValueKind == JsonValueKind.Array
+                ? [.. a.EnumerateArray().Select(arg => arg.ValueKind == JsonValueKind.String ? arg.GetString() ?? "" : "")] : [];
+            return Runs(command, args) ? Entry.Current : Entry.Stale;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return false; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return Entry.None; }
+    }
+
+    /// <summary>Whether an entry runs this Deskweave's bridge against its one router ticket.</summary>
+    static bool Runs(string? command, IReadOnlyList<string> args) =>
+        command is not null && SamePath(command, Bridge) && args.Count == 2 && args[0] == "--workspace"
+        && SamePath(args[1], WorkspaceAccessStore.RouterTicket);
+
+    static bool SamePath(string a, string b)
+    {
+        try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
+
+    /// <summary>
+    /// The strings one key holds in a TOML table: its value, or each string of an array. Enough for
+    /// the command and args Codex writes, as basic "..." or literal '...' strings; not a TOML reader.
+    /// </summary>
+    internal static List<string> TomlStrings(string table, string key)
+    {
+        List<string> found = [];
+        var start = System.Text.RegularExpressions.Regex.Match(table, @"(?m)^[ \t]*" + key + @"[ \t]*=[ \t]*");
+        if (!start.Success) return found;
+        int i = start.Index + start.Length;
+        bool array = i < table.Length && table[i] == '[';
+        if (array) i++;
+        while (i < table.Length)
+        {
+            char c = table[i];
+            if (c is '"' or '\'')
+            {
+                var text = new StringBuilder();
+                for (i++; i < table.Length && table[i] != c; i++)
+                {
+                    if (c == '\'' || table[i] != '\\' || i + 1 >= table.Length) { text.Append(table[i]); continue; }
+                    char escaped = table[++i];
+                    int hex = escaped == 'u' ? 4 : escaped == 'U' ? 8 : 0;
+                    if (hex > 0 && i + hex < table.Length
+                        && int.TryParse(table.AsSpan(i + 1, hex), System.Globalization.NumberStyles.HexNumber, null, out int code))
+                    {
+                        text.Append(char.ConvertFromUtf32(code));
+                        i += hex;
+                    }
+                    else text.Append(escaped switch { 'n' => '\n', 't' => '\t', 'r' => '\r', _ => escaped });
+                }
+                found.Add(text.ToString());
+                i++;
+                if (!array) break;
+            }
+            else if (array && c == ']' || !array && c is '\n' or '#') break;
+            else if (c == '#') { while (i < table.Length && table[i] != '\n') i++; }
+            else i++;
+        }
+        return found;
     }
 
     /// <summary>
@@ -98,10 +184,11 @@ internal static class WorkspaceConnections
         string[] scope = app == AgentApp.ClaudeCode ? ["--scope", "user"] : [];
         using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         bound.CancelAfter(TimeSpan.FromSeconds(30));
-        // Replace, never duplicate: an entry from an older Deskweave comes out first.
-        bool had = IsConnected(app);
+        // Replace, never duplicate: an entry from an older Deskweave, working or stale, comes out first.
+        // A stale one left in place would make the add below refuse the name.
+        bool had = HasEntry(app);
         if (had) await Run(cli, ["mcp", "remove", .. scope, AppName], bound.Token, null).ConfigureAwait(false);
-        if (!connect) return IsConnected(app) ? $"{name} kept its Deskweave entry. Remove it in {name}'s MCP settings." : null;
+        if (!connect) return HasEntry(app) ? $"{name} kept its Deskweave entry. Remove it in {name}'s MCP settings." : null;
         var added = await Run(cli, ["mcp", "add", .. scope, AppName, "--", Bridge, "--workspace", WorkspaceAccessStore.RouterTicket],
             bound.Token, null).ConfigureAwait(false);
         // What the configuration says now, not what the command claimed: one that exits 0 without
@@ -242,7 +329,7 @@ internal static class WorkspaceConnections
     internal static async Task RemoveOwnedConnections()
     {
         foreach (AgentApp app in Enum.GetValues<AgentApp>())
-            if (IsConnected(app)) await SetConnected(app, false, default).ConfigureAwait(false);
+            if (HasEntry(app)) await SetConnected(app, false, default).ConfigureAwait(false);
         if (!Directory.Exists(WorkspaceAccessStore.Root)) return;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         foreach (string folder in Directory.EnumerateDirectories(WorkspaceAccessStore.Root))
