@@ -36,6 +36,10 @@ internal static class Program
             Thread.Sleep(TimeSpan.FromMinutes(5));
             return 0;
         }
+        // Standing in for claude.exe / codex.exe so the connection checks never run the owner's
+        // real agent command. Writes only inside the isolated root the caller names in the
+        // environment, in each app's own format, and starts no model.
+        if (args.Length > 0 && args[0] == "mcp") return FirstRunConnections.Cli(args);
         // ponytail: one probe at a time on this PC (see ui-probe); child modes above never wait for it.
         using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
         try { turn.WaitOne(); } catch (AbandonedMutexException) { }
@@ -173,6 +177,7 @@ internal static class Program
             Check(restarted.Computer!.Folder == firstFolder && File.Exists(Path.Combine(firstFolder, "retained-output.txt")),
                 "Restart opens the same saved workspace folder with the result intact");
             WorkspaceRuntime.Rest();
+            FirstRunConnections.Run(Path.Combine(fixture, "agents"), Check);
         }
         catch (Exception ex) { failure = ex.ToString(); }
         finally

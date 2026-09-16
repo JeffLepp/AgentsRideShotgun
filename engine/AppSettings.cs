@@ -25,8 +25,15 @@ public sealed record AppSettings
     public bool StartWithWindows { get; init; } = true;
     public ThemeChoice Theme { get; init; } = ThemeChoice.FollowWindows;
     // Check for updates and Send crash reports arrive with a release channel (MVP_SPEC, out of scope).
-    /// <summary>The first-launch window was answered, with Start or Skip.</summary>
+    /// <summary>The first-launch window was answered, by Start or by closing it. It is never shown again.</summary>
     public bool FirstRunDone { get; init; }
+
+    /// <summary>
+    /// Start was pressed on first launch. It is the owner's consent to write Deskweave into an
+    /// agent's own configuration, and it keeps: a supported agent installed later is connected
+    /// without asking again. Closing first launch leaves it false and nothing is ever written.
+    /// </summary>
+    public bool ConnectAgents { get; init; }
 
     // Agents
     /// <summary>As "Ctrl+Alt+P". Empty registers nothing.</summary>

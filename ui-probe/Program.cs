@@ -241,8 +241,8 @@ static class Program
         // Each Wave 1 slice adds its behavior checks in its own Scenes.*.cs file. A named slice is
         // useful while repairing one checker; ordinary validation leaves it unset and runs all.
         string? slice = Environment.GetEnvironmentVariable("DESKWEAVE_UI_GATE_SLICE")?.Trim().ToLowerInvariant();
-        if (slice is not null and not ("hub" or "corner" or "settings"))
-            throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner or settings.");
+        if (slice is not null and not ("hub" or "corner" or "settings" or "firstrun"))
+            throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner, settings or firstrun.");
         if (slice is null or "hub") await HubScenes.Gate();
         if (slice is null or "corner")
         {
@@ -254,6 +254,7 @@ static class Program
             await CornerScenes.Gate();
         }
         if (slice is null or "settings") await SettingsScenes.Gate();
+        if (slice is null or "firstrun") await FirstRunScenes.Gate();
     }
 
     internal static MainWindow Window => _window;
@@ -264,7 +265,7 @@ static class Program
     {
         // Only choices that remain visible after the cut round belong in this default claim.
         AppSettings s = AppSettingsStore.Current;
-        Check(s.StartWithWindows && s.Theme == ThemeChoice.FollowWindows && !s.FirstRunDone
+        Check(s.StartWithWindows && s.Theme == ThemeChoice.FollowWindows && !s.FirstRunDone && !s.ConnectAgents
             && s.PauseHotkey == "Ctrl+Alt+P" && s.AccountScopes.Count == 0
             && s.CornerShow == CornerShow.ComesAndGoes && !s.CornerPinned
             && s.CornerLeft is null && s.CornerTop is null && s.CornerWidth is null

@@ -83,11 +83,14 @@ public static class ModuleEntry
         WorkspacePeekHost.Start();
         // One named pipe for every connected agent. It starts nothing until an agent uses a tool.
         WorkspaceRouter.Start();
+        // Consent was given once; an agent installed since then connects on its own.
+        WorkspaceConnections.KeepUp();
     }
 
     /// <summary>App exit. Stops the clock and every workspace still running under it.</summary>
     public static void Shutdown()
     {
+        WorkspaceConnections.StopKeepingUp();
         WorkspaceRouter.Stop();
         WorkspacePeekHost.Stop();
         WorkspaceRuntime.Rest();
@@ -103,6 +106,7 @@ public static class ModuleEntry
 
     public static void Uninstall(bool removeData)
     {
+        WorkspaceConnections.StopKeepingUp();
         WorkspaceRouter.Stop();
         WorkspacePeekHost.Stop();
         WorkspaceRuntime.Rest();

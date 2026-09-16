@@ -207,11 +207,23 @@ public sealed class WorkspaceMcp : IDisposable
         + "Use status for the current setting and effective block; only the owner can change it. Re-enabling blocking retains prior browser observation. "
         + "No owner browser profile is shared, and this is input separation, not a confidentiality sandbox.";
 
+    /// <summary>
+    /// The scoped instruction that comes with connecting (MVP_SPEC, Behavior): an agent uses
+    /// Deskweave by itself for anything with a window, and never for the work it already does well.
+    /// It is deliberately two sentences with no room to read them the other way round - phasing in
+    /// where it does not belong is as much a failure as not phasing in at all.
+    /// </summary>
+    internal const string Scope = "Use Deskweave whenever your work needs a window on screen: running the app you are building, "
+        + "clicking through it, a browser, a GUI or end-to-end test, a screenshot of something running. Do this without being asked. "
+        + "Do not use Deskweave for anything else: writing or reading code, builds, unit tests, package installs, "
+        + "version control, and ordinary file and shell work stay in your own tools where they are faster. ";
+
     /// <summary>What an agent connected through the router is told before it has a workspace.</summary>
     internal const string RouterInstructions = "Deskweave gives you a Windows desktop of your own for app, browser and GUI work, "
-        + "beside the owner's screen instead of on it. It picks your workspace the first time you use one of these tools: "
+        + "beside the owner's screen instead of on it, so testing never takes the owner's mouse, keyboard or focus. " + Scope
+        + "It picks your workspace the first time you use one of these tools: "
         + "one the owner set up for your project folder or for you, a shared one, or a new one for your folder. "
-        + "Keep using your own shell and file tools for code; use these for anything with a window. " + ExternalInstructions;
+        + ExternalInstructions;
 
     /// <summary>The tool list a connected agent sees, the same whichever workspace it lands in.</summary>
     internal static object[] ExternalToolSchemas => [.. ExternalTools.Select(Schema)];

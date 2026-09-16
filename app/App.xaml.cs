@@ -65,7 +65,10 @@ public partial class App : Application
             StartWithWindows.Sync(AppSettingsStore.Current);
             AppSettingsStore.Changed += settings => StartWithWindows.Sync(settings);
             // Started by Windows at sign-in: stay in the tray; the corner window still comes and goes.
-            if (!e.Args.Contains(StartWithWindows.Background)) window.Show();
+            if (e.Args.Contains(StartWithWindows.Background)) return;
+            // First launch comes before the hub and instead of it. It is shown once, whichever way
+            // it is answered, so an unanswered one is the only reason to hold the hub back.
+            if (FirstRunWindow.Needed) ShowFirstRun(window); else window.Show();
         }
         catch (Exception failure)
         {
@@ -75,6 +78,17 @@ public partial class App : Application
             _quitting = true;
             Shutdown(1);
         }
+    }
+
+    /// <summary>
+    /// The one screen before anything is written anywhere (MVP_SPEC, Surfaces 5). The hub follows
+    /// it however it ends: Start connects, closing connects nothing, and neither asks again.
+    /// </summary>
+    static void ShowFirstRun(MainWindow hub)
+    {
+        var first = new FirstRunWindow();
+        first.Closed += (_, _) => { if (!hub.IsVisible) hub.Show(); };
+        first.Show();
     }
 
     void CreateTray()

@@ -33,6 +33,16 @@ internal static class WorkspaceConnections
 
     internal enum AgentApp { ClaudeCode, Codex }
 
+    /// <summary>The agent apps Deskweave connects by itself, in the order first launch lists them.</summary>
+    internal static readonly AgentApp[] Supported = Enum.GetValues<AgentApp>();
+
+    internal static string DisplayName(AgentApp app) => app == AgentApp.ClaudeCode ? "Claude Code" : "Codex";
+
+    /// <summary>Where an agent app's own command lives, or null when it is not on this PC. A field so
+    /// the probes can point it at a stub and never reach the owner's real installation.</summary>
+    internal static Func<AgentApp, string?> Locate =
+        app => app == AgentApp.ClaudeCode ? WorkspaceAgent.FindCli() : FindCodex();
+
     internal static object AppConfiguration => new
     {
         mcpServers = new Dictionary<string, object>
@@ -41,7 +51,7 @@ internal static class WorkspaceConnections
         },
     };
 
-    internal static bool IsInstalled(AgentApp app) => (app == AgentApp.ClaudeCode ? WorkspaceAgent.FindCli() : FindCodex()) is not null;
+    internal static bool IsInstalled(AgentApp app) => Locate(app) is not null;
 
     /// <summary>Whether the app's own configuration has Deskweave in it. Reads the file, never writes it.</summary>
     internal static bool IsConnected(AgentApp app)
@@ -73,8 +83,8 @@ internal static class WorkspaceConnections
     /// </summary>
     internal static async Task<string?> SetConnected(AgentApp app, bool connect, CancellationToken cancel = default)
     {
-        string name = app == AgentApp.ClaudeCode ? "Claude Code" : "Codex";
-        string? cli = app == AgentApp.ClaudeCode ? WorkspaceAgent.FindCli() : FindCodex();
+        string name = DisplayName(app);
+        string? cli = Locate(app);
         if (cli is null) return name + " isn't installed on this PC.";
         if (connect && !File.Exists(Bridge)) return "Deskweave's workspace bridge is missing. Reinstall Deskweave.";
         string[] scope = app == AgentApp.ClaudeCode ? ["--scope", "user"] : [];
@@ -86,6 +96,64 @@ internal static class WorkspaceConnections
         var added = await Run(cli, ["mcp", "add", .. scope, AppName, "--", Bridge, "--workspace", WorkspaceAccessStore.RouterTicket],
             bound.Token, null).ConfigureAwait(false);
         return added.Code == 0 ? null : $"{name} did not accept the connection. Nothing else was changed.";
+    }
+
+    /// <summary>
+    /// Connects the given agent apps and answers with the ones that would not, each with the one
+    /// line to show the owner. Safe to repeat: <see cref="SetConnected"/> replaces an entry rather
+    /// than adding a second, so a PC that has seen ten first launches still has one per agent.
+    /// </summary>
+    internal static async Task<IReadOnlyList<(AgentApp App, string Why)>> Connect(
+        IEnumerable<AgentApp> apps, CancellationToken cancel = default)
+    {
+        List<(AgentApp, string)> refused = [];
+        foreach (AgentApp app in apps)
+            if (await SetConnected(app, true, cancel).ConfigureAwait(false) is { } why) refused.Add((app, why));
+        return refused;
+    }
+
+    /// <summary>How often a PC with a supported agent still missing is looked at again.</summary>
+    internal static TimeSpan KeepUpEvery = TimeSpan.FromMinutes(10);
+
+    static CancellationTokenSource? _keepingUp;
+
+    /// <summary>
+    /// The owner pressed Start once, so an agent installed later is connected without being asked
+    /// again (MVP_SPEC, Behavior). Looks now and then every <see cref="KeepUpEvery"/>, and stops
+    /// itself once every supported agent is connected, so the ordinary PC pays nothing. Off the UI
+    /// thread: finding an agent's command walks folders. Does nothing without consent.
+    /// </summary>
+    internal static void KeepUp()
+    {
+        if (_keepingUp is not null || !AppSettingsStore.Current.ConnectAgents) return;
+        var stop = _keepingUp = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            using var clock = new PeriodicTimer(KeepUpEvery);
+            try
+            {
+                do
+                {
+                    // Consent can be withdrawn while this waits; an agent turned off in Settings
+                    // stays off because nothing here removes an entry, only adds a missing one.
+                    if (!AppSettingsStore.Current.ConnectAgents) continue;
+                    await Connect(Supported.Where(app => IsInstalled(app) && !IsConnected(app)), stop.Token).ConfigureAwait(false);
+                    if (Supported.All(IsConnected)) return;
+                }
+                while (await clock.WaitForNextTickAsync(stop.Token).ConfigureAwait(false));
+            }
+            catch (OperationCanceledException) { }   // the app is closing
+            finally { stop.Dispose(); }
+        }, stop.Token);
+    }
+
+    /// <summary>App exit, and the probes between runs. Nothing is left writing an agent's configuration.</summary>
+    internal static void StopKeepingUp()
+    {
+        if (Interlocked.Exchange(ref _keepingUp, null) is not { } stop) return;
+        // Disposed by the loop it stops, which may still be inside a wait on this token.
+        try { stop.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
 
     internal static async Task<string> Codex(string id, bool connect, CancellationToken cancel = default, string? profileRoot = null)
