@@ -331,9 +331,7 @@ public sealed partial class AgentDesktop : IDisposable
         nint canvasDc = Native.CreateCompatibleDC(screenDc);
         nint canvas = Native.CreateCompatibleBitmap(screenDc, width, height);
         nint previousCanvas = Native.SelectObject(canvasDc, canvas);
-        Native.SetBkColor(canvasDc, 0x00201A14);
-        var whole = new Native.Rect { Right = width, Bottom = height };
-        Native.ExtTextOutW(canvasDc, 0, 0, Native.EtoOpaque, ref whole, null, 0, 0);
+        WorkspaceWall.Paint(canvasDc, screenDc, width, height);
 
         // Back to front, so the window the agent is actually using ends up on top.
         for (int i = windows.Count - 1; i >= 0; i--)

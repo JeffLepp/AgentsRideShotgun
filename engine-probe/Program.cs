@@ -187,7 +187,7 @@ internal static class Program
             WorkspaceRuntime.Rest();
             FirstRunConnections.Run(Path.Combine(fixture, "agents"), Check);
             LiveRouter.Run(Check);
-            ProjectRouting.Run(Check);
+            ProjectRouting.Run(Check, output);
         }
         catch (Exception ex) { failure = ex.ToString(); }
         finally

@@ -7,6 +7,9 @@ using System.Text.Json.Serialization;
 namespace HiveMind.AgentWorkspaces;
 
 public enum ThemeChoice { FollowWindows, Light, Dark }
+
+/// <summary>Settings > General > Agent screens: a desktop behind the agent's windows, or a plain fill.</summary>
+public enum AgentScreenLook { Full, Simple }
 public enum CornerShow { ComesAndGoes, Always, Off }
 public enum ScreenshotMode { KeySteps, Continuous, Off }
 public enum PreviewSmoothness { Balanced, Smooth, BatterySaver }
@@ -63,6 +66,9 @@ public sealed record AppSettings
     // History & screenshots
     public ScreenshotMode Screenshots { get; init; } = ScreenshotMode.KeySteps;
 
+    /// <summary>How an agent's screen looks behind its windows (<see cref="WorkspaceWall"/>).</summary>
+    public AgentScreenLook AgentScreen { get; init; } = AgentScreenLook.Full;
+
     /// <summary>Whatever was on disk, coerced to the choices Settings actually offers.</summary>
     internal AppSettings Sane()
     {
@@ -88,6 +94,7 @@ public sealed record AppSettings
             AgentsOff = [.. (AgentsOff ?? d.AgentsOff).Where(a => Enum.TryParse<WorkspaceConnections.AgentApp>(a, out _))
                 .Distinct(StringComparer.Ordinal)],
             Screenshots = Known(Screenshots, d.Screenshots),
+            AgentScreen = Known(AgentScreen, d.AgentScreen),
         };
     }
 }

@@ -48,6 +48,11 @@ public partial class SettingsView
             new Choice(ThemeChoice.Dark, "Dark"),
         ], s => s.Theme, (s, v) => s with { Theme = v });
 
+        var agentScreen = Dropdown("Agent screens", [
+            new Choice(AgentScreenLook.Full, "Full desktop"),
+            new Choice(AgentScreenLook.Simple, "Simple"),
+        ], s => s.AgentScreen, (s, v) => s with { AgentScreen = v });
+
         // On: CornerShow.ComesAndGoes (it comes and goes on its own). Off: CornerShow.Off (it never
         // appears on its own; the tray still shows it, per ModuleEntry.ShowCornerRequested).
         var cornerShow = Toggle("Show the corner window", s => s.CornerShow != CornerShow.Off,
@@ -83,6 +88,7 @@ public partial class SettingsView
                 Section(null, Group(
                     Row(startupText, startup),
                     Row(RowText("Theme"), theme),
+                    Row(RowText("Agent screens", "How the agent's screen looks behind its windows"), agentScreen),
                     Row(RowText("Show the corner window"), cornerShow))),
                 Section(null, Group(versionRow, licenseStack, openData)),
             },

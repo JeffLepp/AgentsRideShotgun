@@ -1,15 +1,35 @@
 using System.IO;
+using System.Windows.Media.Imaging;
 using HiveMind.AgentWorkspaces;
 
 internal static class ProjectRouting
 {
-    internal static void Run(Action<bool, string> check)
+    internal static void Run(Action<bool, string> check, string output)
     {
         using (var desktop = AgentDesktop.Create(AgentDesktop.NameFor("empty" + Guid.NewGuid().ToString("N")[..8])))
         {
             DesktopFrame frame = desktop.Capture(640, 480);
             check(frame is { Complete: true, Windows: 0, Image.PixelWidth: 640, Image.PixelHeight: 480 },
                 "A new empty Windows desktop returns a real opaque background screenshot before any app opens");
+            // Settings > General > Agent screens: a desktop behind the windows, or the plain fill.
+            AgentScreenLook lookBefore = AppSettingsStore.Current.AgentScreen;
+            var looks = new Dictionary<AgentScreenLook, uint>();
+            foreach (AgentScreenLook look in new[] { AgentScreenLook.Full, AgentScreenLook.Simple })
+            {
+                AppSettingsStore.Update(s => s with { AgentScreen = look });
+                desktop.Capture(1440, 900);   // a first sight builds the wall off the capture path
+                Thread.Sleep(1500);
+                BitmapSource screen = desktop.Capture(1440, 900).Image!;
+                var png = new PngBitmapEncoder();
+                png.Frames.Add(BitmapFrame.Create(screen));
+                using (FileStream file = File.Create(Path.Combine(output, "agent-screen-" + look.ToString().ToLowerInvariant() + ".png"))) png.Save(file);
+                var pixel = new uint[1];
+                screen.CopyPixels(new System.Windows.Int32Rect(230, 160, 1, 1), pixel, 4, 0);   // inside the first glow
+                looks[look] = pixel[0] & 0xFFFFFF;
+            }
+            AppSettingsStore.Update(s => s with { AgentScreen = lookBefore });
+            check(looks[AgentScreenLook.Simple] == 0x141A20 && looks[AgentScreenLook.Full] != looks[AgentScreenLook.Simple],
+                "Full desktop paints the agent screen's background; Simple keeps the plain fill");
         }
         var gate = new WorkspaceCaptureGate();
         using var entered = new ManualResetEventSlim();
