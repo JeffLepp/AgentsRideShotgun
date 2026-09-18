@@ -15,7 +15,14 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <RuntimeFrameworkVersion>10.0.11</RuntimeFrameworkVersion>
     <SelfContained>true</SelfContained>
+    <StartupObject>Deskweave.Program</StartupObject>
   </PropertyGroup>
+  <!-- App.xaml compiles as a Page so the SDK does not generate a Main next to Program.cs. -->
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" SubType="Designer" Generator="MSBuild:Compile" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
   <ItemGroup>
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
