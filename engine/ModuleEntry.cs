@@ -45,6 +45,12 @@ public static class ModuleEntry
 
     internal static void RequestShowCorner() => ShowCornerRequested?.Invoke();
 
+    /// <summary>An agent needs the owner and the corner window can't show it (MVP_SPEC, Alerts):
+    /// title and one line, for the app's Windows notification. Raised on the UI thread.</summary>
+    public static event Action<string, string>? AttentionNeeded;
+
+    internal static void RequestAttention(string title, string text) => AttentionNeeded?.Invoke(title, text);
+
     /// <summary>The tray's "Pause every agent" / "Resume every agent", and the toast's Resume link.
     /// The corner window owns pausing; it sets <see cref="AllPaused"/>. Raised on the UI thread.</summary>
     public static event Action? PauseAllRequested;

@@ -19,7 +19,9 @@ public partial class App : Application
     bool _ownsInstance;
     bool _quitting;
     bool _hiddenNotice;
+    bool _infoShowing;
     Action? _refreshTrayPause;
+    Action<string, string>? _attention;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -113,6 +115,26 @@ public partial class App : Application
             Visible = true
         };
         _tray.DoubleClick += (_, _) => Dispatcher.BeginInvoke(ShowWorkspace);
+        // An agent needs the owner and the corner can't show it. Clicking brings the corner up
+        // with the question on it, even when Settings has the corner off, as the tray's own item does.
+        _attention = (title, text) => Dispatcher.BeginInvoke(() =>
+        {
+            _infoShowing = false;
+            _tray?.ShowBalloonTip(10000, title, text, System.Windows.Forms.ToolTipIcon.Info);
+        });
+        ModuleEntry.AttentionNeeded += _attention;
+        _tray.BalloonTipClicked += (_, _) =>
+        {
+            if (_infoShowing) { _infoShowing = false; return; }
+            Dispatcher.BeginInvoke(ModuleEntry.RequestShowCorner);
+        };
+    }
+
+    /// <summary>One line from the tray, for a state the owner should hear once and nothing shows.</summary>
+    internal void Tell(string title, string text)
+    {
+        _infoShowing = true;   // clicking it opens nothing
+        _tray?.ShowBalloonTip(8000, title, text, System.Windows.Forms.ToolTipIcon.Info);
     }
 
     void WindowClosing(object? sender, CancelEventArgs e)
@@ -121,6 +143,7 @@ public partial class App : Application
         HideOnClose(MainWindow, e);
         if (_hiddenNotice || _tray is null) return;
         _hiddenNotice = true;
+        _infoShowing = true;
         _tray.ShowBalloonTip(3500, "Deskweave is still running",
             "Agents can keep working. Quit from this icon.",
             System.Windows.Forms.ToolTipIcon.Info);
@@ -165,6 +188,7 @@ public partial class App : Application
         }
         _instance?.Dispose();
         if (_refreshTrayPause is not null) ModuleEntry.AllPausedChanged -= _refreshTrayPause;
+        if (_attention is not null) ModuleEntry.AttentionNeeded -= _attention;
         if (_tray is not null)
         {
             _tray.Visible = false;

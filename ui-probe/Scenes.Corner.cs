@@ -310,6 +310,25 @@ static class CornerScenes
             WorkspacePeekHost.DropFiles([sourcePath]);
             Program.Check(File.Exists(Path.Combine(folder, "notes (2).txt")),
                 "A clash on drop is renamed \" (2)\" rather than overwriting the first copy");
+
+            // Alerts (MVP_SPEC): with the corner off, an agent's question becomes one Windows notification.
+            var heard = new List<(string Title, string Text)>();
+            Action<string, string> listen = (title, text) => heard.Add((title, text));
+            ModuleEntry.AttentionNeeded += listen;
+            try
+            {
+                AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Off });
+                await Task.Delay(60);
+                runtime.Access!.Handoffs.Request("url", "http://localhost:5173/", "the page is ready");
+                await Task.Delay(200);
+                Program.Check(heard.Count == 1 && heard[0].Title.EndsWith(" wants you", StringComparison.Ordinal)
+                    && heard[0].Text == "Open http://localhost:5173/ on your desktop?",
+                    "With the corner off, an agent's question raises one Windows notification in the corner's own words");
+                InvokeHost("Rethink");
+                Program.Check(heard.Count == 1, "The same question is announced once, however often the corner rethinks");
+                runtime.Access.Handoffs.CancelPending();
+            }
+            finally { ModuleEntry.AttentionNeeded -= listen; }
         }
         finally
         {

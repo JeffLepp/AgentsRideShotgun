@@ -24,6 +24,8 @@ public sealed class FirstRunWindow : Window
     internal const string LocalLine = "Deskweave runs only on this PC";
     internal const string StartLabel = "Start";
     internal const string TryAgainLabel = "Try again";
+    internal const string ConnectedTitle = "Your agents are connected";
+    internal const string RestartLine = "Agent sessions that were already open pick it up when you start them again.";
 
     /// <summary>The agent apps this screen offers, in reference order, with their tile.</summary>
     static readonly (WorkspaceConnections.AgentApp App, string Letter, Color Tile)[] Candidates =
@@ -464,6 +466,9 @@ public sealed class FirstRunWindow : Window
             error.Visibility = Visibility.Visible;
         }
         WorkspaceConnections.KeepUp();
+        // Agents read their tools when a session starts, so one already open has not heard of
+        // Deskweave yet. Said once, where it cannot clutter a screen: the tray's notification.
+        if (_connected.Count > 0 && Application.Current is App deskweave) deskweave.Tell(ConnectedTitle, RestartLine);
         if (_rows.All(row => row.Error.Visibility != Visibility.Visible)) { Close(); return; }
         // Recovery, not a dead end: one more try for the rows that said why, their switch back so
         // the owner can leave one out instead, and closing still keeps whatever did connect.

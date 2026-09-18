@@ -31,6 +31,10 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     internal WorkspaceHandoffs Handoffs { get; }
     internal bool HasDriver { get { lock (_gate) return _driver is not null; } }
     internal string Controller { get { lock (_gate) return _driver is { } id ? _clients.GetValueOrDefault(id, "Connected agent") : ""; } }
+    /// <summary>Who is at the wheel, or who was last: an agent that let go between turns is still
+    /// the one the corner and the hub name.</summary>
+    internal string LastController { get { lock (_gate) return _driver is { } id ? _clients.GetValueOrDefault(id, "Connected agent") : _lastLabel; } }
+    string _lastLabel = "";
     /// <summary>When an agent last took or used this workspace, on the Environment.TickCount64 clock.</summary>
     internal long LastActive { get { lock (_gate) return _lastActive; } }
     internal event Action? Changed;
@@ -207,6 +211,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     void ReleaseDriver()
     {
         if (_driver is null) return;
+        _lastLabel = _clients.GetValueOrDefault(_driver.Value, _lastLabel);
         _driver = null;
         if (_control.Driving != Driver.Owner) _control.Release();
     }
@@ -214,10 +219,10 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     {
         lock (_gate)
         {
+            if (_driver == client) ReleaseDriver();
             _clients.Remove(client);
             _read.Remove(client);
             if (_conversation == client) _conversation = null;
-            if (_driver == client) ReleaseDriver();
         }
         Notify();
     }

@@ -147,7 +147,7 @@ internal sealed class HubViewModel : IDisposable
             bool needsYou = runtime?.Access?.Handoffs.All.Any(h => h.State == "pending") == true
                 || state is MissionState.NeedsYou or MissionState.Failed or MissionState.Interrupted;
             entry.NeedsYou = needsYou;
-            string driver = runtime?.Access?.Controller ?? string.Empty;
+            string driver = runtime?.Access?.LastController ?? string.Empty;
             string kept = WorkspaceHome.Label(workspace.Agents);
             string who = driver.Length > 0 ? WorkspaceHome.DisplayName(driver)
                 : kept.Equals(workspace.Name, StringComparison.OrdinalIgnoreCase) ? string.Empty : kept;

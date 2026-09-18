@@ -1,5 +1,6 @@
 using System.IO;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -88,6 +89,7 @@ internal static class WorkspacePeekHost
         _window = null;
         window?.Close();
         _dismissed = _summoned = _pausedAll = false;
+        _announced.Clear();
         ModuleEntry.AllPaused = false;
         _frontId = _backId = null;
         _background = null;
@@ -209,6 +211,7 @@ internal static class WorkspacePeekHost
     static void Rethink()
     {
         if (!_started || _owner is null) return;
+        Announce();
         (WorkspaceRuntime? front, WorkspaceRuntime? back) = PickTwo();
         bool held = _window?.Hovered == true || _window?.Manipulating == true || _pausedAll && front is not null;
         bool busy = front is not null && Busy(front);
@@ -401,6 +404,28 @@ internal static class WorkspacePeekHost
         window.ShowNeedsYou(pending is null ? null : Question(pending));
     }
 
+    static readonly HashSet<string> _announced = [];
+
+    /// <summary>
+    /// MVP_SPEC, Alerts: a Windows notification only when an agent needs the owner and this window
+    /// can't show it - turned off in Settings, or a full-screen app in front. Once per request; the
+    /// hub shows its own. Windows' Do not disturb and sound settings apply to the notification.
+    /// </summary>
+    static void Announce()
+    {
+        bool unseen = _settings.CornerShow == CornerShow.Off || FullScreenInFront();
+        foreach (WorkspaceRuntime r in WorkspaceRuntime.Running)
+            foreach (WorkspaceHandoff request in r.Access?.Handoffs.All ?? [])
+                if (request.State == "pending" && _announced.Add(request.Id) && unseen && !ModuleEntry.HubShowing)
+                    ModuleEntry.RequestAttention(AgentName(r) + " wants you", Question(request));
+    }
+
+    static bool FullScreenInFront() =>
+        SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4;   // busy, D3D full screen, presentation
+
+    [DllImport("shell32.dll")]
+    static extern int SHQueryUserNotificationState(out int state);
+
     static string Question(WorkspaceHandoff request) =>
         "Open " + (request.Kind == "file" ? Path.GetFileName(request.Target) : request.Target) + " on your desktop?";
 
@@ -432,7 +457,7 @@ internal static class WorkspacePeekHost
 
     /// <summary>What an external agent calls itself, as the reference always shows it.</summary>
     static string AgentName(WorkspaceRuntime r) =>
-        r.Access is { Controller.Length: > 0 } access ? WorkspaceHome.DisplayName(access.Controller) : "Agent";
+        r.Access is { LastController.Length: > 0 } access ? WorkspaceHome.DisplayName(access.LastController) : "Agent";
 
     static string ShortAgentName(WorkspaceRuntime r)
     {

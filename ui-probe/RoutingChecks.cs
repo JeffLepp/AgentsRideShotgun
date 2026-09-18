@@ -81,6 +81,8 @@ internal static class RoutingChecks
             await Task.Delay(2500);
             Program.Check(sleeper.Access?.HasDriver == false && sleeper.Quiet is not null,
                 "An agent that goes quiet without releasing lets go of its workspace by itself");
+            Program.Check(WorkspaceHome.DisplayName(sleeper.Access!.LastController) == "Codex",
+                "The corner and the hub still name the agent after it lets go");
             WorkspaceRuntime.SleepAfter = TimeSpan.FromMilliseconds(500);
             WorkspaceRuntime.Doze();
             Program.Check(WorkspaceRuntime.Of(scratch) is null && File.Exists(WorkspaceStore.LastFrameOf(scratch))
