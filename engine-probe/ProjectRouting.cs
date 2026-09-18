@@ -51,6 +51,16 @@ internal static class ProjectRouting
         using (new WorkspaceEvidence(evidenceHome)) { }
         check(!File.Exists(old) && File.Exists(recent),
             "Screenshots older than 7 days are dropped when a workspace next starts, newer ones stay");
+        File.WriteAllBytes(Path.Combine(frames, "250000.png"), [3]);
+        using (var evidence = new WorkspaceEvidence(evidenceHome))
+        {
+            var pixel = System.Windows.Media.Imaging.BitmapSource.Create(1, 1, 96, 96,
+                System.Windows.Media.PixelFormats.Bgr32, null, new byte[4], 4);
+            evidence.Note("probe", "frame", "kept", pixel);
+        }
+        string[] names = [.. Directory.GetFiles(frames).Select(Path.GetFileName).Order(StringComparer.Ordinal)!];
+        check(names.Length == 3 && names[^1]!.StartsWith('t'),
+            "A new screenshot sorts after the numbered ones older versions wrote, so trimming keeps the newest");
         // Outside the source checkout: its .git must not turn non-project fixtures into projects.
         string root = Directory.CreateTempSubdirectory("Deskweave-routing-").FullName;
         string alpha = Path.Combine(root, "Alpha"), beta = Path.Combine(root, "Beta");

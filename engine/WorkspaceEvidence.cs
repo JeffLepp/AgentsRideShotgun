@@ -50,8 +50,10 @@ public sealed class WorkspaceEvidence : IDisposable
         }
     }
 
-    const string StampFormat = "yyyyMMdd-HHmmss-fffffff";
-    const int StampLength = 23;
+    // The leading "t" sorts after every digit, so these follow the numbered frames older versions
+    // wrote (000001.png, 250000.png) instead of landing between them.
+    const string StampFormat = "'t'yyyyMMdd-HHmmss-fffffff";
+    const int StampLength = 24;
 
     /// <summary>
     /// Drops one workspace's frames past their week; the app sweeps every workspace with this, not

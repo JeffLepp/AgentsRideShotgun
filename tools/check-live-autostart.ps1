@@ -82,8 +82,9 @@ try {
     Check ($init.result.serverInfo.name -eq 'deskweave') "With Deskweave closed, the agent's bridge starts it and initializes ($($report.coldStartSeconds) s)"
     Check ($report.coldStartSeconds -lt 10) 'The first answer arrives inside Codex''s default 10 s MCP startup timeout'
     Check ($twinInit.result.serverInfo.name -eq 'deskweave') 'A second session starting at the same moment connects too'
-    $twin.StandardInput.Close(); $twin.WaitForExit(5000) | Out-Null
-    Start-Sleep -Seconds 1
+    $twin.StandardInput.Close()
+    foreach ($i in 1..15) { Watch-Screen; Start-Sleep -Milliseconds 100 }   # keep watching while it settles
+    $twin.WaitForExit(5000) | Out-Null
     $app = @(Get-Process Deskweave)
     Check ($app.Count -eq 1) 'Exactly one Deskweave is running'
     $app = $app[0]

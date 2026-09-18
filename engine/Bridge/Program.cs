@@ -201,7 +201,7 @@ async Task<(Link?, string)> Open(TimeSpan patience)
                 // What is left of the wait, not a fresh ten seconds: a pipe that shows up at the end
                 // of a startup wait must not push the answer past the client's own timeout.
                 using var bound = new CancellationTokenSource(TimeSpan.FromMilliseconds(
-                    Math.Clamp(until - Environment.TickCount64, 2000, 10000)));
+                    Math.Clamp(until - Environment.TickCount64, 500, 10000)));
                 await pipe.ConnectAsync(bound.Token);
                 await WorkspacePipeProtocol.Write(pipe, key, 256, bound.Token);
                 if (await WorkspacePipeProtocol.Read(pipe, 256, bound.Token) == "workspace-pipe/1")
