@@ -215,7 +215,7 @@ static class SettingsScenes
                 && !Descendants<TextBlock>(view).Any(x => TextOf(x) == "Codex"), "Agents without an installation have no row");
             Program.Agents(_ => AgentState.NotInstalled);
             ShowSettled(view, "agents");
-            Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "No supported agent found on this PC"),
+            Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == FirstRunWindow.NoAgentLine),
                 "Agents explains when neither supported app is installed");
             Program.Agents(_ => AgentState.Connected);
             ShowSettled(view, "agents");

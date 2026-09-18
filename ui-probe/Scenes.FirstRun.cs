@@ -14,7 +14,7 @@ namespace Deskweave.UiProbe;
 /// </summary>
 static class FirstRunScenes
 {
-    [Scene("first-launch", "07-first-launch", 240, 44, 520, 500)]
+    [Scene("first-launch", "07-first-launch", 240, 44, 520, 520)]
     static async Task<FrameworkElement> FirstLaunch(SceneContext scene)
     {
         using IDisposable seams = Program.AgentSeams();
@@ -144,7 +144,7 @@ static class FirstRunScenes
             Program.Agents(_ => AgentState.NotInstalled);
             using (Shown open = Open())
             {
-                Program.Check(Switches(open.Window).Count == 0 && Words(open.Window).Contains("No supported agent found on this PC"),
+                Program.Check(Switches(open.Window).Count == 0 && Words(open.Window).Contains(FirstRunWindow.NoAgentLine),
                     "With no supported agent installed, first launch says so and offers no switches");
                 await PressStart(open.Window);
             }

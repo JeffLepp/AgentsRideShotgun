@@ -77,7 +77,6 @@ public sealed partial class WorkspaceControl
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 { receipt = receipt with { Reason = receipt.Reason + " Screenshot unavailable: " + ex.GetType().Name + ". Do not replay input." }; }
-                if (frame is not null) await SawBrowser("a computer screenshot containing browser content").ConfigureAwait(false);
             }
             if (request.Screenshot && frame is null)
                 receipt = receipt with { Reason = receipt.Reason + " No image returned. Observe again before further coordinate input." };

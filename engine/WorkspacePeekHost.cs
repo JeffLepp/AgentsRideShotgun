@@ -225,8 +225,10 @@ internal static class WorkspacePeekHost
         bool busy = front is not null && Busy(front);
         TimeSpan quiet = DateTimeOffset.Now - _stirred;
         TimeSpan fade = TimeSpan.FromSeconds(5);
+        // The hub can't answer a desktop request, so a question shows here even while it is open.
+        bool asking = front?.Access?.Handoffs.All.Any(request => request.State == "pending") == true;
         bool wanted = WorkspacePeekPolicy.Wanted(_settings.CornerShow, front is not null,
-            ModuleEntry.HubShowing, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade);
+            ModuleEntry.HubShowing && !asking, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade);
         // A tray summon's own grace period (held or within the fixed fade after the last activity)
         // has ended: stop treating it as summoned, or it would keep forcing ComesAndGoes-like timing
         // on a mode (Off, say) that means something else once a later Settings change picks it up.
@@ -421,10 +423,10 @@ internal static class WorkspacePeekHost
     /// </summary>
     static void Announce()
     {
-        bool unseen = _settings.CornerShow == CornerShow.Off || FullScreenInFront();
+        if (_settings.CornerShow != CornerShow.Off && !FullScreenInFront()) return;
         foreach (WorkspaceRuntime r in WorkspaceRuntime.Running)
             foreach (WorkspaceHandoff request in r.Access?.Handoffs.All ?? [])
-                if (request.State == "pending" && _announced.Add(request.Id) && unseen && !ModuleEntry.HubShowing)
+                if (request.State == "pending" && _announced.Add(request.Id))
                     ModuleEntry.RequestAttention(AgentName(r) + " wants you", Question(request), r.Id, request.Id);
     }
 

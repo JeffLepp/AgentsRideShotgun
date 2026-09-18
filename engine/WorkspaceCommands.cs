@@ -199,9 +199,7 @@ public sealed class WorkspaceCommands : IDisposable
         if (pid == 0)
         {
             Clean(job);
-            error = _control.ProgramsBlockedAfterWebContent
-                ? "commands are blocked after browser inspection"
-                : "the workspace would not start a command shell";
+            error = "the workspace would not start a command shell";
             return null;
         }
         job.Pid = pid;

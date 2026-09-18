@@ -333,6 +333,13 @@ static class CornerScenes
                 Program.Check(heard.Count == 2 && typeof(WorkspacePeekHost).GetField("_pendingId", BindingFlags.NonPublic | BindingFlags.Static)!
                     .GetValue(null) as string == second.Id,
                     "Clicking a notification brings up its own question, not an older one waiting in the same workspace");
+                // The hub can't answer a desktop request, so the question shows over it.
+                AppSettingsStore.Update(s => s with { CornerShow = CornerShow.ComesAndGoes });
+                ModuleEntry.HubShowing = true;
+                InvokeHost("Rethink");
+                await Task.Delay(300);
+                Program.Check(GateWindow() is { Watching: true }, "A question for the owner shows in the corner even while the hub is open");
+                ModuleEntry.HubShowing = false;
                 runtime.Access.Handoffs.CancelPending();
             }
             finally { ModuleEntry.AttentionNeeded -= listen; }

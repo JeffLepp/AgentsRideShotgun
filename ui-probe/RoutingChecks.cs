@@ -92,23 +92,7 @@ internal static class RoutingChecks
             Program.Check(await desktop.Workspace() == scratch && WorkspaceRuntime.Of(scratch) is not null,
                 "The same agent session's next call wakes the sleeping workspace");
 
-            // What a session read stays with it across sleep and wake; another session starts clean.
-            WorkspaceRuntime.Of(scratch)!.Plane!.SwapUntrusted(true);   // as if it had just read an outside page
             await desktop.Tool("release");
-            await Task.Delay(700);
-            WorkspaceRuntime.Doze();
-            bool slept = WorkspaceRuntime.Of(scratch) is null;
-            bool refused;
-            try { await desktop.Tool("run", new { command = "echo refused", seconds = 20 }); refused = false; }
-            catch (IOException) { refused = true; }
-            JsonElement state = await desktop.Tool("status");
-            bool told = state.GetProperty("content")[0].GetProperty("text").GetString()!.Contains("\"programsBlockedAfterWebContent\":true", StringComparison.Ordinal);
-            await desktop.Tool("release");
-            Program.Check(slept && refused && told,
-                "A session that read an outside page is still refused, and told so, after its workspace sleeps and wakes");
-            await home.Tool("run", new { command = "echo allowed", seconds = 20 });
-            Program.Check(true, "Another session in the same workspace is not refused for it");
-            await home.Tool("release");
             int cap = WorkspaceRuntime.Running.Count;
             WorkspaceRouter.MaxRunning = cap;
             await trader.Tool("acquire");

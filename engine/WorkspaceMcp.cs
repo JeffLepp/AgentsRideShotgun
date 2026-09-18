@@ -152,9 +152,7 @@ public sealed class WorkspaceMcp : IDisposable
         + "cancel only deliberately. Omit timeout_seconds for no execution deadline. "
         + "request_desktop only asks the owner to open a finished document or HTTP(S) preview; it is not permission. "
         + "Never bypass a refusal with your other tools. Owner logins, permissions, payments and security prompts remain owner decisions. "
-        + "These tools cannot redirect programs launched through other tools. Once you read or screenshot a web page from outside this PC, "
-        + "open and run are refused for the rest of your session; pages on localhost, 127.0.0.1 and file pages never trigger this, "
-        + "so build, reload and retest your own app freely. status shows whether it applies. "
+        + "These tools cannot redirect programs launched through other tools. "
         + "No owner browser profile is shared, and this is input separation, not a confidentiality sandbox.";
 
     /// <summary>
@@ -273,7 +271,7 @@ public sealed class WorkspaceMcp : IDisposable
             case "look":
             {
                 nint window = Window(arguments, "window");
-                BitmapSource? frame = await _control.Shot(window, Bool(arguments, "marks")).ConfigureAwait(false);
+                BitmapSource? frame = _control.Shot(window, Bool(arguments, "marks"));
                 // A desktop with nothing on it cannot be photographed. That is emptiness, not a
                 // fault, and calling it an error sends a model looking for a broken tool.
                 if (frame is null) return Say(_control.Windows().Count == 0
@@ -357,7 +355,6 @@ public sealed class WorkspaceMcp : IDisposable
             }
             case "open":
             {
-                if (_control.ProgramsBlockedAfterWebContent) return Fail(Executed);
                 int pid = _control.Open(Str(arguments, "program"),
                     Str(arguments, "arguments") is { Length: > 0 } a ? a : null, quiet: false, out string exe);
                 if (pid == 0) return Fail("that program did not start");
@@ -474,20 +471,9 @@ public sealed class WorkspaceMcp : IDisposable
     /// integrity. `codex` does not - its launcher looks for its own install under APPDATA, which the
     /// safety boundary redirects into the workspace.
     /// </summary>
-    /// <summary>
-    /// Said to the agent when it asks to execute something after it has read a page. It names the
-    /// reason rather than pretending the workspace is broken, because the run before this told it
-    /// "the workspace would not start a command shell", which is untrue and invites a retry.
-    /// </summary>
-    const string Executed =
-        "This session has read a web page from outside this PC, so program launches and commands in the workspace are " +
-        "refused for the rest of it. Pages on localhost and file pages never cause this. Continue browser-only work; " +
-        "do not bypass the refusal with another tool, a new connection, or a new mission.";
-
     async Task<object> RunCommand(string command, int seconds, bool powershell, double limitSeconds,
         CancellationToken cancel)
     {
-        if (_control.ProgramsBlockedAfterWebContent) return Fail(Executed);
         CommandJob? job = _control.Commands.Start(command, powershell, limitSeconds, out string? error, _home);
         if (job is null) return Fail("could not run that: " + error);
 

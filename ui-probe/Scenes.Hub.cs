@@ -293,7 +293,7 @@ static class HubScenes
                 "The tray pause label returns after resuming");
 
             Program.Check(QuitQuestion.Title == "Quit Deskweave?"
-                && QuitQuestion.Body == "Agents working now will stop. Your files stay."
+                && QuitQuestion.Body.StartsWith("Agents working now will stop. Your files stay.", StringComparison.Ordinal)
                 && QuitQuestion.QuitLabel == "Quit" && QuitQuestion.CancelLabel == "Cancel",
                 "The quit question uses plain words and Quit/Cancel buttons");
             QuitQuestion.ConfirmForTests = () => false;

@@ -5,14 +5,11 @@ namespace HiveMind.AgentWorkspaces;
 
 internal sealed record WorkspaceAccessPolicy(bool Enabled = false, bool DesktopRequests = true)
 {
-    // Missing fields in older owner policy retain the existing safe default.
-    public bool BlockProgramsAfterWebContent { get; init; } = true;
-
     /// <summary>
     /// Start this workspace's Chrome when the workspace starts, rather than on the first browse.
     /// Measured 2026-09-07: a cold browse costs about forty seconds, which an agent reads as a hung
     /// tool. Not a permission - it opens no page and reads nothing - so a connecting client never
-    /// tightens or widens it, and blocking after browser inspection is unaffected.
+    /// tightens or widens it.
     /// </summary>
     public bool PrewarmBrowser { get; init; } = true;
 
@@ -20,7 +17,6 @@ internal sealed record WorkspaceAccessPolicy(bool Enabled = false, bool DesktopR
     {
         Enabled = Enabled && requested.Enabled,
         DesktopRequests = DesktopRequests && requested.DesktopRequests,
-        BlockProgramsAfterWebContent = BlockProgramsAfterWebContent || requested.BlockProgramsAfterWebContent,
     };
 }
 

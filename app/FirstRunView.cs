@@ -20,8 +20,9 @@ namespace Deskweave;
 public sealed class FirstRunWindow : Window
 {
     internal const string Headline = "Your agents test in their own screen now";
-    internal const string Explanation = "When Claude Code or Codex needs to click through your app, it happens in a corner window. Your mouse stays yours.";
+    internal const string Explanation = "When Claude Code or Codex needs to click through your app, it happens in a corner window. Your mouse stays yours. Agent sessions already open need a restart.";
     internal const string LocalLine = "Deskweave runs only on this PC";
+    internal const string NoAgentLine = "No Claude Code or Codex yet. Install one and Deskweave connects it.";
     internal const string StartLabel = "Start";
     internal const string TryAgainLabel = "Try again";
     internal const string ConnectedTitle = "Your agents are connected";
@@ -351,7 +352,7 @@ public sealed class FirstRunWindow : Window
             stack.Children.Add(first ? row : Seam(row));
             first = false;
         }
-        if (first) stack.Children.Add(Plain("No supported agent found on this PC"));
+        if (first) stack.Children.Add(Plain(NoAgentLine));
         var card = new Border { Child = stack, Margin = new Thickness(0, 0, 0, 16) };
         card.SetResourceReference(StyleProperty, "Card");
         return card;

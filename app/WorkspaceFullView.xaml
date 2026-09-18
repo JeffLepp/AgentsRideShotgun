@@ -134,7 +134,13 @@
         <Border x:Name="ScreenBorder" Grid.Row="2" CornerRadius="{DynamicResource SkinPanelRadius}" BorderThickness="1"
                 BorderBrush="{DynamicResource HairlineBrush}" Background="{DynamicResource CardBrush}"
                 ClipToBounds="True" VerticalAlignment="Top">
-            <Image x:Name="ScreenImage" Stretch="UniformToFill"/>
+            <Grid>
+                <Image x:Name="ScreenImage" Stretch="UniformToFill"/>
+                <Border x:Name="LastSeenPill" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Margin="12" Padding="10,5" CornerRadius="8" Background="{DynamicResource GlassBrush}">
+                    <TextBlock x:Name="LastSeenText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}"/>
+                </Border>
+            </Grid>
         </Border>
         <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>

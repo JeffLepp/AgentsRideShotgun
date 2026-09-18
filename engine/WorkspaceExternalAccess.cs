@@ -11,17 +11,6 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     readonly Dictionary<Guid, string> _clients = [];
     WorkspacePipeServer? _server;
     Guid? _driver;
-    // Whose conversation the plane's "has read a page" flag belongs to right now. A conversation is
-    // the agent's session as the router knows it, which outlives this workspace: sleeping and
-    // waking hands a new client id to the same conversation. The others' flags wait in PagesRead.
-    // ponytail: in memory only, so a Deskweave restart mid-session forgets a flag; persist it if
-    // restarts under a live agent turn out to matter.
-    string? _conversation;
-    readonly Dictionary<Guid, string> _conversations = [];
-    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> PagesRead = new();
-
-    /// <summary>The router's session ended: its conversation is over and its flag goes with it.</summary>
-    internal static void Forget(string conversation) => PagesRead.TryRemove(conversation, out _);
     int _activeUses;
     long _lastActive;
     bool _disposed;
@@ -61,8 +50,6 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         {
             if (_disposed) return;
             Policy = policy;
-            // The page-safety setting lives on the shared control plane, even with agent access off.
-            _control.ConfigureWebContentBlocking(policy.BlockProgramsAfterWebContent);
             if (!policy.Enabled)
             {
                 WorkspacePipeServer? closing = _server;
@@ -93,19 +80,16 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         }
     }
     /// <summary>One more agent in this workspace, through its own pipe or handed over by the router.</summary>
-    internal WorkspacePipePeer Attach() => Attach("", "");
+    internal WorkspacePipePeer Attach() => Attach("");
 
-    /// <summary>One more agent, working in <paramref name="home"/>: its commands start there.
-    /// <paramref name="conversation"/> is the router session it belongs to; empty for a client of
-    /// this workspace's own pipe, whose connection is its whole conversation.</summary>
-    internal WorkspacePipePeer Attach(string home, string conversation)
+    /// <summary>One more agent, working in <paramref name="home"/>: its commands start there.</summary>
+    internal WorkspacePipePeer Attach(string home)
     {
         Guid client = Guid.NewGuid();
         lock (_gate)
         {
             if (_disposed || !Policy.Enabled) throw new IOException("Agent access is off.");
             _clients.Add(client, "Connected agent");
-            _conversations[client] = conversation.Length > 0 ? conversation : client.ToString("N");
         }
         var mcp = new WorkspaceMcp(_control, this, client, home);
         Notify();
@@ -134,7 +118,6 @@ internal sealed class WorkspaceExternalAccess : IDisposable
                 _driver = null;
             }
             if (!_control.AgentTakes()) return "The owner has control.";
-            Converse(client);
             _driver = client;
             _lastActive = Environment.TickCount64;
             _letGo.Change(IdleHandoverMs, Timeout.Infinite);
@@ -246,49 +229,15 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         {
             if (_driver == client) ReleaseDriver();
             _clients.Remove(client);
-            if (_conversations.Remove(client, out string? conversation))
-            {
-                if (_conversation == conversation)
-                {
-                    PagesRead[conversation] = _control.ReadUntrustedContent;
-                    _conversation = null;
-                }
-                // Its own pipe's client: the connection was the whole conversation.
-                if (conversation == client.ToString("N")) Forget(conversation);
-            }
         }
         Notify();
     }
 
-    string ConversationOf(Guid who) => _conversations.GetValueOrDefault(who, who.ToString("N"));
-
-    /// <summary>Gives the plane this one's own "has read a page" flag, keeping the last holder's.</summary>
-    void Converse(Guid who)
-    {
-        string conversation = ConversationOf(who);
-        if (_conversation == conversation) return;
-        bool held = _control.SwapUntrusted(PagesRead.GetValueOrDefault(conversation));
-        if (_conversation is { } before) PagesRead[before] = held;
-        _conversation = conversation;
-    }
-
-    /// <summary>Whether this client's own conversation has read a page from outside this PC.</summary>
-    bool HasRead(Guid client)
-    {
-        lock (_gate)
-        {
-            string conversation = ConversationOf(client);
-            return _conversation == conversation ? _control.ReadUntrustedContent : PagesRead.GetValueOrDefault(conversation);
-        }
-    }
     internal object Status(Guid client) => new
     {
         workspace = _id, folder = _control.Folder, enabled = Policy.Enabled,
         fileAccess = "normal-windows-user", relativePaths = "workspace-folder", followsFileLinks = true,
         controller = Controller, hasControl = MayUse(client), ownerHasControl = _control.Driving == Driver.Owner,
-        hasReadWebContent = HasRead(client),
-        blockProgramsAfterWebContent = _control.BlockProgramsAfterWebContent,
-        programsBlockedAfterWebContent = _control.BlockProgramsAfterWebContent && HasRead(client),
         mainDesktop = Policy.DesktopRequests ? "ask-every-time" : "workspace-only", requests = Handoffs.All,
     };
     void Notify() => Changed?.Invoke();
@@ -299,9 +248,6 @@ internal sealed class WorkspaceExternalAccess : IDisposable
             if (_disposed) return;
             _disposed = true;
             _letGo.Dispose();
-            // Sleeping: the conversation holding the plane keeps its flag for when it wakes.
-            if (_conversation is { } holding) PagesRead[holding] = _control.ReadUntrustedContent;
-            _conversation = null;
             WorkspacePipeServer? closing = _server;
             _server?.Dispose();
             _server = null;

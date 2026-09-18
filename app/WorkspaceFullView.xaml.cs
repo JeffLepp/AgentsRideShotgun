@@ -121,7 +121,10 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         try { lines = File.ReadAllLines(log); }
         catch (IOException) { return; }
         catch (UnauthorizedAccessException) { return; }
-        foreach (string line in lines.TakeLast(200))
+        // The newest 40 steps, shown oldest first. Walking back from the end is what keeps the
+        // latest ones: taking 40 from the front of the last 200 dropped exactly what just happened.
+        var rows = new List<DidRow>();
+        foreach (string line in lines.TakeLast(200).Reverse())
         {
             string[] parts = line.Split('\t');
             if (parts.Length < 4) continue;
@@ -136,9 +139,12 @@ public partial class WorkspaceFullView : UserControl, IDisposable
                 if (File.Exists(framePath)) thumb = LoadImage(framePath);
             }
             (string prefix, string code) = Describe(action, detail);
-            _did.Add(new DidRow(when.ToLocalTime().ToString("HH:mm:ss"), prefix, code, thumb));
-            if (_did.Count >= 40) break;
+            DateTimeOffset local = when.ToLocalTime();
+            rows.Add(new DidRow(local.ToString(local.Date == DateTime.Today ? "HH:mm:ss" : "MMM d HH:mm"), prefix, code, thumb));
+            if (rows.Count >= 40) break;
         }
+        rows.Reverse();
+        foreach (DidRow row in rows) _did.Add(row);
     }
 
     static (string Prefix, string Code) Describe(string action, string detail) => action switch
@@ -194,7 +200,14 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         // dropped below) before another starts, rather than racing it.
         if (_capturingScreen || !HubPreview.Allowed) return;
         WorkspaceControl? plane = WorkspaceRuntime.Of(id)?.Plane;
-        if (plane is null) return;
+        // Asleep: the picture is the last one it had, and says so rather than looking live.
+        LastSeenPill.Visibility = plane is null && ScreenImage.Source is not null ? Visibility.Visible : Visibility.Collapsed;
+        if (plane is null)
+        {
+            if (WorkspaceStore.Find(id) is { } stored)
+                LastSeenText.Text = "Last seen " + stored.LastUsed.ToLocalTime().ToString("MMM d, h:mm tt");
+            return;
+        }
         _capturingScreen = true;
         try
         {

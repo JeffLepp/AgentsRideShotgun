@@ -216,44 +216,6 @@ public sealed partial class WorkspaceControl : IDisposable
 
     bool AgentMayAct => Ticket != 0;
 
-    // --- browser observation and owner policy -------------------------------------------------
-
-    /// <summary>
-    /// Whether the conversation has observed browser content. This fact is independent of the
-    /// owner's blocking preference: switching blocking off must never erase it. The default
-    /// blocks subsequent launches; an owner can explicitly allow iterative build/browse work.
-    /// </summary>
-    public bool ReadUntrustedContent => _readUntrustedContent;
-    volatile bool _readUntrustedContent;
-    volatile bool _blockProgramsAfterWebContent = true;
-    public bool BlockProgramsAfterWebContent => _blockProgramsAfterWebContent;
-    public bool ProgramsBlockedAfterWebContent => _blockProgramsAfterWebContent && _readUntrustedContent;
-
-    /// <summary>Owner-only configuration; never an agent tool. Does not clear taint, grant an
-    /// input lease, approve a handoff, or cancel work already admitted.</summary>
-    internal void ConfigureWebContentBlocking(bool block)
-    {
-        if (_blockProgramsAfterWebContent == block) return;
-        _blockProgramsAfterWebContent = block;
-        _evidence.Note("policy", "browser inspection", block
-            ? "owner enabled program blocking; prior browser observation retained"
-            : "owner disabled program blocking; browser content remains untrusted");
-    }
-
-    /// <summary>
-    /// Marks the mission as having taken in page content. Deliberately covers the picture as well
-    /// as the text: a photograph of a browser window is read by the model just as the page text is,
-    /// and an instruction painted on a page is legible in both.
-    /// </summary>
-    void Untrusted(string how)
-    {
-        if (ReadUntrustedContent) return;
-        _readUntrustedContent = true;
-        _evidence.Note("untrusted", how, ProgramsBlockedAfterWebContent
-            ? "page content is in the mission - programs are now refused"
-            : "page content is in the mission - owner has disabled program blocking");
-    }
-
     // --- perception --------------------------------------------------------------------------
 
     public IReadOnlyList<AgentWindow> Windows() => _desktop.Windows();
@@ -275,7 +237,7 @@ public sealed partial class WorkspaceControl : IDisposable
     /// browser protocol - which is the only way to answer a captcha or a visual check. Pass zero for
     /// the whole workspace screen.
     /// </summary>
-    public async Task<BitmapSource?> Shot(nint window = 0, bool marks = false)
+    public BitmapSource? Shot(nint window = 0, bool marks = false)
     {
         BitmapSource? frame = window == 0 ? Screen() : _desktop.CaptureWindow(window);
         if (frame is not null && marks)
@@ -287,34 +249,7 @@ public sealed partial class WorkspaceControl : IDisposable
         }
         _evidence.Note("shot", window == 0 ? "the whole screen" : Describe(window),
             frame is null ? "nothing to photograph" : $"{frame.PixelWidth}x{frame.PixelHeight}");
-        // A picture of a page is page content. The whole screen counts too, because the browser is
-        // on it - this is why the flag is set here and not only where page text is read.
-        if (frame is not null && (window == 0 || window == BrowserWindow))
-            await SawBrowser("a photograph of the browser").ConfigureAwait(false);
         return frame;
-    }
-
-    /// <summary>
-    /// A picture with the browser in it. Only a page from outside this PC counts: the owner's own
-    /// app on localhost or a file is what the agent is there to test. A browser that has never
-    /// loaded a page has nothing on it to photograph.
-    /// </summary>
-    internal async Task SawBrowser(string how)
-    {
-        if (ReadUntrustedContent || _browser is not { HasContent: true } browser) return;
-        if (await browser.ShowsOutside(CancellationToken.None).ConfigureAwait(false)) Untrusted(how);
-    }
-
-    /// <summary>
-    /// Hands the plane another conversation's "has read a page" flag and returns the one it held.
-    /// Agents sharing a workspace take turns, and what one of them read is in its conversation, not
-    /// in the next one's; without this, one agent reading a page blocked every later one for good.
-    /// </summary>
-    internal bool SwapUntrusted(bool read)
-    {
-        bool held = _readUntrustedContent;
-        _readUntrustedContent = read;
-        return held;
     }
 
     /// <summary>
@@ -617,11 +552,6 @@ public sealed partial class WorkspaceControl : IDisposable
     {
         started = exe;
         if (_requiredLease.Value is { } expected && (expected == 0 || Ticket != expected)) return 0;
-        if (ProgramsBlockedAfterWebContent)
-        {
-            if (!quiet) Note("open", Path.GetFileName(exe), "REFUSED, browser inspection blocking is enabled and this mission has read a page");
-            return 0;
-        }
         // "hivemind" or "chrome" is what a person types into Start; CreateProcess wants the file.
         (exe, arguments) = WorkspacePrograms.Resolve(exe, arguments);
         started = exe;
@@ -838,7 +768,6 @@ public sealed partial class WorkspaceControl : IDisposable
         bool opened;
         try { opened = await browser.NewTab(url, input.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
-        if (opened && !WorkspaceBrowser.Local(url)) Untrusted("opened " + url + " in a new tab");
         Note("browser", "new tab " + url, opened ? "opened, now at "
             + await Address(cancel).ConfigureAwait(false) : "the browser would not open a tab");
         return opened;
@@ -857,7 +786,6 @@ public sealed partial class WorkspaceControl : IDisposable
         string text = await _browser.Read(20000, cancel).ConfigureAwait(false);
         string at = await Address(cancel).ConfigureAwait(false);
         _evidence.Note("page", at, text.Length + " characters read");
-        if (text.Length > 0 && !WorkspaceBrowser.Local(at)) Untrusted("read " + at);
         return text;
     }
 

@@ -325,8 +325,6 @@ internal sealed class WorkspaceRouter : IDisposable
     {
         string _cwd = string.Empty;
         string _client = string.Empty;
-        // This agent session, across every workspace it binds to: what it read stays with it.
-        readonly string _conversation = "session:" + Guid.NewGuid().ToString("N");
         string? _hello;
         WorkspacePipePeer? _bound;
         WorkspaceRuntime? _runtime;
@@ -338,7 +336,6 @@ internal sealed class WorkspaceRouter : IDisposable
         {
             _bound?.Closed();
             _bound = null;
-            WorkspaceExternalAccess.Forget(_conversation);
         }
 
         async Task<string?> Handle(string body, CancellationToken cancel)
@@ -413,7 +410,7 @@ internal sealed class WorkspaceRouter : IDisposable
             }
             if (runtime?.Access is not { } access) return (null, why ?? "The workspace stopped while it was starting. Try again.");
             WorkspacePipePeer peer;
-            try { peer = access.Attach(_cwd, _conversation); }
+            try { peer = access.Attach(_cwd); }
             catch (IOException ex) { return (null, ex.Message); }
             // The workspace hears this agent's own hello, so the owner sees its name on the tile.
             if (_hello is not null) await peer.Handle(_hello, cancel).ConfigureAwait(false);

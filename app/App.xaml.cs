@@ -242,7 +242,7 @@ internal static class TrayMenu
 internal static class QuitQuestion
 {
     internal const string Title = "Quit Deskweave?";
-    internal const string Body = "Agents working now will stop. Your files stay.";
+    internal const string Body = "Agents working now will stop. Your files stay. Deskweave starts again in the background when an agent needs it.";
     internal const string QuitLabel = "Quit";
     internal const string CancelLabel = "Cancel";
     internal static Func<bool>? ConfirmForTests;

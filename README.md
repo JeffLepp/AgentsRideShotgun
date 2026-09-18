@@ -17,7 +17,7 @@ Exact package hashes, test results and remaining MVP gates are in [VALIDATION.md
 
 First launch detects **Claude Code** and **Codex**. **Start** consents to connecting the enabled
 agents; closing it connects nothing. Settings > Agents can connect later. Agent sessions that were
-already open pick it up when they are started again. No Deskweave sign-in is required.
+already open need a restart to see Deskweave. No Deskweave sign-in is required.
 
 Once connected, an agent that needs a screen while Deskweave is closed starts it in the background
 (tray only). An agent that goes 30 seconds without a workspace action lets go of it, so the corner
@@ -34,9 +34,8 @@ The connection tells agents to use Deskweave for their own browser/GUI work and 
 An explicit request to open a page for you in your own browser stays a desktop request through
 the agent's normal approved tools. Code, builds, unit tests and ordinary files stay in those
 tools too. These are connected-agent instructions, not interception of arbitrary programs;
-real model adoption remains a separate acceptance gate (`tools/check-phase-in.ps1`). Reading
-your own app on localhost or a file page never stops the agent from running programs in its
-workspace; reading an outside web page does, for the rest of that agent's session.
+real model adoption is checked with `tools/check-phase-in.ps1` (Claude Code and Codex both chose
+Deskweave for screen work and stayed out of it otherwise, 4/4 each; see VALIDATION.md).
 
 - **Corner window:** appears for activity, fades when quiet, and stays while hovered or pinned.
   Move it by its name pill and resize from its edges. Click the screen to use it while the

@@ -102,7 +102,7 @@ public partial class SettingsView
             .ToArray();
         Border onThisPc = installedRows.Length > 0
             ? Group(installedRows)
-            : Group(Row(RowText("No supported agent found on this PC")));
+            : Group(Row(RowText(FirstRunWindow.NoAgentLine)));
 
         var pause = ShortcutRow("Pause every agent", "Pause every agent", s => s.PauseHotkey,
             (s, v) => s with { PauseHotkey = v }, () => ModuleEntry.PauseShortcutTaken);
