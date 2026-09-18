@@ -48,6 +48,18 @@ public sealed partial class AgentDesktop
     }
 
     /// <summary>
+    /// Sizes a window to the whole workspace screen. A workspace desktop has no taskbar, and
+    /// maximizing leaves room for one: an empty strip along the bottom of every corner preview.
+    /// </summary>
+    internal bool Fill(nint window) => window != 0 && Run(() =>
+    {
+        if (!OwnsWindow(window)) return false;
+        if (Native.IsZoomed(window)) Native.ShowWindow(window, Native.SwRestore);
+        return Native.SetWindowPos(window, 0, 0, 0, ScreenWidth, ScreenHeight,
+            Native.SwpNoZOrder | Native.SwpNoActivate | Native.SwpNoOwnerZOrder);
+    });
+
+    /// <summary>
     /// Moves, sizes, maximizes, minimizes, restores, raises or closes one window. Measured 2026-09-06:
     /// without this the agent wrote a PowerShell script around SetWindowPos, in Notepad, to do what
     /// one call does. A move is fitted to the screen; zero width or height keeps the current size.

@@ -180,8 +180,8 @@ public sealed partial class WorkspaceBrowser : IDisposable
         // stays enabled, as it does on the owner's desktop. Keep a separate browser profile.
         // The crash-restore bubble is what a browser shows after being killed, which is exactly how
         // a workspace browser ends. An agent should not have to recognise and dismiss it to see the
-        // page it just asked for. Maximized, because the workspace screen is what the corner window
-        // shows: a page filling it is readable there, a default-sized window is mostly empty desktop.
+        // page it just asked for. Maximized, then filled to the whole screen once it is up, because
+        // the workspace screen is what the corner shows: a page filling it is readable there.
         string common = $"--no-first-run --no-default-browser-check --hide-crash-restore-bubble --start-maximized " +
             $"--disable-session-crashed-bubble --restore-last-session=false " +
             $"--user-data-dir=\"{profile}\" ";
@@ -208,6 +208,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
         try
         {
             browser.InitialNavigationConfirmed = await browser.Go(url, cancel).ConfigureAwait(false);
+            browser._desktop.Fill(browser.Window);
             return browser;
         }
         catch

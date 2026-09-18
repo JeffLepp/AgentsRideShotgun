@@ -52,7 +52,8 @@ public sealed class FirstRunWindow : Window
     {
         Title = "Deskweave";
         Width = 520;
-        Height = 560;
+        // As tall as what it says: one agent row or two, or an error line under one.
+        SizeToContent = SizeToContent.Height;
         ResizeMode = ResizeMode.NoResize;
         WindowStyle = WindowStyle.None;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;

@@ -14,7 +14,7 @@ namespace Deskweave.UiProbe;
 /// </summary>
 static class FirstRunScenes
 {
-    [Scene("first-launch", "07-first-launch", 240, 44, 520, 560)]
+    [Scene("first-launch", "07-first-launch", 240, 44, 520, 500)]
     static async Task<FrameworkElement> FirstLaunch(SceneContext scene)
     {
         using IDisposable seams = Program.AgentSeams();
