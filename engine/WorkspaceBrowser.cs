@@ -138,7 +138,12 @@ public sealed partial class WorkspaceBrowser : IDisposable
             && (at.IsLoopback || at.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>Whether any open tab shows a page from outside this PC. No answer counts as yes.</summary>
+    /// <summary>
+    /// Whether any open tab holds a page from outside this PC. Every tab counts, not only the one
+    /// on screen: whether a tab is visible can only be asked of the page itself, and a hostile page
+    /// can answer "hidden". An outside tab left open behind the owner's app therefore still counts
+    /// until it is closed. No answer counts as yes.
+    /// </summary>
     internal async Task<bool> ShowsOutside(CancellationToken cancel)
     {
         try

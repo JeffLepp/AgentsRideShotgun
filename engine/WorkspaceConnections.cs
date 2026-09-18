@@ -326,17 +326,27 @@ internal static class WorkspaceConnections
         finally { if (!process.HasExited) process.Kill(entireProcessTree: true); }
     }
 
+    /// <summary>
+    /// Uninstall: takes out the entries that run this install's bridge, and only those. An entry
+    /// under the same name that runs anything else (another copy, a server the owner set up by
+    /// hand) is not ours to remove. Both agents at once, inside 20 s: the uninstaller ends its hook
+    /// at 30, and one agent that hangs must not cost the other its cleanup.
+    /// </summary>
     internal static async Task RemoveOwnedConnections()
     {
-        foreach (AgentApp app in Enum.GetValues<AgentApp>())
-            if (HasEntry(app)) await SetConnected(app, false, default).ConfigureAwait(false);
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await Task.WhenAll(Enum.GetValues<AgentApp>().Select(async app =>
+        {
+            try { if (IsConnected(app)) await SetConnected(app, false, budget.Token).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        })).ConfigureAwait(false);
         if (!Directory.Exists(WorkspaceAccessStore.Root)) return;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         foreach (string folder in Directory.EnumerateDirectories(WorkspaceAccessStore.Root))
         {
             string id = Path.GetFileName(folder);
             if (id.Length == 0 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-')) continue;
-            await Codex(id, false, timeout.Token).ConfigureAwait(false);
+            try { await Codex(id, false, budget.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
             WorkspaceAccessStore.Withdraw(id);
         }
     }

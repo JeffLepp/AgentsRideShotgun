@@ -46,10 +46,12 @@ public static class ModuleEntry
     internal static void RequestShowCorner() => ShowCornerRequested?.Invoke();
 
     /// <summary>An agent needs the owner and the corner window can't show it (MVP_SPEC, Alerts):
-    /// title and one line, for the app's Windows notification. Raised on the UI thread.</summary>
-    public static event Action<string, string>? AttentionNeeded;
+    /// title, one line, the workspace and the request, for the app's Windows notification. Raised
+    /// on the UI thread.</summary>
+    public static event Action<string, string, string, string>? AttentionNeeded;
 
-    internal static void RequestAttention(string title, string text) => AttentionNeeded?.Invoke(title, text);
+    internal static void RequestAttention(string title, string text, string workspace, string request) =>
+        AttentionNeeded?.Invoke(title, text, workspace, request);
 
     /// <summary>The tray's "Pause every agent" / "Resume every agent", and the toast's Resume link.
     /// The corner window owns pausing; it sets <see cref="AllPaused"/>. Raised on the UI thread.</summary>
@@ -83,6 +85,7 @@ public static class ModuleEntry
     public static void Initialize()
     {
         WorkspaceRuntime.Watch();
+        WorkspaceRuntime.SweepEvidence();
         // The corner view watches the same background runtime. It costs nothing until the owner
         // turns it on, and turning it on in the panel must not be the only way to get it back after
         // a restart - a mission that works while HiveMind is minimised is exactly when it is wanted.

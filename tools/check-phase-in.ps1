@@ -68,26 +68,38 @@ foreach ($case in $cases) {
         }
     } finally { Pop-Location }
 
-    # Which tools the agent reached for, from its own event stream.
-    $tools = @(); $shell = @()
+    # Which tools the agent reached for, from its own event stream: a Deskweave call counts only if
+    # it succeeded, and a window started from the agent's own shell is the failure this measures.
+    $tools = @(); $shell = @(); $calls = @{}; $worked = $false
     foreach ($line in Get-Content -LiteralPath $log) {
         if (-not $line.StartsWith('{')) { continue }
         try { $event = $line | ConvertFrom-Json } catch { continue }
-        if ($Agent -eq 'claude' -and $event.type -eq 'assistant') {
-            foreach ($part in $event.message.content) {
-                if ($part.type -ne 'tool_use') { continue }
-                $tools += $part.name
-                if ($part.name -eq 'Bash') { $shell += $part.input.command }
+        if ($Agent -eq 'claude') {
+            foreach ($part in @($event.message.content)) {
+                if ($part.type -eq 'tool_use') {
+                    $tools += $part.name; $calls[$part.id] = $part.name
+                    if ($part.name -eq 'Bash') { $shell += $part.input.command }
+                } elseif ($part.type -eq 'tool_result' -and -not $part.is_error -and "$($calls[$part.tool_use_id])" -like 'mcp__deskweave__*') {
+                    if ($calls[$part.tool_use_id] -notmatch '__(status|release|acquire)$') { $worked = $true }
+                }
             }
-        } elseif ($Agent -eq 'codex' -and $event.item) {
-            if ($event.item.type -eq 'mcp_tool_call') { $tools += "mcp__$($event.item.server)__$($event.item.tool)" }
+        } elseif ($event.item -and $event.type -eq 'item.completed') {
+            if ($event.item.type -eq 'mcp_tool_call') {
+                $tools += "mcp__$($event.item.server)__$($event.item.tool)"
+                if ($event.item.server -eq 'deskweave' -and $event.item.status -ne 'failed' -and -not $event.item.error `
+                    -and $event.item.tool -notmatch '^(status|release|acquire)$') { $worked = $true }
+            }
             if ($event.item.type -eq 'command_execution') { $tools += 'shell'; $shell += $event.item.command }
         }
     }
-    $used = @($tools | Where-Object { $_ -like 'mcp__deskweave__*' -and $_ -notlike '*__status' -and $_ -notlike '*__release' }).Count -gt 0
+    $used = @($tools | Where-Object { $_ -like 'mcp__deskweave__*' -and $_ -notmatch '__(status|release)$' }).Count -gt 0
+    # A launch from the agent's own shell (a heuristic; the logs are kept for a person to read).
+    $launch = '(?i)(start-process|\bstart\s+\S*\.(html|ps1|exe)|invoke-item|explorer(\.exe)?\s|(powershell|pwsh)(\.exe)?\b[^|;]*gui\.ps1|(^|[\s;&])\.[/\\]gui\.ps1|dotnet\s+run|electron|msedge|chrome(\.exe)?\s)'
+    $window = @($shell | Where-Object { $_ -match $launch }).Count -gt 0
+    $right = if ($case.screen) { $worked -and -not $window } else { -not $used }
     $results += [pscustomobject]@{
-        case = $case.name; needsScreen = $case.screen; usedDeskweave = $used; right = ($used -eq $case.screen)
-        tools = ($tools | Select-Object -Unique) -join ' '; shell = $shell
+        case = $case.name; needsScreen = $case.screen; usedDeskweave = $used; deskweaveWorked = $worked
+        shellWindow = $window; right = $right; tools = ($tools | Select-Object -Unique) -join ' '; shell = $shell
     }
 }
 $summary = [pscustomobject]@{
@@ -95,5 +107,5 @@ $summary = [pscustomobject]@{
     of = $results.Count; cases = $results
 }
 $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $Out 'phase-in-report.json') -Encoding UTF8
-$results | Format-Table case, needsScreen, usedDeskweave, right -AutoSize | Out-String -Width 200
+$results | Format-Table case, needsScreen, usedDeskweave, deskweaveWorked, shellWindow, right -AutoSize | Out-String -Width 200
 "$($summary.right) of $($summary.of) right. Logs: $Out"

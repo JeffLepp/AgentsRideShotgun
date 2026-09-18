@@ -112,25 +112,29 @@ public sealed partial class WorkspaceControl : IDisposable
     /// </summary>
     public void OwnerTakes()
     {
+        bool changed;
         lock (_gate)
         {
             _desktop.Revoke();
             _agentLease = 0;
             CancelInput();
-            Became(Driver.Owner);
+            changed = Became(Driver.Owner);
         }
+        if (changed) DriverChanged?.Invoke(Driver.Owner);
         _evidence.Note("control", "owner", "took control");
     }
 
     /// <summary>The agent asks for the workspace. Refused outright while the owner holds it.</summary>
     public bool AgentTakes()
     {
+        bool changed;
         lock (_gate)
         {
             if (_disposed || Driving == Driver.Owner) { _evidence.Note("control", "agent", "refused, owner is driving or workspace closed"); return false; }
             _agentLease = _desktop.Lease;
-            Became(Driver.Agent);
+            changed = Became(Driver.Agent);
         }
+        if (changed) DriverChanged?.Invoke(Driver.Agent);
         _evidence.Note("control", "agent", "took control");
         return true;
     }
@@ -138,21 +142,43 @@ public sealed partial class WorkspaceControl : IDisposable
     /// <summary>Nobody is driving. A workspace can run without either of them at the wheel.</summary>
     public void Release()
     {
+        bool changed;
         lock (_gate)
         {
             _desktop.Revoke();
             _agentLease = 0;
             CancelInput();
-            Became(Driver.Nobody);
+            changed = Became(Driver.Nobody);
         }
+        if (changed) DriverChanged?.Invoke(Driver.Nobody);
         _evidence.Note("control", "-", "released");
     }
 
-    void Became(Driver who)
+    /// <summary>An agent lets go: nobody drives, unless the owner took the wheel in the meantime.
+    /// Checked and done under one lock, so letting go can never take the wheel from the owner.</summary>
+    public void AgentLetsGo()
     {
-        if (Driving == who) return;
+        bool changed;
+        lock (_gate)
+        {
+            if (Driving == Driver.Owner) return;
+            _desktop.Revoke();
+            _agentLease = 0;
+            CancelInput();
+            changed = Became(Driver.Nobody);
+        }
+        if (changed) DriverChanged?.Invoke(Driver.Nobody);
+        _evidence.Note("control", "-", "released");
+    }
+
+    // The event is raised by the caller after the lock is let go: its listeners reach back into the
+    // corner and the agent access, which take their own locks, and holding this one across them
+    // is a lock-order deadlock with any thread that takes those first.
+    bool Became(Driver who)
+    {
+        if (Driving == who) return false;
         Driving = who;
-        DriverChanged?.Invoke(who);
+        return true;
     }
 
     /// <summary>The number the agent's input must carry, or zero when it is not allowed to act.</summary>

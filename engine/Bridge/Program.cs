@@ -35,10 +35,10 @@ var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(fal
 var output = new Lock();
 string? hello = null;
 
-// A short wait covers a Deskweave that is starting at the same moment, as both do at sign-in. A
-// Deskweave that is not running at all is started in the background. Past that, the client hears
-// one line rather than a long hang it may give up on first.
-(Link? link, string why) = await Reach(TimeSpan.FromSeconds(2));
+// A Deskweave that is starting (at sign-in, or for another agent a moment ago) gets as long as one
+// this bridge starts itself; one not running at all is started in the background. Both stay under
+// Codex's 10 s MCP startup timeout. Past that, the client hears one line rather than a long hang.
+(Link? link, string why) = await Reach(TimeSpan.FromSeconds(9));
 if (link is null) return await Say(why switch
 {
     NotOpen => why + " Open Deskweave, then reconnect this MCP server.",
@@ -134,26 +134,33 @@ static Expect Read(string message)
 }
 
 // Joins Deskweave, starting it first when it is not running: an agent that needs a screen should not
-// have to ask the owner to open an app. A Deskweave that is running but slow gets the patience.
+// have to ask the owner to open an app. A Deskweave that is running but still starting gets the
+// patience. Only the real install's router ticket is started or waited on that long; any other
+// ticket (a probe's fixture store) gets two seconds and never starts an app.
 async Task<(Link?, string)> Reach(TimeSpan patience)
 {
+    if (App() is not { } app) return await Open(TimeSpan.FromSeconds(Math.Min(patience.TotalSeconds, 2)));
     bool running = Running();
     (Link? found, string reason) = await Open(running ? patience : TimeSpan.Zero);
-    if (found is null && reason == NotOpen && !running && Launch()) (found, reason) = await Open(TimeSpan.FromSeconds(9));
+    if (found is null && reason == NotOpen && !running && Launch(app)) (found, reason) = await Open(TimeSpan.FromSeconds(9));
     return (found, reason);
 }
 
-// Starts the Deskweave this bridge was installed with, in the tray the way Start with Windows does,
-// so nothing opens on the owner's screen. Only for the real install's router ticket: a probe's
-// fixture store never starts an app. Provider variables from the agent's session are put back to
-// what the owner's account has, so the app sees the same config homes as when Windows starts it.
-bool Launch()
+// The Deskweave this bridge was installed with, when the ticket is that install's own router ticket.
+string? App()
 {
     string app = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Deskweave.exe"));
     string home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Deskweave", "agent-workspaces.access", "router.json");
-    if (ticket is null || !string.Equals(Path.GetFullPath(ticket), home, StringComparison.OrdinalIgnoreCase)
-        || !File.Exists(app)) return false;
+    return ticket is not null && string.Equals(Path.GetFullPath(ticket), home, StringComparison.OrdinalIgnoreCase)
+        && File.Exists(app) ? app : null;
+}
+
+// Starts it in the tray the way Start with Windows does, so nothing opens on the owner's screen.
+// Provider variables from the agent's session are put back to what the owner's account has, so
+// the app sees the same config homes as when Windows starts it.
+static bool Launch(string app)
+{
     var start = new ProcessStartInfo(app, "--background") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(app)! };
     foreach (string name in start.Environment.Keys.Where(k => k.StartsWith("CLAUDE", StringComparison.OrdinalIgnoreCase)
         || k.StartsWith("CODEX", StringComparison.OrdinalIgnoreCase) || k.StartsWith("DESKWEAVE_", StringComparison.OrdinalIgnoreCase)).ToList())
@@ -191,7 +198,10 @@ async Task<(Link?, string)> Open(TimeSpan patience)
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             try
             {
-                using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                // What is left of the wait, not a fresh ten seconds: a pipe that shows up at the end
+                // of a startup wait must not push the answer past the client's own timeout.
+                using var bound = new CancellationTokenSource(TimeSpan.FromMilliseconds(
+                    Math.Clamp(until - Environment.TickCount64, 2000, 10000)));
                 await pipe.ConnectAsync(bound.Token);
                 await WorkspacePipeProtocol.Write(pipe, key, 256, bound.Token);
                 if (await WorkspacePipeProtocol.Read(pipe, 256, bound.Token) == "workspace-pipe/1")

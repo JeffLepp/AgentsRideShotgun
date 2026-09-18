@@ -197,6 +197,13 @@ sealed class WorkspaceLimits : IDisposable
         }
     }
 
+    /// <summary>Percent of physical memory in use right now, 0-100; 0 when Windows won't say.</summary>
+    internal static uint MemoryLoad()
+    {
+        var status = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
+        return GlobalMemoryStatusEx(ref status) ? status.MemoryLoad : 0;
+    }
+
     internal static ulong PhysicalMemory()
     {
         var status = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };

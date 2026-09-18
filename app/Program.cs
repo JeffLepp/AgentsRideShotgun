@@ -24,12 +24,13 @@ static class Program
                     // While our files still exist: take Deskweave out of the agents' configs, or
                     // every agent session afterwards tries a bridge that is gone. The owner's
                     // workspaces and settings stay; Settings has Delete all Deskweave data.
+                    // Velopack ends this after 30 s, so the quick part goes first.
                     try
                     {
+                        using (RegistryKey? run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
+                            run?.DeleteValue("Deskweave", false);
                         ProductContext.Configure("Deskweave");
                         ModuleEntry.Uninstall(removeData: false);
-                        using RegistryKey? run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
-                        run?.DeleteValue("Deskweave", false);
                     }
                     catch { /* an uninstall that throws is worse than one that misses something */ }
                 })

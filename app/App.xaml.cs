@@ -21,7 +21,8 @@ public partial class App : Application
     bool _hiddenNotice;
     bool _infoShowing;
     Action? _refreshTrayPause;
-    Action<string, string>? _attention;
+    Action<string, string, string, string>? _attention;
+    (string Workspace, string Request)? _attentionFor;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -117,16 +118,22 @@ public partial class App : Application
         _tray.DoubleClick += (_, _) => Dispatcher.BeginInvoke(ShowWorkspace);
         // An agent needs the owner and the corner can't show it. Clicking brings the corner up
         // with the question on it, even when Settings has the corner off, as the tray's own item does.
-        _attention = (title, text) => Dispatcher.BeginInvoke(() =>
+        _attention = (title, text, workspace, request) => Dispatcher.BeginInvoke(() =>
         {
             _infoShowing = false;
+            _attentionFor = (workspace, request);
             _tray?.ShowBalloonTip(10000, title, text, System.Windows.Forms.ToolTipIcon.Info);
         });
         ModuleEntry.AttentionNeeded += _attention;
         _tray.BalloonTipClicked += (_, _) =>
         {
             if (_infoShowing) { _infoShowing = false; return; }
-            Dispatcher.BeginInvoke(ModuleEntry.RequestShowCorner);
+            var clicked = _attentionFor;
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (clicked is { } one) WorkspacePeekHost.ShowFor(one.Workspace, one.Request);
+                else ModuleEntry.RequestShowCorner();
+            });
         };
     }
 

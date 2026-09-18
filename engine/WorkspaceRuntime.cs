@@ -222,24 +222,44 @@ public sealed class WorkspaceRuntime : IDisposable
     /// </summary>
     internal static bool SleepQuietest()
     {
-        WorkspaceRuntime? quietest = Running.Where(r => r.Quiet is not null).MaxBy(r => r.Quiet);
-        quietest?.Dispose();
-        return quietest is not null;
+        foreach (WorkspaceRuntime runtime in Running.Where(r => r.Quiet is not null && r.Id != WorkspacePeekHost.PinnedOn)
+            .OrderByDescending(r => r.Quiet))
+            if (runtime.TrySleep()) return true;
+        return false;
+    }
+
+    /// <summary>Stops this workspace if nothing got hold of it since it was found quiet.</summary>
+    bool TrySleep()
+    {
+        if (Access?.Retire() == false) return false;
+        Dispose();
+        return true;
     }
 
     /// <summary>
-    /// Sleeps what nobody has used for <see cref="SleepAfter"/>. A pinned corner window keeps the
-    /// most recent one awake, since that is the screen the owner asked to keep in view.
-    /// ponytail: idle time and the capacity cap only; a low-memory trigger if small PCs need it.
+    /// Sleeps what nobody has used for <see cref="SleepAfter"/>, and the quietest one each minute
+    /// while memory is nearly full. A pinned corner window keeps the workspace it shows awake.
     /// </summary>
     internal static void Doze()
     {
-        WorkspaceRuntime? kept = AppSettingsStore.Current.CornerPinned
-            ? Running.Where(r => r.Quiet is not null).MinBy(r => r.Quiet) : null;
         foreach (WorkspaceRuntime runtime in Running)
-            if (runtime != kept && runtime.Quiet >= SleepAfter) runtime.Dispose();
+            if (runtime.Id != WorkspacePeekHost.PinnedOn && runtime.Quiet >= SleepAfter) runtime.TrySleep();
+        if (WorkspaceLimits.MemoryLoad() >= 90) SleepQuietest();
         if (Live.Count == 0) _sleeper?.Stop();
     }
+
+    static Timer? _sweeper;
+
+    /// <summary>
+    /// Screenshots older than a week go from every workspace, running or asleep (MVP_SPEC, History):
+    /// now and hourly for as long as the app runs, on a pool thread. Walks the folders rather than
+    /// reading workspace records, which can write a record back while one is being created.
+    /// </summary>
+    internal static void SweepEvidence() => _sweeper ??= new Timer(_ =>
+    {
+        try { foreach (string folder in Directory.EnumerateDirectories(WorkspaceStore.Root)) WorkspaceEvidence.Expire(folder); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }, null, TimeSpan.Zero, TimeSpan.FromHours(1));
 
     /// <summary>Adds a line to the conversation from outside - the owner's own messages.</summary>
     public void Note(string who, string what)
@@ -318,7 +338,7 @@ public sealed class WorkspaceRuntime : IDisposable
         DateTimeOffset used = DateTimeOffset.Now - (Quiet ?? TimeSpan.Zero);
         try
         {
-            if (_plane?.LastFrame is { } frame)
+            if (_plane?.LastFrame is { } frame && AppSettingsStore.Current.Screenshots != ScreenshotMode.Off)
             {
                 var png = new PngBitmapEncoder();
                 png.Frames.Add(BitmapFrame.Create(frame));
@@ -466,6 +486,8 @@ public sealed class WorkspaceRuntime : IDisposable
         _nextWake = null;
         _reviewQueued = false;
         _sleeper?.Stop();
+        _sweeper?.Dispose();
+        _sweeper = null;
         foreach (WorkspaceRuntime runtime in Live.Values.ToArray()) runtime.Dispose();
         Live.Clear();
     }

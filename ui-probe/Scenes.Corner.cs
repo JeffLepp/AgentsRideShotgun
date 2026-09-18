@@ -312,8 +312,8 @@ static class CornerScenes
                 "A clash on drop is renamed \" (2)\" rather than overwriting the first copy");
 
             // Alerts (MVP_SPEC): with the corner off, an agent's question becomes one Windows notification.
-            var heard = new List<(string Title, string Text)>();
-            Action<string, string> listen = (title, text) => heard.Add((title, text));
+            var heard = new List<(string Title, string Text, string Workspace, string Request)>();
+            Action<string, string, string, string> listen = (title, text, workspace, request) => heard.Add((title, text, workspace, request));
             ModuleEntry.AttentionNeeded += listen;
             try
             {
@@ -322,10 +322,17 @@ static class CornerScenes
                 runtime.Access!.Handoffs.Request("url", "http://localhost:5173/", "the page is ready");
                 await Task.Delay(200);
                 Program.Check(heard.Count == 1 && heard[0].Title.EndsWith(" wants you", StringComparison.Ordinal)
-                    && heard[0].Text == "Open http://localhost:5173/ on your desktop?",
+                    && heard[0].Text == "Open http://localhost:5173/ on your desktop?" && heard[0].Workspace == stored.Id,
                     "With the corner off, an agent's question raises one Windows notification in the corner's own words");
                 InvokeHost("Rethink");
                 Program.Check(heard.Count == 1, "The same question is announced once, however often the corner rethinks");
+                WorkspaceHandoff second = runtime.Access.Handoffs.Request("url", "http://localhost:5174/", "the second page");
+                await Task.Delay(200);
+                WorkspacePeekHost.ShowFor(stored.Id, second.Id);
+                await Task.Delay(200);
+                Program.Check(heard.Count == 2 && typeof(WorkspacePeekHost).GetField("_pendingId", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .GetValue(null) as string == second.Id,
+                    "Clicking a notification brings up its own question, not an older one waiting in the same workspace");
                 runtime.Access.Handoffs.CancelPending();
             }
             finally { ModuleEntry.AttentionNeeded -= listen; }

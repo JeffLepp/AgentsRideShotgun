@@ -11,10 +11,17 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     readonly Dictionary<Guid, string> _clients = [];
     WorkspacePipeServer? _server;
     Guid? _driver;
-    // Whose conversation the plane's "has read a page" flag belongs to right now, and the flags of
-    // the others. The built-in boss is Guid.Empty, and the plane starts out holding its flag.
-    Guid? _conversation = Guid.Empty;
-    readonly Dictionary<Guid, bool> _read = [];
+    // Whose conversation the plane's "has read a page" flag belongs to right now. A conversation is
+    // the agent's session as the router knows it, which outlives this workspace: sleeping and
+    // waking hands a new client id to the same conversation. The others' flags wait in PagesRead.
+    // The built-in boss holds the plane first. ponytail: in memory only, so a Deskweave restart
+    // mid-session forgets a flag; persist it if restarts under a live agent turn out to matter.
+    string? _conversation;
+    readonly Dictionary<Guid, string> _conversations = [];
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> PagesRead = new();
+
+    /// <summary>The router's session ended: its conversation is over and its flag goes with it.</summary>
+    internal static void Forget(string conversation) => PagesRead.TryRemove(conversation, out _);
     bool _supervisor;
     int _activeUses;
     long _lastActive;
@@ -44,6 +51,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         _id = id;
         _control = control;
         Policy = WorkspaceAccessStore.Read(id);
+        _conversation = Boss;
         Handoffs = new(id, control.Folder);
         _letGo = new Timer(_ => LetGoIfQuiet());
         Handoffs.Changed += Notify;
@@ -87,16 +95,19 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         }
     }
     /// <summary>One more agent in this workspace, through its own pipe or handed over by the router.</summary>
-    internal WorkspacePipePeer Attach() => Attach("");
+    internal WorkspacePipePeer Attach() => Attach("", "");
 
-    /// <summary>One more agent, working in <paramref name="home"/>: its commands start there.</summary>
-    internal WorkspacePipePeer Attach(string home)
+    /// <summary>One more agent, working in <paramref name="home"/>: its commands start there.
+    /// <paramref name="conversation"/> is the router session it belongs to; empty for a client of
+    /// this workspace's own pipe, whose connection is its whole conversation.</summary>
+    internal WorkspacePipePeer Attach(string home, string conversation)
     {
         Guid client = Guid.NewGuid();
         lock (_gate)
         {
             if (_disposed || !Policy.Enabled) throw new IOException("Agent access is off.");
             _clients.Add(client, "Connected agent");
+            _conversations[client] = conversation.Length > 0 ? conversation : client.ToString("N");
         }
         var mcp = new WorkspaceMcp(_control, this, client, home);
         Notify();
@@ -112,6 +123,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     {
         lock (_gate)
         {
+            if (_retired) return "This workspace just went to sleep. Try again; the next call wakes it.";
             if (_disposed || !Policy.Enabled || !_clients.ContainsKey(client)) return "Agent access is off. Ask the owner to enable it.";
             if (_supervisor) return "The built-in boss is working. Wait for it to finish.";
             if (_activeUses > 0 && _driver != client) return "The previous controller is stopping. Try again after it releases its current action.";
@@ -133,6 +145,22 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         Notify();
         return null;
     }
+
+    /// <summary>
+    /// Closes this workspace to agents so it can sleep, but only if nobody holds or is using it
+    /// right now; checked and closed under one lock, so no call can start in between. A call that
+    /// arrives after is told to try again, and its retry wakes the workspace.
+    /// </summary>
+    internal bool Retire()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _driver is not null || _supervisor || _activeUses > 0) return false;
+            _retired = true;
+            return true;
+        }
+    }
+    bool _retired;
 
     /// <summary>
     /// Agents rarely say they are finished. One that has gone quiet between turns lets go by itself,
@@ -213,7 +241,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         if (_driver is null) return;
         _lastLabel = _clients.GetValueOrDefault(_driver.Value, _lastLabel);
         _driver = null;
-        if (_control.Driving != Driver.Owner) _control.Release();
+        _control.AgentLetsGo();
     }
     void Disconnect(Guid client)
     {
@@ -221,19 +249,41 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         {
             if (_driver == client) ReleaseDriver();
             _clients.Remove(client);
-            _read.Remove(client);
-            if (_conversation == client) _conversation = null;
+            if (_conversations.Remove(client, out string? conversation))
+            {
+                if (_conversation == conversation)
+                {
+                    PagesRead[conversation] = _control.ReadUntrustedContent;
+                    _conversation = null;
+                }
+                // Its own pipe's client: the connection was the whole conversation.
+                if (conversation == client.ToString("N")) Forget(conversation);
+            }
         }
         Notify();
     }
 
+    string Boss => "boss:" + _id;
+    string ConversationOf(Guid who) => who == Guid.Empty ? Boss : _conversations.GetValueOrDefault(who, who.ToString("N"));
+
     /// <summary>Gives the plane this one's own "has read a page" flag, keeping the last holder's.</summary>
     void Converse(Guid who)
     {
-        if (_conversation == who) return;
-        bool held = _control.SwapUntrusted(_read.GetValueOrDefault(who));
-        if (_conversation is { } before) _read[before] = held;
-        _conversation = who;
+        string conversation = ConversationOf(who);
+        if (_conversation == conversation) return;
+        bool held = _control.SwapUntrusted(PagesRead.GetValueOrDefault(conversation));
+        if (_conversation is { } before) PagesRead[before] = held;
+        _conversation = conversation;
+    }
+
+    /// <summary>Whether this client's own conversation has read a page from outside this PC.</summary>
+    bool HasRead(Guid client)
+    {
+        lock (_gate)
+        {
+            string conversation = ConversationOf(client);
+            return _conversation == conversation ? _control.ReadUntrustedContent : PagesRead.GetValueOrDefault(conversation);
+        }
     }
     internal bool BeginSupervisor()
     {
@@ -251,9 +301,9 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         workspace = _id, folder = _control.Folder, enabled = Policy.Enabled,
         fileAccess = "normal-windows-user", relativePaths = "workspace-folder", followsFileLinks = true,
         controller = Controller, hasControl = MayUse(client), ownerHasControl = _control.Driving == Driver.Owner,
-        hasReadWebContent = _control.ReadUntrustedContent,
+        hasReadWebContent = HasRead(client),
         blockProgramsAfterWebContent = _control.BlockProgramsAfterWebContent,
-        programsBlockedAfterWebContent = _control.ProgramsBlockedAfterWebContent,
+        programsBlockedAfterWebContent = _control.BlockProgramsAfterWebContent && HasRead(client),
         mainDesktop = Policy.DesktopRequests ? "ask-every-time" : "workspace-only", requests = Handoffs.All,
     };
     void Notify() => Changed?.Invoke();
@@ -264,6 +314,9 @@ internal sealed class WorkspaceExternalAccess : IDisposable
             if (_disposed) return;
             _disposed = true;
             _letGo.Dispose();
+            // Sleeping: the conversation holding the plane keeps its flag for when it wakes.
+            if (_conversation is { } holding) PagesRead[holding] = _control.ReadUntrustedContent;
+            _conversation = null;
             WorkspacePipeServer? closing = _server;
             _server?.Dispose();
             _server = null;

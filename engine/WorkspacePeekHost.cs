@@ -37,6 +37,10 @@ internal static class WorkspacePeekHost
     static readonly HashSet<string> _pausedByUs = [];
 
     static string? _frontId, _backId, _resultForId, _resultName, _resultPath, _pendingId;
+
+    /// <summary>The workspace a pinned corner window is showing, which must not be put to sleep
+    /// under it. Null when the corner is not pinned or shows nothing.</summary>
+    internal static string? PinnedOn => _started && _settings.CornerPinned ? _frontId : null;
     static DateTimeOffset _stirred = DateTimeOffset.MinValue;
     static BitmapSource? _background;
     static DateTimeOffset _backgroundAt;
@@ -399,7 +403,9 @@ internal static class WorkspacePeekHost
 
     static void UpdateNeedsYou(WorkspacePeekWindow window, WorkspaceRuntime front)
     {
-        WorkspaceHandoff? pending = front.Access?.Handoffs.All.FirstOrDefault(request => request.State == "pending");
+        IReadOnlyList<WorkspaceHandoff> all = front.Access?.Handoffs.All ?? [];
+        WorkspaceHandoff? pending = all.FirstOrDefault(request => request.State == "pending" && request.Id == _askFirst)
+            ?? all.FirstOrDefault(request => request.State == "pending");
         _pendingId = pending?.Id;
         window.ShowNeedsYou(pending is null ? null : Question(pending));
     }
@@ -417,7 +423,7 @@ internal static class WorkspacePeekHost
         foreach (WorkspaceRuntime r in WorkspaceRuntime.Running)
             foreach (WorkspaceHandoff request in r.Access?.Handoffs.All ?? [])
                 if (request.State == "pending" && _announced.Add(request.Id) && unseen && !ModuleEntry.HubShowing)
-                    ModuleEntry.RequestAttention(AgentName(r) + " wants you", Question(request));
+                    ModuleEntry.RequestAttention(AgentName(r) + " wants you", Question(request), r.Id, request.Id);
     }
 
     static bool FullScreenInFront() =>
@@ -632,6 +638,19 @@ internal static class WorkspacePeekHost
     /// until the next timer tick, which is what toggling a setting and un-summoning right away used
     /// to leave it doing. With nothing running there is no picture to show, so it opens the app.
     /// </summary>
+    /// <summary>A notification was clicked: the corner comes up on that workspace, with that question.</summary>
+    internal static void ShowFor(string id, string request)
+    {
+        if (_owner is not { } owner) return;
+        if (!owner.CheckAccess()) { owner.BeginInvoke(() => ShowFor(id, request)); return; }
+        if (_followed.ContainsKey(id)) Touch(id);
+        _askFirst = request;
+        ShowCornerNow();
+    }
+
+    /// <summary>The question a clicked notification asked, shown before any other pending one.</summary>
+    static string? _askFirst;
+
     static void ShowCornerNow()
     {
         if (_owner is not { } owner) return;

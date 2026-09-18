@@ -25,7 +25,10 @@ public sealed class WorkspaceEvidence : IDisposable
     readonly Lock _gate = new();
     byte[] _lastFrame = [];
     long _frameBytes;
-    int _nextFrame = 1;
+    // Frame names: the UTC time taken, then a sequence that only grows, so names sort oldest first
+    // (as Trim needs) and never repeat, even if the clock steps back.
+    string _stamp = "";
+    int _sequence;
     bool _disposed;
 
     public WorkspaceEvidence(string workspaceFolder, long frameCap = DefaultCap)
@@ -35,21 +38,36 @@ public sealed class WorkspaceEvidence : IDisposable
         _frames = Path.Combine(_folder, "frames");
         Directory.CreateDirectory(_frames);
         LogPath = Path.Combine(_folder, "actions.log");
-        // Pick up where the last session left off rather than overwriting its evidence, dropping
-        // frames past their week on the way. A workspace that never starts again keeps its last
-        // week until it is cleared or deleted; nothing runs just to age it.
-        DateTime expired = DateTime.UtcNow - KeptFor;
+        // Pick up where the last session left off rather than overwriting its evidence.
+        Expire(workspaceFolder);
         foreach (FileInfo frame in new DirectoryInfo(_frames).GetFiles("*.png"))
         {
-            if (frame.LastWriteTimeUtc < expired)
-            {
-                try { frame.Delete(); continue; }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            }
             _frameBytes += frame.Length;
-            if (int.TryParse(Path.GetFileNameWithoutExtension(frame.Name), out int number) && number >= _nextFrame)
-                _nextFrame = number + 1;
+            string name = Path.GetFileNameWithoutExtension(frame.Name);
+            if (name.Length == StampLength + 7 && string.CompareOrdinal(name, _stamp + "-" + _sequence.ToString("D6", CultureInfo.InvariantCulture)) > 0
+                && int.TryParse(name.AsSpan(StampLength + 1), NumberStyles.None, CultureInfo.InvariantCulture, out int sequence))
+                (_stamp, _sequence) = (name[..StampLength], sequence);
         }
+    }
+
+    const string StampFormat = "yyyyMMdd-HHmmss-fffffff";
+    const int StampLength = 23;
+
+    /// <summary>
+    /// Drops one workspace's frames past their week; the app sweeps every workspace with this, not
+    /// only the running ones. Frames are named by when they were taken, so a name is never reused
+    /// for a later picture while an old log line still points at it.
+    /// </summary>
+    internal static void Expire(string workspaceFolder)
+    {
+        DateTime expired = DateTime.UtcNow - KeptFor;
+        var frames = new DirectoryInfo(Path.Combine(workspaceFolder, "evidence", "frames"));
+        IEnumerable<FileInfo> old = frames.Exists ? frames.GetFiles("*.png") : [];
+        // The picture Recent shows is a screenshot too, and keeps no longer than the rest.
+        foreach (FileInfo frame in old.Append(new FileInfo(Path.Combine(workspaceFolder, "last-frame.png"))))
+            if (frame.Exists && frame.LastWriteTimeUtc < expired)
+                try { frame.Delete(); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     public string LogPath { get; }
@@ -106,14 +124,17 @@ public sealed class WorkspaceEvidence : IDisposable
         if (_lastFrame.AsSpan().SequenceEqual(hash)) { FramesUnchanged++; return string.Empty; }
         _lastFrame = hash;
 
-        string name = _nextFrame.ToString("000000", CultureInfo.InvariantCulture) + ".png";
+        // Sorts after the numbered frames older versions wrote, and after every earlier one here.
+        string now = DateTime.UtcNow.ToString(StampFormat, CultureInfo.InvariantCulture);
+        if (string.CompareOrdinal(now, _stamp) > 0) (_stamp, _sequence) = (now, 0);
+        else _sequence++;
+        string name = _stamp + "-" + _sequence.ToString("D6", CultureInfo.InvariantCulture) + ".png";
         string path = Path.Combine(_frames, name);
         try
         {
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(frame));
             using (FileStream file = File.Create(path)) encoder.Save(file);
-            _nextFrame++;
             _frameBytes += new FileInfo(path).Length;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
@@ -129,6 +150,9 @@ public sealed class WorkspaceEvidence : IDisposable
     {
         if (_frameBytes <= _cap) return;
         FileInfo[] oldest = new DirectoryInfo(_frames).GetFiles("*.png");
+        // Counted again from the disk: the hourly sweep may have expired some behind this recorder.
+        _frameBytes = oldest.Sum(frame => frame.Length);
+        if (_frameBytes <= _cap) return;
         Array.Sort(oldest, (a, b) => string.CompareOrdinal(a.Name, b.Name));
         // The newest frame is never dropped. A cap smaller than one frame would otherwise delete the
         // evidence of the action that was just taken, which is the one thing worth keeping.

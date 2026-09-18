@@ -41,27 +41,57 @@ function Ask($bridge, [int]$id, [string]$method, $params) {
     $bridge.StandardInput.WriteLine((@{ jsonrpc = '2.0'; id = $id; method = $method; params = $params } | ConvertTo-Json -Compress -Depth 6))
     $bridge.StandardInput.Flush()
     $read = $bridge.StandardOutput.ReadLineAsync()
-    if (-not $read.Wait(20000)) { throw "No answer to $method within 20 s" }
+    # Watch the screen while waiting, so a window or focus grab during startup is seen too.
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    while (-not $read.Wait(100)) {
+        Watch-Screen
+        if ([DateTime]::UtcNow -gt $deadline) { throw "No answer to $method within 20 s" }
+    }
     if ($null -eq $read.Result) { throw "Bridge closed: $($bridge.StandardError.ReadToEnd())" }
     $read.Result | ConvertFrom-Json
+}
+# Every visible top-level window a process owns, and who has the foreground: MainWindowHandle
+# sees only one window and nothing about focus.
+Add-Type -Namespace Probe -Name Win -MemberDefinition @'
+public delegate bool EnumProc(System.IntPtr h, System.IntPtr l);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, System.IntPtr l);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr h);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint pid);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+public static int Visible(uint pid) { int n = 0; EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid && IsWindowVisible(h)) n++; return true; }, System.IntPtr.Zero); return n; }
+public static uint Foreground() { uint p; GetWindowThreadProcessId(GetForegroundWindow(), out p); return p; }
+'@
+# Every Deskweave process seen with a visible window, and every process that held the foreground.
+$script:shownBy = @(); $script:foreground = @(); $script:pids = @()
+function Watch-Screen {
+    foreach ($p in @(Get-Process Deskweave -ErrorAction SilentlyContinue)) {
+        $script:pids += [uint32]$p.Id
+        if ([Probe.Win]::Visible([uint32]$p.Id) -gt 0) { $script:shownBy += $p.Id }
+    }
+    $script:foreground += [Probe.Win]::Foreground()
 }
 $hello = @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'claude-code'; version = '1' } }
 $app = $null
 try {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $bridge = Start-Bridge
+    $twin = Start-Bridge   # a second agent session starting at the same moment
     $init = Ask $bridge 1 'initialize' $hello
+    $twinInit = Ask $twin 1 'initialize' $hello
     $report.coldStartSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
     Check ($init.result.serverInfo.name -eq 'deskweave') "With Deskweave closed, the agent's bridge starts it and initializes ($($report.coldStartSeconds) s)"
     Check ($report.coldStartSeconds -lt 10) 'The first answer arrives inside Codex''s default 10 s MCP startup timeout'
+    Check ($twinInit.result.serverInfo.name -eq 'deskweave') 'A second session starting at the same moment connects too'
+    $twin.StandardInput.Close(); $twin.WaitForExit(5000) | Out-Null
+    Start-Sleep -Seconds 1
     $app = @(Get-Process Deskweave)
     Check ($app.Count -eq 1) 'Exactly one Deskweave is running'
     $app = $app[0]
     $command = (Get-CimInstance Win32_Process -Filter "ProcessId = $($app.Id)").CommandLine
     Check ($command -like '*--background*') 'It was started in the background, the way Windows starts it at sign-in'
-    Start-Sleep -Seconds 2
-    $app.Refresh()
-    Check ($app.MainWindowHandle -eq 0) 'Nothing opened on the owner''s screen'
+    foreach ($i in 1..10) { Watch-Screen; Start-Sleep -Milliseconds 200 }
+    $report.foregroundSamples = $script:foreground.Count
+    Check ($script:shownBy.Count -eq 0 -and @($script:foreground | Where-Object { $script:pids -contains $_ }).Count -eq 0) 'From the first moment of startup, nothing opened on the owner''s screen and focus never moved to Deskweave'
     $status = Ask $bridge 2 'tools/call' @{ name = 'status'; arguments = @{} }
     Check ($status.result.content[0].text -like 'No workspace yet*') 'A status call answers without starting a workspace'
     $bridge.StandardInput.Close()
@@ -80,7 +110,7 @@ try {
     Check ($second.WaitForExit(15000)) 'A second background start exits by itself'
     Start-Sleep -Seconds 1
     $app.Refresh()
-    Check ($app.MainWindowHandle -eq 0 -and -not $app.HasExited) 'A second background start does not open the hub on the running one'
+    Check ([Probe.Win]::Visible([uint32]$app.Id) -eq 0 -and [Probe.Win]::Foreground() -ne [uint32]$app.Id -and -not $app.HasExited) 'A second background start does not open the hub on the running one'
     Check ((Hash $settings) -eq $settingsBefore -and (Hash $shell) -eq $shellBefore) 'Owner settings and shell preferences are unchanged'
 }
 catch { $failure = $_.ToString() }
