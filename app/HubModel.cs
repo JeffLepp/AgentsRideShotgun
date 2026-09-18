@@ -131,7 +131,8 @@ internal sealed class HubViewModel : IDisposable
         foreach (string stale in _byId.Keys.Where(id => !keep.Contains(id)).ToArray()) _byId.Remove(stale);
         var working = new List<HubEntry>();
         var asleep = new List<HubEntry>();
-        foreach (StoredWorkspace workspace in records)
+        // Most recently used first: a workspace that just went to sleep tops Recent.
+        foreach (StoredWorkspace workspace in records.OrderByDescending(w => w.LastUsed))
         {
             if (!_byId.TryGetValue(workspace.Id, out HubEntry? entry))
             {

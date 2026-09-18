@@ -11,11 +11,13 @@ namespace HiveMind.AgentWorkspaces;
 /// workspace deletes its evidence and nothing outside the folder is ever written.
 ///
 /// The log is text and is never dropped. Frames are capped at 1 GB per workspace, oldest first,
-/// which is the owner's decision of 2026-08-22.
+/// which is the owner's decision of 2026-08-22, and kept 7 days (MVP_SPEC, History). Settings >
+/// History &amp; privacy > Save screenshots Off keeps the log and no frames.
 /// </summary>
 public sealed class WorkspaceEvidence : IDisposable
 {
     const long DefaultCap = 1L << 30;
+    static readonly TimeSpan KeptFor = TimeSpan.FromDays(7);
 
     readonly string _folder;
     readonly string _frames;
@@ -33,9 +35,17 @@ public sealed class WorkspaceEvidence : IDisposable
         _frames = Path.Combine(_folder, "frames");
         Directory.CreateDirectory(_frames);
         LogPath = Path.Combine(_folder, "actions.log");
-        // Pick up where the last session left off rather than overwriting its evidence.
+        // Pick up where the last session left off rather than overwriting its evidence, dropping
+        // frames past their week on the way. A workspace that never starts again keeps its last
+        // week until it is cleared or deleted; nothing runs just to age it.
+        DateTime expired = DateTime.UtcNow - KeptFor;
         foreach (FileInfo frame in new DirectoryInfo(_frames).GetFiles("*.png"))
         {
+            if (frame.LastWriteTimeUtc < expired)
+            {
+                try { frame.Delete(); continue; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
             _frameBytes += frame.Length;
             if (int.TryParse(Path.GetFileNameWithoutExtension(frame.Name), out int number) && number >= _nextFrame)
                 _nextFrame = number + 1;
@@ -62,7 +72,8 @@ public sealed class WorkspaceEvidence : IDisposable
         if (_disposed) return;
         lock (_gate)
         {
-            string frame = after is null ? string.Empty : Keep(after);
+            string frame = after is null || AppSettingsStore.Current.Screenshots == ScreenshotMode.Off
+                ? string.Empty : Keep(after);
             var line = new StringBuilder()
                 .Append(DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)).Append('\t')
                 .Append(action).Append('\t')

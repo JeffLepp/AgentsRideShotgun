@@ -1,6 +1,9 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using HiveMind.AgentWorkspaces;
@@ -32,9 +35,10 @@ var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(fal
 var output = new Lock();
 string? hello = null;
 
-// A short wait covers a Deskweave that is starting at the same moment, as both do at sign-in. Past
-// that, the client hears one line rather than a long hang it may give up on first.
-(Link? link, string why) = await Open(TimeSpan.FromSeconds(2));
+// A short wait covers a Deskweave that is starting at the same moment, as both do at sign-in. A
+// Deskweave that is not running at all is started in the background. Past that, the client hears
+// one line rather than a long hang it may give up on first.
+(Link? link, string why) = await Reach(TimeSpan.FromSeconds(2));
 if (link is null) return await Say(why switch
 {
     NotOpen => why + " Open Deskweave, then reconnect this MCP server.",
@@ -80,7 +84,7 @@ async Task Forward(string message)
     if (link is null || link.Broken)
     {
         link?.Dispose();
-        (link, why) = await Open(TimeSpan.FromSeconds(1));
+        (link, why) = await Reach(TimeSpan.FromSeconds(1));
         if (link is not null)
         {
             // A new session on Deskweave's side: it hears where the agent works and who it is again.
@@ -127,6 +131,49 @@ static Expect Read(string message)
         return new(id, method, false);
     }
     catch (JsonException) { return new(null, "", false); }
+}
+
+// Joins Deskweave, starting it first when it is not running: an agent that needs a screen should not
+// have to ask the owner to open an app. A Deskweave that is running but slow gets the patience.
+async Task<(Link?, string)> Reach(TimeSpan patience)
+{
+    bool running = Running();
+    (Link? found, string reason) = await Open(running ? patience : TimeSpan.Zero);
+    if (found is null && reason == NotOpen && !running && Launch()) (found, reason) = await Open(TimeSpan.FromSeconds(9));
+    return (found, reason);
+}
+
+// Starts the Deskweave this bridge was installed with, in the tray the way Start with Windows does,
+// so nothing opens on the owner's screen. Only for the real install's router ticket: a probe's
+// fixture store never starts an app. Provider variables from the agent's session are put back to
+// what the owner's account has, so the app sees the same config homes as when Windows starts it.
+bool Launch()
+{
+    string app = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Deskweave.exe"));
+    string home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Deskweave", "agent-workspaces.access", "router.json");
+    if (ticket is null || !string.Equals(Path.GetFullPath(ticket), home, StringComparison.OrdinalIgnoreCase)
+        || !File.Exists(app)) return false;
+    var start = new ProcessStartInfo(app, "--background") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(app)! };
+    foreach (string name in start.Environment.Keys.Where(k => k.StartsWith("CLAUDE", StringComparison.OrdinalIgnoreCase)
+        || k.StartsWith("CODEX", StringComparison.OrdinalIgnoreCase) || k.StartsWith("DESKWEAVE_", StringComparison.OrdinalIgnoreCase)).ToList())
+    {
+        string? own = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User)
+            ?? Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+        if (own is null) start.Environment.Remove(name); else start.Environment[name] = own;
+    }
+    try { Process.Start(start)?.Dispose(); return true; }
+    catch (Win32Exception) { return false; }
+}
+
+// Whether a Deskweave holds its one-per-account lock, starting or running. Must match App.xaml.cs.
+static bool Running()
+{
+    string user = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+        Environment.UserDomainName + "\\" + Environment.UserName)))[..20];
+    if (!Mutex.TryOpenExisting("Local\\Deskweave.App." + user, out Mutex? instance)) return false;
+    instance.Dispose();
+    return true;
 }
 
 // Finds the pipe the ticket names and joins it. The ticket is read again on every attempt: a

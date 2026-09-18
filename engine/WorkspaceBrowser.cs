@@ -124,6 +124,33 @@ public sealed partial class WorkspaceBrowser : IDisposable
         return where.Length == 0 || where.Equals("about:blank", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The owner's own app: a page served from this PC, a file on it, or the browser's own pages.
+    /// Reading one is not reading the web, so edit, reload, test again never stalls on open and run
+    /// (MVP_SPEC, Web page safety). Anything else, data: pages included, is outside.
+    /// </summary>
+    internal static bool Local(string url)
+    {
+        if (Blank(url)) return true;
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out Uri? at)) return false;
+        if (at.IsFile || at.Scheme is "about" or "chrome" or "chrome-error" or "devtools" or "chrome-extension") return true;
+        return at.Scheme is "http" or "https"
+            && (at.IsLoopback || at.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Whether any open tab shows a page from outside this PC. No answer counts as yes.</summary>
+    internal async Task<bool> ShowsOutside(CancellationToken cancel)
+    {
+        try
+        {
+            JsonNode? targets = await Call("Target.getTargets", null, cancel).ConfigureAwait(false);
+            if (targets?["targetInfos"] is not JsonArray all) return true;
+            return all.Any(target => target?["type"]?.GetValue<string>() == "page"
+                && !Local(target["url"]?.GetValue<string>() ?? string.Empty));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return true; }
+    }
+
     /// <summary>Chrome's window, so layer 2 can photograph the page at any time.</summary>
     public nint Window
     {
@@ -148,8 +175,9 @@ public sealed partial class WorkspaceBrowser : IDisposable
         // stays enabled, as it does on the owner's desktop. Keep a separate browser profile.
         // The crash-restore bubble is what a browser shows after being killed, which is exactly how
         // a workspace browser ends. An agent should not have to recognise and dismiss it to see the
-        // page it just asked for.
-        string common = $"--no-first-run --no-default-browser-check --hide-crash-restore-bubble " +
+        // page it just asked for. Maximized, because the workspace screen is what the corner window
+        // shows: a page filling it is readable there, a default-sized window is mostly empty desktop.
+        string common = $"--no-first-run --no-default-browser-check --hide-crash-restore-bubble --start-maximized " +
             $"--disable-session-crashed-bubble --restore-last-session=false " +
             $"--user-data-dir=\"{profile}\" ";
 

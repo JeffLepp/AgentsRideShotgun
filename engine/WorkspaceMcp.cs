@@ -29,12 +29,16 @@ public sealed class WorkspaceMcp : IDisposable
         _pipe = new WorkspacePipeServer(Handle, _control.OwnsProcess);
     }
 
-    internal WorkspaceMcp(WorkspaceControl control, WorkspaceExternalAccess access, Guid client)
+    internal WorkspaceMcp(WorkspaceControl control, WorkspaceExternalAccess access, Guid client, string home = "")
     {
         _control = control;
         _external = access;
         _client = client;
+        _home = Directory.Exists(home) ? home : "";
     }
+
+    /// <summary>The folder the connected agent works in, where its commands start. Empty: the workspace's own.</summary>
+    readonly string _home = "";
 
     public string PipeName => _pipe?.Name ?? string.Empty;
     internal string PipeCapability => _pipe?.Capability ?? string.Empty;
@@ -129,7 +133,8 @@ public sealed class WorkspaceMcp : IDisposable
         new("open", "Starts a program in the workspace by its plain name - notepad, explorer, chrome, or anything on the Start Menu "
             + "such as Deskweave - or by full path. Comes back with the windows that appeared.",
             [("program", "string", "the program to start"), ("arguments", "string", "its command line, if any")], ["program"], true),
-        new("run", "Starts a tracked command inside the workspace. shell=cmd (default) runs it as a "
+        new("run", "Starts a tracked command inside the workspace, in your own working folder, so any window it opens "
+            + "appears on the workspace screen instead of the owner's. shell=cmd (default) runs it as a "
             + "batch script; shell=powershell runs it as a PowerShell script, which is the one to use for anything with quotes or "
             + "more than one line - no escaping needed, write it as you would in a .ps1. "
             + "It returns the actual exit code if the command finishes during the response wait. Otherwise the command keeps running; "
@@ -202,9 +207,9 @@ public sealed class WorkspaceMcp : IDisposable
         + "cancel only deliberately. Omit timeout_seconds for no execution deadline. "
         + "request_desktop only asks the owner to open a finished document or HTTP(S) preview; it is not permission. "
         + "Never bypass a refusal with your other tools. Owner logins, permissions, payments and security prompts remain owner decisions. "
-        + "These tools cannot redirect programs launched through other tools. The owner's Block commands after browser inspection setting defaults on: "
-        + "reading page text or browser screenshots then blocks open/run. If the owner turns it off, build/inspect/edit/retest is allowed within the task. "
-        + "Use status for the current setting and effective block; only the owner can change it. Re-enabling blocking retains prior browser observation. "
+        + "These tools cannot redirect programs launched through other tools. Once you read or screenshot a web page from outside this PC, "
+        + "open and run are refused for the rest of your session; pages on localhost, 127.0.0.1 and file pages never trigger this, "
+        + "so build, reload and retest your own app freely. status shows whether it applies. "
         + "No owner browser profile is shared, and this is input separation, not a confidentiality sandbox.";
 
     /// <summary>
@@ -215,6 +220,9 @@ public sealed class WorkspaceMcp : IDisposable
     /// </summary>
     internal const string Scope = "Use Deskweave automatically for agent-operated browser and GUI work: running the app you are building, "
         + "clicking through or testing it, browsing to inspect or research, and screenshots of running apps. "
+        + "Start anything that opens a window (a desktop app you built, dotnet run, an Electron or Python GUI, a browser, a GUI test) "
+        + "with Deskweave's run, open or browse, never your own shell: a window started from your shell lands on the owner's screen "
+        + "and takes their mouse and focus. Headless servers and command-line tests stay in your own shell. "
         + "When the user explicitly asks to open a page or document for them in their own browser or desktop, use your normal approved "
         + "desktop-opening tools instead; do not silently divert that request into Deskweave. This does not grant permission for any other desktop action. "
         + "To offer a result from workspace testing on the user's desktop, use request_desktop and wait for their approval. "
@@ -324,7 +332,7 @@ public sealed class WorkspaceMcp : IDisposable
             case "look":
             {
                 nint window = Window(arguments, "window");
-                BitmapSource? frame = _control.Shot(window, Bool(arguments, "marks"));
+                BitmapSource? frame = await _control.Shot(window, Bool(arguments, "marks")).ConfigureAwait(false);
                 // A desktop with nothing on it cannot be photographed. That is emptiness, not a
                 // fault, and calling it an error sends a model looking for a broken tool.
                 if (frame is null) return Say(_control.Windows().Count == 0
@@ -548,16 +556,15 @@ public sealed class WorkspaceMcp : IDisposable
     /// "the workspace would not start a command shell", which is untrue and invites a retry.
     /// </summary>
     const string Executed =
-        "This mission has read browser content and the owner has Block commands after browser inspection enabled. " +
-        "Program launches and commands are blocked. Continue browser-only work, or ask the owner whether to turn " +
-        "that setting off in this workspace's Agents settings. Only the owner can change it; do not bypass " +
-        "the refusal with another tool, a new connection, or a new mission.";
+        "This session has read a web page from outside this PC, so program launches and commands in the workspace are " +
+        "refused for the rest of it. Pages on localhost and file pages never cause this. Continue browser-only work; " +
+        "do not bypass the refusal with another tool, a new connection, or a new mission.";
 
     async Task<object> RunCommand(string command, int seconds, bool powershell, double limitSeconds,
         CancellationToken cancel)
     {
         if (_control.ProgramsBlockedAfterWebContent) return Fail(Executed);
-        CommandJob? job = _control.Commands.Start(command, powershell, limitSeconds, out string? error);
+        CommandJob? job = _control.Commands.Start(command, powershell, limitSeconds, out string? error, _home);
         if (job is null) return Fail("could not run that: " + error);
 
         // The wait is how long this call blocks, not how long the command may run. Everything past

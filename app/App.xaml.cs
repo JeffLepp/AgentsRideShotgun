@@ -36,7 +36,9 @@ public partial class App : Application
             _activate = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\Deskweave.Show." + user);
             if (!_ownsInstance)
             {
-                _activate.Set();
+                // A background start (Windows at sign-in, or an agent's bridge) found Deskweave
+                // already running: that is all it wanted, so nothing opens on the owner's screen.
+                if (!e.Args.Contains(StartWithWindows.Background)) _activate.Set();
                 Shutdown();
                 return;
             }

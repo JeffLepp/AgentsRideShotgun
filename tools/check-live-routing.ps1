@@ -63,7 +63,7 @@ try {
     $report.engineSha256 = Hash (Join-Path $root 'out\HiveMind.AgentWorkspaces.dll')
     $report.bridgeSha256 = Hash (Join-Path $root 'out\Bridge\Deskweave.WorkspaceBridge.dll')
     if ($BrowserOnly) {
-        $browser = Run-Session 'browser' $project $true $true
+        $browser = Run-Session 'browser' $project $false $true
         Check ($browser.sessions.Count -eq 2 -and @($browser.sessions | Where-Object { -not $_.browserVerified }).Count -eq 0) 'Both configured providers can open, click and observe a real local browser page'
         $report.workspaces = [ordered]@{ browser = $browser.workspace.id }
     }

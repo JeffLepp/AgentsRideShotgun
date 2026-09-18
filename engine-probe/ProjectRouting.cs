@@ -41,6 +41,16 @@ internal static class ProjectRouting
         Task.WaitAll(first, second);
         check(composites == 1 && ReferenceEquals(first.Result, second.Result),
             "The agent and preview receive the same frame from one composite, with no duplicate capture queue");
+        string evidenceHome = Directory.CreateTempSubdirectory("Deskweave-evidence-").FullName;
+        string frames = Path.Combine(evidenceHome, "evidence", "frames");
+        Directory.CreateDirectory(frames);
+        string old = Path.Combine(frames, "000001.png"), recent = Path.Combine(frames, "000002.png");
+        File.WriteAllBytes(old, [1]);
+        File.WriteAllBytes(recent, [2]);
+        File.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddDays(-8));
+        using (new WorkspaceEvidence(evidenceHome)) { }
+        check(!File.Exists(old) && File.Exists(recent),
+            "Screenshots older than 7 days are dropped when a workspace next starts, newer ones stay");
         // Outside the source checkout: its .git must not turn non-project fixtures into projects.
         string root = Directory.CreateTempSubdirectory("Deskweave-routing-").FullName;
         string alpha = Path.Combine(root, "Alpha"), beta = Path.Combine(root, "Beta");

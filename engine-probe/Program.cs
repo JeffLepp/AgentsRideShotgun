@@ -165,6 +165,12 @@ internal static class Program
                 Check(Client.Text(client.Tool("file", new { path = file })).Contains(expected, StringComparison.Ordinal),
                     "MCP file readback agrees with the filesystem oracle");
                 BrowserProbe.Run(one, client, Check, output, observedProcesses);
+                Check(!Client.Failed(client.Tool("release"))
+                    && !Client.Failed(competitor.Tool("run", new { command = "echo other-agent", seconds = 20 })),
+                    "Another agent sharing the workspace is not refused for the page the first one read");
+                Check(!Client.Failed(competitor.Tool("release"))
+                    && Client.Failed(client.Tool("run", new { command = "echo still-refused", seconds = 20 })),
+                    "The agent that read the outside page is still refused when its turn comes back");
                 one.Plane.OwnerTakes();
                 Check(Client.Failed(client.Tool("save", new { path = file, text = "must not overwrite" })) && File.ReadAllText(file) == expected,
                     "Owner takeover revokes external writes without replay or file modification");

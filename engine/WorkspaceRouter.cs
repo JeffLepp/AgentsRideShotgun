@@ -233,9 +233,12 @@ internal sealed class WorkspaceRouter : IDisposable
 
     /// <summary>
     /// The most workspaces the router will have running at once, the owner's own included: one per
-    /// 3 GB of memory, 2 to 10. Past that an agent is told to ask the owner, not handed a slow PC.
+    /// 3 GB of memory, 2 to 10. Past that the quietest one sleeps to make room, and when every one is
+    /// in use the agent waits its turn rather than being handed a slow PC.
     /// </summary>
-    internal static int MaxRunning => (int)Math.Clamp(WorkspaceLimits.PhysicalMemory() / (3UL << 30), 2, 10);
+    internal static int MaxRunning { get; set; } = (int)Math.Clamp(WorkspaceLimits.PhysicalMemory() / (3UL << 30), 2, 10);
+
+    const string Full = "Every workspace this PC runs smoothly is in use right now. Try again in a minute.";
 
     internal static void Start()
     {
@@ -292,9 +295,7 @@ internal sealed class WorkspaceRouter : IDisposable
                 id => WorkspaceRuntime.Of(id)?.Access?.HasDriver == true);
             bool starting = route.Existing is not { } existing || WorkspaceRuntime.Of(existing) is null;
             int running = WorkspaceRuntime.Running.Count;
-            if (starting && running >= MaxRunning)
-                return (null, $"Deskweave already has {running} workspaces running, the most this PC runs smoothly. "
-                    + "Ask the owner to stop one, or to set one up for agents to share.");
+            if (starting && running >= MaxRunning && !WorkspaceRuntime.SleepQuietest()) return (null, Full);
             StoredWorkspace? workspace = route.Existing is { } id
                 ? all.FirstOrDefault(w => w.Id == id)
                 : WorkspaceStore.Update(WorkspaceStore.Create(route.Name).Id, created => created with { Agents = route.Rule });
@@ -400,10 +401,16 @@ internal sealed class WorkspaceRouter : IDisposable
         {
             Dispatcher? ui = Application.Current?.Dispatcher;
             if (ui is null || ui.HasShutdownStarted) return (null, "Deskweave is closing.");
-            (WorkspaceRuntime? runtime, string? why) = await ui.InvokeAsync(() => Place(_cwd, _client), DispatcherPriority.Normal, cancel);
+            // A full PC is a wait, not a failure (MVP_SPEC, Sleep): under the 60-second tool timeout.
+            (WorkspaceRuntime? runtime, string? why) = (null, null);
+            for (long until = Environment.TickCount64 + 45_000; ; await Task.Delay(1500, cancel).ConfigureAwait(false))
+            {
+                (runtime, why) = await ui.InvokeAsync(() => Place(_cwd, _client), DispatcherPriority.Normal, cancel);
+                if (why != Full || Environment.TickCount64 > until) break;
+            }
             if (runtime?.Access is not { } access) return (null, why ?? "The workspace stopped while it was starting. Try again.");
             WorkspacePipePeer peer;
-            try { peer = access.Attach(); }
+            try { peer = access.Attach(_cwd); }
             catch (IOException ex) { return (null, ex.Message); }
             // The workspace hears this agent's own hello, so the owner sees its name on the tile.
             if (_hello is not null) await peer.Handle(_hello, cancel).ConfigureAwait(false);

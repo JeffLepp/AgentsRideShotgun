@@ -117,6 +117,15 @@ internal static class BrowserProbe
             "Native capture confirms that selecting the first tab changed the displayed page", check, cancel);
         check(ReferenceEquals(browser, control.Browser) && control.Browser.ProcessId == browserPid,
             "Tab interaction preserves the same browser process and connection");
+
+        // Web page safety (MVP_SPEC): the owner's own pages never block open and run; an outside one does.
+        client.Tool("look");
+        check(!control.ReadUntrustedContent && !Program.Client.Failed(client.Tool("run", new { command = "echo local-pages-ok", seconds = 20 })),
+            "Reading and photographing local file pages leaves run available");
+        check(!Program.Client.Failed(client.Tool("browse", new { url = "data:text/html,<h1>Outside-page</h1>" }))
+            && Program.Client.Text(client.Tool("page")).Contains("Outside-page", StringComparison.Ordinal)
+            && Program.Client.Failed(client.Tool("run", new { command = "echo must-not-run", seconds = 20 })),
+            "Reading a page from outside this PC refuses run for the rest of that session");
     }
 
     static void Settled(Func<bool> condition, string claim, Action<bool, string> check, CancellationToken cancel)
@@ -133,7 +142,7 @@ internal static class BrowserProbe
 
     static bool Shows(WorkspaceControl control, byte red, byte green, byte blue, string output)
     {
-        BitmapSource? frame = control.Shot(control.BrowserWindow);
+        BitmapSource? frame = control.Shot(control.BrowserWindow).GetAwaiter().GetResult();
         if (frame is null) return false;
         var rgb = new FormatConvertedBitmap(frame, PixelFormats.Bgr32, null, 0);
         rgb.Freeze();

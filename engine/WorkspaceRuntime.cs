@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace HiveMind.AgentWorkspaces;
@@ -28,6 +29,12 @@ public sealed class WorkspaceRuntime : IDisposable
     static DispatcherTimer? _clock;
     static DateTimeOffset? _nextWake;
     static bool _reviewQueued;
+
+    /// <summary>How long a workspace nobody uses keeps its desktop and browser (MVP_SPEC, Sleep).</summary>
+    internal static TimeSpan SleepAfter { get; set; } = TimeSpan.FromMinutes(30);
+    // One shared clock while anything runs, none while nothing does.
+    static DispatcherTimer? _sleeper;
+    long _touched = Environment.TickCount64;
 
     /// <summary>Set while a tick is running, so a wake that opens a panel cannot start a second tick.</summary>
     static bool _ticking;
@@ -63,7 +70,7 @@ public sealed class WorkspaceRuntime : IDisposable
             // The control plane owns the lease, so who is driving is one answer rather than a
             // boolean here and a different boolean wherever an agent ends up living.
             _plane = new WorkspaceControl(_computer);
-            _plane.DriverChanged += who => DriverChanged?.Invoke(who);
+            _plane.DriverChanged += who => { _touched = Environment.TickCount64; DriverChanged?.Invoke(who); };
             _agent = new WorkspaceAgent(
                 _plane, workspace.Name, _computer.Folder ?? string.Empty,
                 workspace.AgentCredentials, workspace.RunUsageCeilingTokens);
@@ -185,8 +192,53 @@ public sealed class WorkspaceRuntime : IDisposable
         // conversation already has page content in it, the fresh control plane has to be told so,
         // or sleeping over a page would be the way to get execution back.
         if (workspace.SessionReadUntrustedContent) runtime._plane?.CarryUntrustedContent();
+        if (_sleeper is null)
+        {
+            _sleeper = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMinutes(1) };
+            _sleeper.Tick += (_, _) => Doze();
+        }
+        _sleeper.Start();
         AttentionChanged?.Invoke();
         return runtime;
+    }
+
+    /// <summary>
+    /// How long nothing has happened here, or null while something is: an agent holding it, the
+    /// owner's hands on it (Pause every agent included), a question for the owner, a boss mission.
+    /// </summary>
+    internal TimeSpan? Quiet
+    {
+        get
+        {
+            if (_agent?.State is MissionState.Working or MissionState.NeedsYou || _plane?.Driving == Driver.Owner) return null;
+            if (Access is { } access && (access.HasDriver || access.Handoffs.All.Any(r => r.State == "pending"))) return null;
+            return TimeSpan.FromMilliseconds(Environment.TickCount64 - Math.Max(_touched, Access?.LastActive ?? 0));
+        }
+    }
+
+    /// <summary>
+    /// Puts the workspace nobody has used for longest to sleep, to make room for another one. False
+    /// when every running workspace is in use. Its files stay, and the next agent call wakes it.
+    /// </summary>
+    internal static bool SleepQuietest()
+    {
+        WorkspaceRuntime? quietest = Running.Where(r => r.Quiet is not null).MaxBy(r => r.Quiet);
+        quietest?.Dispose();
+        return quietest is not null;
+    }
+
+    /// <summary>
+    /// Sleeps what nobody has used for <see cref="SleepAfter"/>. A pinned corner window keeps the
+    /// most recent one awake, since that is the screen the owner asked to keep in view.
+    /// ponytail: idle time and the capacity cap only; a low-memory trigger if small PCs need it.
+    /// </summary>
+    internal static void Doze()
+    {
+        WorkspaceRuntime? kept = AppSettingsStore.Current.CornerPinned
+            ? Running.Where(r => r.Quiet is not null).MinBy(r => r.Quiet) : null;
+        foreach (WorkspaceRuntime runtime in Running)
+            if (runtime != kept && runtime.Quiet >= SleepAfter) runtime.Dispose();
+        if (Live.Count == 0) _sleeper?.Stop();
     }
 
     /// <summary>Adds a line to the conversation from outside - the owner's own messages.</summary>
@@ -251,9 +303,31 @@ public sealed class WorkspaceRuntime : IDisposable
         if (_disposed) return;
         _disposed = true;
         Live.Remove(Id);
+        KeepLastLook();
         Tear();
         Ended?.Invoke();
         AttentionChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// What a stopped workspace shows under Recent: the last picture anything took of its screen,
+    /// and when it was last used. No new capture is taken for it; stopping stays quick.
+    /// </summary>
+    void KeepLastLook()
+    {
+        DateTimeOffset used = DateTimeOffset.Now - (Quiet ?? TimeSpan.Zero);
+        try
+        {
+            if (_plane?.LastFrame is { } frame)
+            {
+                var png = new PngBitmapEncoder();
+                png.Frames.Add(BitmapFrame.Create(frame));
+                using var file = File.Create(WorkspaceStore.LastFrameOf(Id));
+                png.Save(file);
+            }
+            WorkspaceStore.Update(Id, stored => stored with { LastUsed = used });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     void Tear()
@@ -391,6 +465,7 @@ public sealed class WorkspaceRuntime : IDisposable
         }
         _nextWake = null;
         _reviewQueued = false;
+        _sleeper?.Stop();
         foreach (WorkspaceRuntime runtime in Live.Values.ToArray()) runtime.Dispose();
         Live.Clear();
     }

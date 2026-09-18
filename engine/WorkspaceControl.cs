@@ -269,7 +269,7 @@ public sealed partial class WorkspaceControl : IDisposable
     /// browser protocol - which is the only way to answer a captcha or a visual check. Pass zero for
     /// the whole workspace screen.
     /// </summary>
-    public BitmapSource? Shot(nint window = 0, bool marks = false)
+    public async Task<BitmapSource?> Shot(nint window = 0, bool marks = false)
     {
         BitmapSource? frame = window == 0 ? Screen() : _desktop.CaptureWindow(window);
         if (frame is not null && marks)
@@ -282,11 +282,33 @@ public sealed partial class WorkspaceControl : IDisposable
         _evidence.Note("shot", window == 0 ? "the whole screen" : Describe(window),
             frame is null ? "nothing to photograph" : $"{frame.PixelWidth}x{frame.PixelHeight}");
         // A picture of a page is page content. The whole screen counts too, because the browser is
-        // on it - this is why the flag is set here and not only where page text is read. A browser
-        // that has never loaded a page is the one exception: there is no page on it to photograph.
-        if (frame is not null && _browser is { HasContent: true } && (window == 0 || window == BrowserWindow))
-            Untrusted("a photograph of the browser");
+        // on it - this is why the flag is set here and not only where page text is read.
+        if (frame is not null && (window == 0 || window == BrowserWindow))
+            await SawBrowser("a photograph of the browser").ConfigureAwait(false);
         return frame;
+    }
+
+    /// <summary>
+    /// A picture with the browser in it. Only a page from outside this PC counts: the owner's own
+    /// app on localhost or a file is what the agent is there to test. A browser that has never
+    /// loaded a page has nothing on it to photograph.
+    /// </summary>
+    internal async Task SawBrowser(string how)
+    {
+        if (ReadUntrustedContent || _browser is not { HasContent: true } browser) return;
+        if (await browser.ShowsOutside(CancellationToken.None).ConfigureAwait(false)) Untrusted(how);
+    }
+
+    /// <summary>
+    /// Hands the plane another conversation's "has read a page" flag and returns the one it held.
+    /// Agents sharing a workspace take turns, and what one of them read is in its conversation, not
+    /// in the next one's; without this, one agent reading a page blocked every later one for good.
+    /// </summary>
+    internal bool SwapUntrusted(bool read)
+    {
+        bool held = _readUntrustedContent;
+        _readUntrustedContent = read;
+        return held;
     }
 
     /// <summary>
@@ -335,6 +357,9 @@ public sealed partial class WorkspaceControl : IDisposable
     /// line: the panel photographs twice a second and an action log is not a frame counter.
     /// </summary>
     public BitmapSource? Frame() => Screen();
+
+    /// <summary>The last picture anything took of the screen, without taking a new one.</summary>
+    internal BitmapSource? LastFrame { get { lock (_frameGate) return _lastFrame; } }
 
     readonly Lock _frameGate = new();
     BitmapSource? _lastFrame;
@@ -844,7 +869,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool opened;
         try { opened = await browser.NewTab(url, input.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
-        if (opened && !WorkspaceBrowser.Blank(url)) Untrusted("opened " + url + " in a new tab");
+        if (opened && !WorkspaceBrowser.Local(url)) Untrusted("opened " + url + " in a new tab");
         Note("browser", "new tab " + url, opened ? "opened, now at "
             + await Address(cancel).ConfigureAwait(false) : "the browser would not open a tab");
         return opened;
@@ -863,7 +888,7 @@ public sealed partial class WorkspaceControl : IDisposable
         string text = await _browser.Read(20000, cancel).ConfigureAwait(false);
         string at = await Address(cancel).ConfigureAwait(false);
         _evidence.Note("page", at, text.Length + " characters read");
-        if (text.Length > 0) Untrusted("read " + at);
+        if (text.Length > 0 && !WorkspaceBrowser.Local(at)) Untrusted("read " + at);
         return text;
     }
 

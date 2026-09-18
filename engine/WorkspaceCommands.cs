@@ -150,7 +150,7 @@ public sealed class WorkspaceCommands : IDisposable
     /// Starts a command as a tracked job. Returns null with a reason when the workspace would not
     /// start it at all; a command that starts and then fails is a job with an exit code, not a null.
     /// </summary>
-    public CommandJob? Start(string command, bool powershell, double limitSeconds, out string? error)
+    public CommandJob? Start(string command, bool powershell, double limitSeconds, out string? error, string home = "")
     {
         error = null;
         if (command.Trim().Length == 0) { error = "no command given"; return null; }
@@ -178,7 +178,7 @@ public sealed class WorkspaceCommands : IDisposable
                 "@echo off",
                 // UTF-8 for the whole job, so a build's output is not mangled on the way to the agent.
                 "chcp 65001>nul",
-                "cd /d " + Quote(folder),
+                "cd /d " + Quote(home.Length > 0 ? home : folder),
                 scriptPs is null ? command
                     : "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(scriptPs),
                 string.Empty));

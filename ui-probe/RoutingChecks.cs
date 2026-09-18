@@ -38,6 +38,10 @@ internal static class RoutingChecks
             Program.Check(await codex.Workspace() == id && WorkspaceStore.All().Count == records + 1
                 && ReferenceEquals(runtime, WorkspaceRuntime.Of(id)),
                 "Claude in a subfolder and Codex at the root share one project record and the same desktop");
+            JsonElement here = await codex.Tool("run", new { command = "cd", seconds = 20 });
+            Program.Check(here.GetProperty("content")[0].GetProperty("text").GetString()!
+                    .Contains(JsonSerializer.Serialize(project).Trim('"'), StringComparison.OrdinalIgnoreCase),
+                "A connected agent's workspace command starts in that agent's own project folder");
             JsonElement picture = await codex.Tool("computer", new { screenshot = true });
             Program.Check(picture.GetProperty("content").EnumerateArray().Any(c => c.GetProperty("type").GetString() == "image"),
                 "The routed project returns an actual desktop screenshot");
@@ -69,10 +73,35 @@ internal static class RoutingChecks
             Program.Check(await desktop.Workspace() == scratch && WorkspaceStore.Find(scratch)?.Agents == WorkspaceHome.Scratch
                 && WorkspaceStore.All().Count(w => w.Agents == WorkspaceHome.Scratch) == 1,
                 "Real sessions from home and Desktop reuse the one Scratch workspace");
+
+            // Sleep (MVP_SPEC): a quiet agent lets go, a quiet workspace sleeps, the next call wakes it.
+            WorkspaceExternalAccess.IdleHandoverMs = 1000;
+            await desktop.Tool("computer", new { screenshot = true });
+            WorkspaceRuntime sleeper = WorkspaceRuntime.Of(scratch)!;
+            await Task.Delay(2500);
+            Program.Check(sleeper.Access?.HasDriver == false && sleeper.Quiet is not null,
+                "An agent that goes quiet without releasing lets go of its workspace by itself");
+            WorkspaceRuntime.SleepAfter = TimeSpan.FromMilliseconds(500);
+            WorkspaceRuntime.Doze();
+            Program.Check(WorkspaceRuntime.Of(scratch) is null && File.Exists(WorkspaceStore.LastFrameOf(scratch))
+                && DateTimeOffset.Now - WorkspaceStore.Find(scratch)!.LastUsed < TimeSpan.FromMinutes(1),
+                "A quiet workspace sleeps, keeping its last picture and when it was last used");
+            await desktop.Tool("acquire");
+            Program.Check(await desktop.Workspace() == scratch && WorkspaceRuntime.Of(scratch) is not null,
+                "The same agent session's next call wakes the sleeping workspace");
             await desktop.Tool("release");
+            int cap = WorkspaceRuntime.Running.Count;
+            WorkspaceRouter.MaxRunning = cap;
+            await trader.Tool("acquire");
+            Program.Check(await trader.Workspace() == traderId && WorkspaceRuntime.Running.Count == cap,
+                "At the PC's limit a new project's call puts the quietest workspace to sleep instead of failing");
+            await trader.Tool("release");
         }
         finally
         {
+            WorkspaceExternalAccess.IdleHandoverMs = 30_000;
+            WorkspaceRuntime.SleepAfter = TimeSpan.FromMinutes(30);
+            WorkspaceRouter.MaxRunning = (int)Math.Clamp(WorkspaceLimits.PhysicalMemory() / (3UL << 30), 2, 10);
             WorkspaceRouter.Stop();
             foreach (var runtime in WorkspaceRuntime.Running.Where(r => !before.Contains(r.Id)).ToArray()) runtime.Dispose();
         }
