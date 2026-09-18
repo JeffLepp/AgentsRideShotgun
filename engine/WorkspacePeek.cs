@@ -140,6 +140,10 @@ internal static class WorkspacePeekPlacement
         catch (EntryPointNotFoundException) { return true; }
     }
 
+    /// <summary>Where the corner window goes when it has no saved place: the primary monitor's work
+    /// area. The UI probe points it at another monitor, so a test run leaves the owner's screen alone.</summary>
+    internal static Func<Rect> HomeWorkArea = () => SystemParameters.WorkArea;
+
     /// <summary>A monitor's DPI scale and its work area, in DIPs of that same scale.</summary>
     internal readonly record struct MonitorGeometry(double Scale, Rect WorkArea);
 

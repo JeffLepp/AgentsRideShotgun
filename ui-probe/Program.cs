@@ -14,6 +14,27 @@ using HiveMind.Product;
 
 namespace Deskweave.UiProbe;
 
+/// <summary>
+/// Where the gate's real windows go: a monitor other than the primary one when there is one, so a
+/// run leaves the owner's main screen alone while he works (the harness scenes already render off
+/// every monitor). The app's own defaults are pointed there through their test hooks; the placement
+/// rules under test are the same on any monitor.
+/// </summary>
+static class TestScreen
+{
+    internal static Rect Work { get; private set; } = SystemParameters.WorkArea;
+
+    internal static void Use()
+    {
+        if (System.Windows.Forms.Screen.AllScreens.FirstOrDefault(s => !s.Primary) is not { } other) return;
+        System.Drawing.Rectangle px = other.WorkingArea;
+        double guess = WorkspacePeekPlacement.PrimaryScale();
+        Work = WorkspacePeekPlacement.MonitorFor(new Rect(px.Left / guess, px.Top / guess, px.Width / guess, px.Height / guess)).WorkArea;
+        WorkspacePeekPlacement.HomeWorkArea = () => Work;
+        ShellPlacement.Home = () => other;
+    }
+}
+
 static class Program
 {
     static readonly List<string> Passed = [];
@@ -41,6 +62,7 @@ static class Program
         using var scope = WorkspaceStore.UseRootForTests(Path.Combine(_output, "workspaces"));
         using var preferences = ShellPreferences.UseFileForTests(Path.Combine(_output, "shell.json"));
         using var settings = AppSettingsStore.UseFileForTests(Path.Combine(_output, "settings.json"));
+        TestScreen.Use();
         using var watchdog = new System.Threading.Timer(_ =>
         {
             Report(new TimeoutException("UI probe exceeded its three-minute limit."));
@@ -80,7 +102,7 @@ static class Program
 
     static async Task Run()
     {
-        _window = new MainWindow { ShowActivated = false, Left = 20, Top = 20 };
+        _window = new MainWindow { ShowActivated = false, Left = TestScreen.Work.Left + 20, Top = TestScreen.Work.Top + 20 };
         _window.Show();
         await Settle();
         Check(WorkspaceStore.All() is [{ Name: "Scratch" }] && !WorkspaceRuntime.AnyRunning,

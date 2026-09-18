@@ -593,7 +593,7 @@ internal static class WorkspacePeekHost
             Rect saved = new(left, top, total.Width, total.Height);
             if (WorkspacePeekPlacement.OnConnectedMonitor(saved)) return saved;
         }
-        return WorkspacePeekPlacement.Corner(SystemParameters.WorkArea, total);
+        return WorkspacePeekPlacement.Corner(WorkspacePeekPlacement.HomeWorkArea(), total);
     }
 
     static void HoldHotkeys()

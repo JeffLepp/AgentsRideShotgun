@@ -105,11 +105,10 @@ public partial class MainWindow : Window, IDisposable
     internal void ShowStack()
     {
         _mode = "stack";
-        MinWidth = 320; MinHeight = 480;
         SettingsSlot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Collapsed;
         StackRoot.Visibility = Visibility.Visible;
-        (_stackPlacement ?? ShellPlacement.DefaultStack()).Restore(this, 320, 480);
+        if (!(_stackPlacement ?? ShellPlacement.DefaultStack()).Restore(this, 320, 480)) { MinWidth = 320; MinHeight = 480; }
         QueuePreferenceSave();
         UpdateVisibleWork();
     }
@@ -117,11 +116,10 @@ public partial class MainWindow : Window, IDisposable
     internal void ShowWide(string? select)
     {
         _mode = "wide";
-        MinWidth = 960; MinHeight = 600;
         StackRoot.Visibility = Visibility.Collapsed;
         SettingsSlot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Visible;
-        (_widePlacement ?? ShellPlacement.DefaultWide()).Restore(this, 960, 600);
+        if (!(_widePlacement ?? ShellPlacement.DefaultWide()).Restore(this, 960, 600)) { MinWidth = 960; MinHeight = 600; }
         string? id = select ?? _selectedId ?? _hub.Working.Concat(_hub.Asleep).Select(entry => entry.Id).FirstOrDefault();
         if (id is not null) SelectWorkspace(id);
         QueuePreferenceSave();
@@ -157,11 +155,10 @@ public partial class MainWindow : Window, IDisposable
             SettingsSlot.Content = created;
         }
         _mode = "settings";
-        MinWidth = 960; MinHeight = 600;
         StackRoot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Collapsed;
         SettingsSlot.Visibility = Visibility.Visible;
-        (_widePlacement ?? ShellPlacement.DefaultWide()).Restore(this, 960, 600);
+        if (!(_widePlacement ?? ShellPlacement.DefaultWide()).Restore(this, 960, 600)) { MinWidth = 960; MinHeight = 600; }
         var view = (SettingsView)SettingsSlot.Content;
         if (first) view.Show("general");
         // So Escape reaches its own handler first (it raises BackRequested) rather than this window's.

@@ -73,35 +73,48 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
     internal bool Valid => double.IsFinite(Left) && double.IsFinite(Top) && double.IsFinite(Width)
         && double.IsFinite(Height) && Width > 0 && Height > 0 && Math.Abs(Left) < 1_000_000 && Math.Abs(Top) < 1_000_000;
 
-    internal void Restore(Window window, double minimumWidth, double minimumHeight)
+    /// <summary>Puts the window here, fitted to that monitor. Moves and sizes it in one step before
+    /// its size limits change, so switching stack/wide never grows it past the monitor's edge, not
+    /// even for a frame. False when there is nothing to place yet.</summary>
+    internal bool Restore(Window window, double minimumWidth, double minimumHeight)
     {
-        if (!Valid) return;
+        if (!Valid) return false;
         nint handle = new WindowInteropHelper(window).Handle;
-        if (handle == 0) return;
+        if (handle == 0) return false;
         var screens = System.Windows.Forms.Screen.AllScreens;
         var screen = screens.FirstOrDefault(s => s.DeviceName == Display)
             ?? screens.FirstOrDefault(s => s.WorkingArea.Contains((int)Left, (int)Top))
-            ?? System.Windows.Forms.Screen.PrimaryScreen!;
+            ?? Home();
         var work = screen.WorkingArea;
         double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), window);
         double availableWidth = work.Width / scale;
         double availableHeight = work.Height / scale;
-        window.MinWidth = Math.Min(minimumWidth, availableWidth);
-        window.MinHeight = Math.Min(minimumHeight, availableHeight);
-        window.Width = Math.Clamp(Width, window.MinWidth, availableWidth);
-        window.Height = Math.Clamp(Height, window.MinHeight, availableHeight);
-        int width = Math.Min(work.Width, (int)Math.Round(window.Width * scale));
-        int height = Math.Min(work.Height, (int)Math.Round(window.Height * scale));
+        double minWidth = Math.Min(minimumWidth, availableWidth), minHeight = Math.Min(minimumHeight, availableHeight);
+        double dipWidth = Math.Clamp(Width, minWidth, availableWidth), dipHeight = Math.Clamp(Height, minHeight, availableHeight);
+        int width = Math.Min(work.Width, (int)Math.Round(dipWidth * scale));
+        int height = Math.Min(work.Height, (int)Math.Round(dipHeight * scale));
         int left = Math.Clamp((int)Math.Round(Left), work.Left, work.Right - width);
         int top = Math.Clamp((int)Math.Round(Top), work.Top, work.Bottom - height);
+        // Lowering a limit never resizes; a higher one left in place would clamp the move below.
+        window.MinWidth = Math.Min(window.MinWidth, minWidth);
+        window.MinHeight = Math.Min(window.MinHeight, minHeight);
         SetWindowPos(handle, 0, left, top, width, height, 0x0004 | 0x0010); // no z-order or activation change
+        window.MinWidth = minWidth;
+        window.MinHeight = minHeight;
+        window.Width = dipWidth;
+        window.Height = dipHeight;
+        return true;
     }
+
+    /// <summary>The monitor a window goes to when it has no saved place: the primary one. The UI
+    /// probe points it at another monitor, so a test run leaves the owner's screen alone.</summary>
+    internal static Func<System.Windows.Forms.Screen> Home = () => System.Windows.Forms.Screen.PrimaryScreen!;
 
     /// <summary>Where the reference puts the stack by default: 24 from the top and right of the
     /// primary monitor's work area, 340 wide, the work area's height minus 48.</summary>
     internal static ShellPlacement DefaultStack()
     {
-        var screen = System.Windows.Forms.Screen.PrimaryScreen!;
+        var screen = Home();
         var work = screen.WorkingArea;
         double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), null);
         double width = 340;
@@ -115,7 +128,7 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
     /// smaller work area.</summary>
     internal static ShellPlacement DefaultWide()
     {
-        var screen = System.Windows.Forms.Screen.PrimaryScreen!;
+        var screen = Home();
         var work = screen.WorkingArea;
         double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), null);
         double width = Math.Min(1200, Math.Max(960, work.Width / scale - 40));

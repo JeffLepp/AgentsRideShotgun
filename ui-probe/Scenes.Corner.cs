@@ -265,7 +265,7 @@ static class CornerScenes
         WorkspaceRuntime runtime = WorkspaceRuntime.Start(stored);
         try
         {
-            Rect work = SystemParameters.WorkArea;
+            Rect work = TestScreen.Work;
             double left = work.Left + 40, top = work.Top + 40;
             AppSettingsStore.Update(s => s with
             {
@@ -292,7 +292,7 @@ static class CornerScenes
             WorkspacePeekHost.Start();
             await Task.Delay(60);
             window = GateWindow();
-            Rect corner = WorkspacePeekPlacement.Corner(SystemParameters.WorkArea, visible);
+            Rect corner = WorkspacePeekPlacement.Corner(TestScreen.Work, visible);
             Program.Check(window is not null
                 && Close(window.Left + WorkspacePeekWindow.ShadowMargin, corner.Left) && Close(window.Top + WorkspacePeekWindow.ShadowMargin, corner.Top),
                 "A saved place off every connected monitor falls back to the ordinary corner");
@@ -411,20 +411,21 @@ static class CornerScenes
                 "Activity during a fade reverses it without hiding the window or restarting the rise");
 
             // Keep the owner's saved front-card position when a back card joins and leaves.
-            AppSettingsStore.Update(s => s with { CornerLeft = 160, CornerTop = 160 });
+            double savedLeft = TestScreen.Work.Left + 160, savedTop = TestScreen.Work.Top + 160;
+            AppSettingsStore.Update(s => s with { CornerLeft = savedLeft, CornerTop = savedTop });
             using (WorkspaceRuntime second = WorkspaceRuntime.Start(WorkspaceStore.Create("Second corner fixture")))
             {
                 window.ForceHoverForTests(true);
                 second.Plane!.OwnerTakes();
                 InvokeHost("StirFrom", second.Id);
-                Program.Check(Close(window.FrontRect.Left, 160) && Close(window.FrontRect.Top, 160),
+                Program.Check(Close(window.FrontRect.Left, savedLeft) && Close(window.FrontRect.Top, savedTop),
                     "Adding a stacked preview preserves the saved front-card position");
                 Program.Check((string?)typeof(WorkspacePeekHost).GetField("_frontId", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null) == stored.Id,
                     "Another agent's activity cannot replace the screen under the owner's pointer");
                 // Mimic the OS moving a captured window between input events. A preview tick must
                 // not reapply the old saved geometry until the drag reports its final position.
                 typeof(WorkspacePeekWindow).GetField("_moving", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, true);
-                window.Place(new Rect(230, 220, window.VisibleSize.Width, window.VisibleSize.Height));
+                window.Place(new Rect(savedLeft + 70, savedTop + 60, window.VisibleSize.Width, window.VisibleSize.Height));
                 Rect moving = window.FrontRect;
                 InvokeHost("Rethink");
                 Program.Check(window.FrontRect == moving, "Preview refreshes do not snap a window back during a move");
@@ -433,7 +434,7 @@ static class CornerScenes
                 window.ForceHoverForTests(false);
             }
             InvokeHost("StirFrom", stored.Id);
-            Program.Check(Close(window.FrontRect.Left, 160) && Close(window.FrontRect.Top, 160),
+            Program.Check(Close(window.FrontRect.Left, savedLeft) && Close(window.FrontRect.Top, savedTop),
                 "Removing a stacked preview preserves the saved front-card position");
 
             // Hover holds it up past the fixed five-second fade.
