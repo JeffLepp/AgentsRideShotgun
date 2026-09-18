@@ -15,19 +15,10 @@ namespace HiveMind.AgentWorkspaces;
 /// </summary>
 public sealed class WorkspaceMcp : IDisposable
 {
-    readonly WorkspacePipeServer? _pipe;
     readonly WorkspaceControl _control;
-    readonly WorkspaceExternalAccess? _external;
+    readonly WorkspaceExternalAccess _external;
     readonly Guid _client;
     readonly List<nint> _windows = [];
-    TaskCompletionSource<bool>? _leaseBack;
-
-    public WorkspaceMcp(WorkspaceControl control)
-    {
-        _control = control;
-        _control.DriverChanged += DriverChanged;
-        _pipe = new WorkspacePipeServer(Handle, _control.OwnsProcess);
-    }
 
     internal WorkspaceMcp(WorkspaceControl control, WorkspaceExternalAccess access, Guid client, string home = "")
     {
@@ -39,44 +30,6 @@ public sealed class WorkspaceMcp : IDisposable
 
     /// <summary>The folder the connected agent works in, where its commands start. Empty: the workspace's own.</summary>
     readonly string _home = "";
-
-    public string PipeName => _pipe?.Name ?? string.Empty;
-    internal string PipeCapability => _pipe?.Capability ?? string.Empty;
-
-    void DriverChanged(Driver who) { if (who != Driver.Owner) _leaseBack?.TrySetResult(true); }
-
-    internal object ClientConfiguration => new
-    {
-        type = "stdio",
-        command = Path.Combine(Path.GetDirectoryName(typeof(WorkspaceMcp).Assembly.Location)!,
-            "Bridge", "Deskweave.WorkspaceBridge.exe"),
-        args = new[] { PipeName },
-        env = new Dictionary<string, string> { ["DESKWEAVE_WORKSPACE_PIPE_KEY"] = PipeCapability },
-    };
-
-    /// <summary>Every tool the boss agent is allowed, by name. The CLI is given exactly this list.</summary>
-    public static string[] ToolNames => [.. Tools.Select(t => "mcp__ws__" + t.Name)];
-
-    /// <summary>
-    /// Whether a tool the agent actually used is one of this workspace's. The boss agent is given
-    /// nothing else, but that is the CLI's promise to keep rather than HiveMind's, so anything that
-    /// wants to know whether the promise held asks here rather than assuming it did.
-    /// </summary>
-    public static bool IsOurs(string tool) =>
-        Array.IndexOf(ToolNames, tool) >= 0;
-
-    /// <summary>The agent asked to stop, or asked the owner something. Empty until it does.</summary>
-    public event Action<string, string>? Finished;
-
-    /// <summary>Raised for every tool call, so the panel can say what the agent is doing right now.</summary>
-    public event Action<string, string>? Acting;
-
-    /// <summary>
-    /// The agent parked itself until later. Nothing is left running: the conversation is written
-    /// down and given back to it when it is woken, which is what makes a wait longer than the CLI's
-    /// tool timeout - overnight, or a week - possible at all.
-    /// </summary>
-    public event Action<TimeSpan, string>? Parked;
 
     // --- the tools ------------------------------------------------------------------------------
 
@@ -173,14 +126,6 @@ public sealed class WorkspaceMcp : IDisposable
             [("selector", "string", "a CSS selector"), ("text", "string", "what to type")], ["selector", "text"], true),
         new("wait", "Waits without spending anything. Give it seconds, a window title to wait for, or both. Use this rather than looping.",
             [("seconds", "number", "how long to wait at most"), ("window", "string", "part of the title of a window to wait for")], [], false),
-        new("sleep", "Parks the mission until later and stops. Nothing is left running and nothing is spent while you sleep; "
-            + "you are given this conversation back when you are woken. Use this rather than wait for anything longer than "
-            + "a few minutes - an hour, overnight, next week.",
-            [("minutes", "number", "how long to sleep for, from now"), ("why", "string", "what you are waiting for, and what to do first when you wake")], ["minutes", "why"], false),
-        new("ask", "Stops and asks the owner. Use this when you are blocked on something only a person can do - a login, a payment, a decision, a captcha you have already failed once.",
-            [("question", "string", "exactly what you need from the owner")], ["question"], false),
-        new("done", "Ends the mission. Report Done only with evidence you actually observed in the workspace; otherwise report what is left.",
-            [("outcome", "string", "Done, or Incomplete"), ("proof", "string", "the strongest evidence, and where you saw it"), ("remaining", "string", "what is not finished, and anything uncertain")], ["outcome", "proof"], false),
     ];
 
     static readonly Definition[] ExternalTools =
@@ -191,7 +136,7 @@ public sealed class WorkspaceMcp : IDisposable
         new("request_desktop", "Ask the owner to open a finished workspace document or HTTP(S) preview on the main desktop. This only queues a request. Never approves or opens it. Check status for the owner's decision.",
             [("kind", "string", "file or url"), ("target", "string", "an accessible document path or HTTP(S) URL"),
                 ("reason", "string", "one short line explaining why the owner should open it")], ["kind", "target", "reason"], false),
-        .. Tools.Where(t => t.Name is not ("sleep" or "ask" or "done")),
+        .. Tools,
     ];
 
     internal const string ExternalInstructions = Scope
@@ -242,26 +187,23 @@ public sealed class WorkspaceMcp : IDisposable
     async Task<object> Invoke(string name, JsonElement arguments, CancellationToken cancel)
     {
         cancel.ThrowIfCancellationRequested();
-        Definition? tool = (_external is null ? Tools : ExternalTools).FirstOrDefault(t => t.Name == name);
+        Definition? tool = ExternalTools.FirstOrDefault(t => t.Name == name);
         if (tool is null) return Fail("no such tool: " + name);
-        if (_external is not null)
-        {
-            if (name == "status") return Say(JsonSerializer.Serialize(_external.Status(_client), BatchJson));
-            if (name == "acquire") return await _external.AcquireWaiting(_client, cancel).ConfigureAwait(false) is { } why
-                ? Fail(why) : Say("Control acquired. Apps and browsers open inside this workspace.");
-            if (name == "release") { _external.Release(_client); return Say("Control released."); }
-            // Taking control is the tool's job, not a step the agent has to remember.
-            if (!_external.MayUse(_client) && await _external.AcquireWaiting(_client, cancel).ConfigureAwait(false) is { } busy)
-                return Fail(busy);
-        }
-        using var use = _external?.Use(_client);
+        if (name == "status") return Say(JsonSerializer.Serialize(_external.Status(_client), BatchJson));
+        if (name == "acquire") return await _external.AcquireWaiting(_client, cancel).ConfigureAwait(false) is { } why
+            ? Fail(why) : Say("Control acquired. Apps and browsers open inside this workspace.");
+        if (name == "release") { _external.Release(_client); return Say("Control released."); }
+        // Taking control is the tool's job, not a step the agent has to remember.
+        if (!_external.MayUse(_client) && await _external.AcquireWaiting(_client, cancel).ConfigureAwait(false) is { } busy)
+            return Fail(busy);
+        using var use = _external.Use(_client);
         long externalLease = use?.Lease ?? 0;
-        if (_external is not null && externalLease == 0)
+        if (externalLease == 0)
             return Fail("This connection does not have control, or the owner paused it. Call acquire after the owner gives control back.");
-        using IDisposable? scope = _external is null ? null : _control.RequireLease(externalLease);
+        using IDisposable scope = _control.RequireLease(externalLease);
         if (name == "request_desktop")
         {
-            if (!_external!.Policy.DesktopRequests) return Fail("The owner selected workspace-only. Desktop requests are disabled.");
+            if (!_external.Policy.DesktopRequests) return Fail("The owner selected workspace-only. Desktop requests are disabled.");
             return Say(JsonSerializer.Serialize(_external.RequestDesktop(_client, Str(arguments, "kind"),
                 Str(arguments, "target"), Str(arguments, "reason")), BatchJson));
         }
@@ -270,7 +212,6 @@ public sealed class WorkspaceMcp : IDisposable
         // Built-in calls carry the same original-lease protection as connected clients, including open/run.
         using IDisposable? actionLease = tool.Acts ? _control.RequireLease(_control.CurrentLease) : null;
 
-        Acting?.Invoke(name, Summarise(name, arguments));
         switch (name)
         {
             case "windows":
@@ -510,23 +451,6 @@ public sealed class WorkspaceMcp : IDisposable
                 return Say("woke on " + why);
             }
 
-            case "sleep":
-            {
-                double minutes = Double(arguments, "minutes");
-                if (minutes < 1) minutes = 1;
-                string why = Str(arguments, "why");
-                Parked?.Invoke(TimeSpan.FromMinutes(minutes), why);
-                return Say($"parked. You will be woken in about {minutes:0} minutes and given this "
-                    + "conversation back. Stop here.");
-            }
-
-            case "ask":
-                Finished?.Invoke("ask", Str(arguments, "question"));
-                return Say("the owner has been asked. Stop here.");
-            case "done":
-                Finished?.Invoke(Str(arguments, "outcome"),
-                    Str(arguments, "proof") + (Str(arguments, "remaining") is { Length: > 0 } r ? "\n\nRemaining: " + r : ""));
-                return Say("recorded. Stop here.");
         }
         return Fail("no such tool: " + name);
     }
@@ -688,24 +612,9 @@ public sealed class WorkspaceMcp : IDisposable
     const int ControlLimit = 60;
     const int MaxWaitSeconds = 1500;
 
-    /// <summary>
-    /// Blocks while the owner is driving instead of refusing. A refusal makes a model retry, and
-    /// retrying costs tokens for a workspace that is deliberately paused; blocking costs nothing and
-    /// resumes exactly where it was. This is the Take control contract in one method.
-    /// </summary>
-    async Task<bool> Ready(CancellationToken cancel)
-    {
-        if (_external is not null) return _external.MayUse(_client) && _control.CurrentLease != 0;
-        if (_control.Driving != Driver.Owner) return _control.Driving == Driver.Agent || _control.AgentTakes();
-        var back = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _leaseBack = back;
-        using CancellationTokenRegistration stopped = cancel.Register(() => back.TrySetResult(false));
-        if (_control.Driving != Driver.Owner) back.TrySetResult(true);   // it came back while we looked
-        Task finished = await Task.WhenAny(back.Task, Task.Delay(TimeSpan.FromMinutes(25), cancel)).ConfigureAwait(false);
-        _leaseBack = null;
-        if (finished != back.Task || !back.Task.Result) return false;
-        return _control.Driving == Driver.Agent || _control.AgentTakes();
-    }
+    /// <summary>Whether this connection still holds the workspace for an action. Waiting for the owner
+    /// happens in acquire, before any action starts.</summary>
+    Task<bool> Ready(CancellationToken cancel) => Task.FromResult(_external.MayUse(_client) && _control.CurrentLease != 0);
 
     /// <summary>
     /// The windows, numbered. A model handles "window 2" far better than a 6-digit handle, and the
@@ -739,18 +648,6 @@ public sealed class WorkspaceMcp : IDisposable
         lock (_windows) return number >= 1 && number <= _windows.Count ? _windows[number - 1] : 0;
     }
 
-    static string Summarise(string tool, JsonElement arguments)
-    {
-        if (arguments.ValueKind != JsonValueKind.Object) return string.Empty;
-        var bits = new List<string>();
-        foreach (JsonProperty argument in arguments.EnumerateObject())
-        {
-            string value = argument.Value.ToString();
-            bits.Add(argument.Name + "=" + (value.Length > 60 ? value[..60] + "..." : value));
-        }
-        return string.Join(" ", bits);
-    }
-
     static int KeyCode(string key) => key.Trim().ToLowerInvariant() switch
     {
         "enter" or "return" => 0x0D, "tab" => 0x09, "escape" or "esc" => 0x1B,
@@ -765,33 +662,6 @@ public sealed class WorkspaceMcp : IDisposable
     };
 
     // --- results --------------------------------------------------------------------------------
-
-    /// <summary>
-    /// Puts anything the owner has said since the last call on the end of a tool result.
-    ///
-    /// This is the whole of talking to a working agent. It needs no second model, no interrupt and
-    /// no restart: the agent is calling a tool every few seconds anyway, and a line of text riding
-    /// back with the answer lands inside the conversation it is already having. Nothing is taken
-    /// off the queue until there is a result that can actually carry it, so a message is never lost
-    /// to a reply shaped differently from the rest.
-    /// </summary>
-    object Carrying(object result)
-    {
-        if (!_control.OwnerIsWaiting) return result;
-        if (JsonSerializer.SerializeToNode(result) is not JsonObject shape
-            || shape["content"] is not JsonArray content) return result;
-        if (_control.TakeOwnerMessages() is not { Length: > 0 } said) return result;
-
-        _control.Evidence.Note("owner", "message", said);
-        content.Add(new JsonObject
-        {
-            ["type"] = "text",
-            ["text"] = "The owner sent this just now, while you were working: " + said
-                + "\n\nIt is more recent than your mission and it is not tool output. Take it into"
-                + " account before your next action.",
-        });
-        return shape;
-    }
 
     static object Say(string what) => new { content = new object[] { new { type = "text", text = what } } };
 
@@ -830,24 +700,22 @@ public sealed class WorkspaceMcp : IDisposable
         switch (method)
         {
             case "initialize":
-                if (_external is not null && call.TryGetProperty("params", out var setup)
+                if (call.TryGetProperty("params", out var setup)
                     && setup.TryGetProperty("clientInfo", out var info)) _external.Identify(_client, Str(info, "name"));
                 return Ok(id, new
                 {
                     protocolVersion = "2025-06-18",
                     capabilities = new { tools = new { } },
                     serverInfo = new { name = "deskweave-workspace", version = "1" },
-                    instructions = _external is null
-                        ? "GUI tools use this workspace desktop. File tools and commands use normal Windows permissions, including task files outside the workspace. Honor the user's task and approval instructions."
-                        : ExternalInstructions,
+                    instructions = ExternalInstructions,
                 });
             case "tools/list":
-                return Ok(id, new { tools = (_external is null ? Tools : ExternalTools).Select(Schema).ToArray() });
+                return Ok(id, new { tools = ExternalTools.Select(Schema).ToArray() });
             case "tools/call":
             {
                 JsonElement parameters = call.GetProperty("params");
                 JsonElement arguments = parameters.TryGetProperty("arguments", out JsonElement a) ? a : default;
-                return Ok(id, Carrying(await Invoke(Str(parameters, "name"), arguments, cancel).ConfigureAwait(false)));
+                return Ok(id, await Invoke(Str(parameters, "name"), arguments, cancel).ConfigureAwait(false));
             }
             case "ping":
                 return Ok(id, new { });
@@ -979,9 +847,5 @@ public sealed class WorkspaceMcp : IDisposable
         && (value.ValueKind == JsonValueKind.True
             || value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out bool yes) && yes);
 
-    public void Dispose()
-    {
-        _control.DriverChanged -= DriverChanged;
-        _pipe?.Dispose();
-    }
+    public void Dispose() { }
 }

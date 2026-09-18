@@ -42,7 +42,7 @@ internal static class WorkspaceConnections
     /// <summary>Where an agent app's own command lives, or null when it is not on this PC. A field so
     /// the probes can point it at a stub and never reach the owner's real installation.</summary>
     internal static Func<AgentApp, string?> Locate =
-        app => app == AgentApp.ClaudeCode ? WorkspaceAgent.FindCli() : FindCodex();
+        app => app == AgentApp.ClaudeCode ? FindClaude() : FindCodex();
 
     internal static object AppConfiguration => new
     {
@@ -349,6 +349,19 @@ internal static class WorkspaceConnections
             catch (OperationCanceledException) { return; }
             WorkspaceAccessStore.Withdraw(id);
         }
+    }
+
+    static string? FindClaude()
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        foreach (string guess in new[]
+        {
+            Path.Combine(home, ".local", "bin", "claude.exe"), Path.Combine(home, ".local", "bin", "claude"),
+            Path.Combine(roaming, "npm", "claude.cmd"), Path.Combine(roaming, "npm", "claude"),
+        })
+            if (File.Exists(guess)) return guess;
+        return null;
     }
 
     static string? FindCodex()

@@ -140,7 +140,7 @@ internal static class WorkspacePeekHost
 
     static void FollowOne(WorkspaceRuntime runtime)
     {
-        var follow = new Follow(runtime, () => StirFrom(runtime.Id), state => RunMoved(runtime.Id, state));
+        var follow = new Follow(runtime, () => StirFrom(runtime.Id), who => Driven(runtime.Id, who));
         follow.Attach();
         _followed[runtime.Id] = follow;
         if (_pausedAll && runtime.Plane is { Driving: not Driver.Owner } plane)
@@ -148,11 +148,10 @@ internal static class WorkspacePeekHost
             plane.OwnerTakes();
             _pausedByUs.Add(runtime.Id);
         }
-        // Already working by the time this module noticed it (a restart mid-mission): the exact
-        // start passed unseen, so the best honest floor is now - a file from before this moment is
-        // not claimed as this run's, which only ever costs a chip that could have shown, never a
-        // wrong one.
-        if (runtime.Agent?.State == MissionState.Working) _runStarted[runtime.Id] = DateTimeOffset.Now;
+        // Already held by an agent by the time this module noticed it: the exact start passed
+        // unseen, so the honest floor is now - a file from before this moment is not claimed as
+        // this run's, which only ever costs a chip that could have shown, never a wrong one.
+        if (runtime.Access?.HasDriver == true) _runStarted[runtime.Id] = DateTimeOffset.Now;
     }
 
     static void Unfollow(string id)
@@ -163,11 +162,17 @@ internal static class WorkspacePeekHost
         _pausedByUs.Remove(id);
     }
 
-    /// <summary>A followed workspace's mission moved. Only the transition into Working matters here:
-    /// that is the run the result chip must stay honest about.</summary>
-    static void RunMoved(string id, MissionState state)
+    /// <summary>
+    /// Who drives a followed workspace changed. An agent taking it starts a run, the stretch the
+    /// result chip reports on; letting go ends it, and then the chip offers what that run made.
+    /// </summary>
+    static void Driven(string id, Driver who)
     {
-        if (state == MissionState.Working) _runStarted[id] = DateTimeOffset.Now;
+        if (_owner is not { } owner) return;
+        if (!owner.CheckAccess()) { owner.BeginInvoke(() => Driven(id, who)); return; }
+        if (who != Driver.Agent || !_followed.ContainsKey(id)) return;
+        _runStarted[id] = DateTimeOffset.Now;
+        if (_resultForId == id) _resultForId = null;
     }
 
     static void StirFrom(string id)
@@ -191,8 +196,7 @@ internal static class WorkspacePeekHost
         _frontId = id;
     }
 
-    static bool Busy(WorkspaceRuntime r) => r.Agent?.State is MissionState.Working or MissionState.NeedsYou
-        || r.Access?.HasDriver == true
+    static bool Busy(WorkspaceRuntime r) => r.Access?.HasDriver == true
         || r.Plane?.Driving == Driver.Owner
         || r.Access?.Handoffs.All.Any(request => request.State == "pending") == true;
 
@@ -259,7 +263,7 @@ internal static class WorkspacePeekHost
 
         (string message, PeekTone tone) = Status(front);
         window.Describe(WorkspaceName(front), message, tone);
-        window.SetActive(front.Agent?.State == MissionState.Working || front.Access?.HasDriver == true);
+        window.SetActive(front.Access?.HasDriver == true);
         if (back is not null)
         {
             (string backMessage, PeekTone backTone) = Status(back);
@@ -368,16 +372,14 @@ internal static class WorkspacePeekHost
 
     static void UpdateResultChip(WorkspacePeekWindow window, WorkspaceRuntime front)
     {
-        if ((front.Agent?.State ?? MissionState.Idle) != MissionState.Done)
+        // A run is over when the agent that took the workspace let go of it.
+        if (front.Access is not { HasDriver: false } || !_runStarted.TryGetValue(front.Id, out DateTimeOffset since))
         {
             _resultForId = null; _resultName = null; _resultPath = null;
         }
         else if (_resultForId != front.Id)
         {
             _resultForId = front.Id;
-            // Missing only if this module never saw the run start (Unfollowed and re-followed
-            // between); "now" is the honest floor then too - see FollowOne.
-            DateTimeOffset since = _runStarted.GetValueOrDefault(front.Id, DateTimeOffset.Now);
             (_resultName, _resultPath) = NewestFile(front.Plane?.Folder, since);
         }
         window.ShowResultChip(_resultName, _resultPath);
@@ -446,17 +448,7 @@ internal static class WorkspacePeekHost
     {
         if (r.Access?.Handoffs.All.Any(request => request.State == "pending") == true)
             return (AgentName(r) + " wants you", PeekTone.Attention);
-        if (r.Access?.HasDriver == true) return (AgentName(r), PeekTone.Working);
-        MissionState state = r.Agent?.State ?? MissionState.Idle;
-        if (state == MissionState.Done) return (AgentName(r), PeekTone.Quiet);
-        return state switch
-        {
-            MissionState.Working => (AgentName(r), PeekTone.Working),
-            MissionState.Waiting => ("Waiting", PeekTone.Quiet),
-            MissionState.Failed => ("Stopped", PeekTone.Quiet),
-            MissionState.Interrupted => ("Interrupted", PeekTone.Quiet),
-            _ => (AgentName(r), PeekTone.Quiet),
-        };
+        return (AgentName(r), r.Access?.HasDriver == true ? PeekTone.Working : PeekTone.Quiet);
     }
 
     static string WorkspaceName(WorkspaceRuntime r) => WorkspaceStore.Find(r.Id)?.Name ?? "Workspace";
@@ -692,14 +684,12 @@ internal static class WorkspacePeekHost
 
     /// <summary>One followed workspace's event subscriptions, kept together so unfollowing removes
     /// exactly the delegates that were added.</summary>
-    sealed class Follow(WorkspaceRuntime runtime, Action stir, Action<MissionState> moved)
+    sealed class Follow(WorkspaceRuntime runtime, Action stir, Action<Driver> driven)
     {
         internal readonly WorkspaceRuntime Runtime = runtime;
-        void Acted(string tool, string detail) => stir();
-        void Said(string said) => stir();
-        void MovedOn(MissionState state) { moved(state); stir(); }
         void Drove(Driver who)
         {
+            driven(who);
             if (_pausedAll && who != Driver.Owner && Runtime.Plane is { } plane)
             {
                 _pausedByUs.Add(Runtime.Id);
@@ -712,9 +702,6 @@ internal static class WorkspacePeekHost
 
         internal void Attach()
         {
-            Runtime.Acting += Acted;
-            Runtime.Said += Said;
-            Runtime.Moved += MovedOn;
             Runtime.DriverChanged += Drove;
             Runtime.Ended += Ended;
             if (Runtime.Access is { } access) access.Handoffs.Changed += HandoffsChanged;
@@ -722,9 +709,6 @@ internal static class WorkspacePeekHost
 
         internal void Detach()
         {
-            Runtime.Acting -= Acted;
-            Runtime.Said -= Said;
-            Runtime.Moved -= MovedOn;
             Runtime.DriverChanged -= Drove;
             Runtime.Ended -= Ended;
             if (Runtime.Access is { } access) access.Handoffs.Changed -= HandoffsChanged;

@@ -97,10 +97,12 @@ internal static class Program
             string firstFolder = WorkspaceStore.FolderOf(first.Id);
             string secondFolder = WorkspaceStore.FolderOf(second.Id);
             Check(first.Id != second.Id && firstFolder != secondFolder, "Two fixture workspaces have separate persistent identities and folders");
+            string named = first.Name;
             Task.WaitAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() =>
-                WorkspaceStore.Update(first.Id, current => current with { UsageRuns = current.UsageRuns + 1 }))).ToArray());
+                WorkspaceStore.Update(first.Id, current => current with { Name = current.Name + "+" }))).ToArray());
             first = WorkspaceStore.All().Single(workspace => workspace.Id == first.Id);
-            Check(first.UsageRuns == 32, "Concurrent workspace updates retain all 32 independent counter increments");
+            Check(first.Name == named + new string('+', 32), "Concurrent workspace updates retain all 32 independent changes");
+            first = WorkspaceStore.Update(first.Id, current => current with { Name = named })!;
             string config = JsonSerializer.Serialize(WorkspaceConnections.Configuration(first.Id));
             Check(WorkspaceConnections.Name(first.Id) == "deskweave_workspace_" + first.Id
                 && config.Contains("Deskweave.WorkspaceBridge.exe", StringComparison.Ordinal)

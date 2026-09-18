@@ -7,6 +7,8 @@ param(
     [ValidateSet('claude', 'codex')][string]$Agent = 'claude',
     [string]$Model = '',
     [switch]$IncludeOwnerOpen,
+    [switch]$ScoreOnly,
+    [string[]]$Only = @(),   # run just these cases, keeping the other logs   # score the logs already in -Out again, without running any agent
     [string]$Out = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -16,6 +18,8 @@ $bridge = Join-Path $root 'out/Bridge/Deskweave.WorkspaceBridge.exe'
 $ticket = Join-Path $env:LOCALAPPDATA 'Deskweave/agent-workspaces.access/router.json'
 if (-not (Test-Path -LiteralPath $bridge)) { throw "Publish first: $bridge is missing." }
 New-Item -ItemType Directory -Force $Out | Out-Null
+# This runs from inside other agent tools too; a nested Claude Code refuses to start with this set.
+Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue
 
 # The fixture: a repository with a web page and a small Windows app, both with one button.
 $project = Join-Path $Out 'tiny-shop'
@@ -38,7 +42,7 @@ $form.Controls.AddRange(@($label, $button))
 $cases = @(
     @{ name = 'web-test'; screen = $true; prompt = 'index.html is a small shop page. Open it in a browser, click Add to cart, and tell me what the button says afterwards.' },
     @{ name = 'gui-test'; screen = $true; prompt = 'gui.ps1 is a small Windows app. Start it, press its Add to cart button, and tell me what the label says afterwards. Close it when done.' },
-    @{ name = 'edit'; screen = $false; prompt = 'Change the h1 in index.html to say "Tiny Shop". Do not test it.' },
+    @{ name = 'edit'; screen = $false; prompt = 'Change the h1 in index.html to say Tiny Shop. Do not test it.' }   # no inner quotes: claude.cmd mangles them,
     @{ name = 'count'; screen = $false; prompt = 'How many lines are in gui.ps1? Just answer.' }
 )
 if ($IncludeOwnerOpen) {
@@ -49,6 +53,7 @@ if ($IncludeOwnerOpen) {
 $results = @()
 foreach ($case in $cases) {
     $log = Join-Path $Out "$($case.name).jsonl"
+    if (-not $ScoreOnly -and ($Only.Count -eq 0 -or $Only -contains $case.name)) {
     Push-Location $project
     try {
         if ($Agent -eq 'claude') {
@@ -67,6 +72,7 @@ foreach ($case in $cases) {
             & codex @flags $case.prompt 2>&1 | Set-Content -LiteralPath $log -Encoding UTF8
         }
     } finally { Pop-Location }
+    }
 
     # Which tools the agent reached for, from its own event stream: a Deskweave call counts only if
     # it succeeded, and a window started from the agent's own shell is the failure this measures.
@@ -95,7 +101,9 @@ foreach ($case in $cases) {
     $used = @($tools | Where-Object { $_ -like 'mcp__deskweave__*' -and $_ -notmatch '__(status|release)$' }).Count -gt 0
     # A launch from the agent's own shell (a heuristic; the logs are kept for a person to read).
     $launch = '(?i)(start-process|\bstart\s+\S*\.(html|ps1|exe)|invoke-item|explorer(\.exe)?\s|(powershell|pwsh)(\.exe)?\b[^|;]*gui\.ps1|(^|[\s;&])\.[/\\]gui\.ps1|dotnet\s+run|electron|msedge|chrome(\.exe)?\s)'
-    $window = @($shell | Where-Object { $_ -match $launch }).Count -gt 0
+    # Reading the file is not launching it (Codex runs every command as pwsh -Command "...").
+    $reading = '(?i)(get-content|readalllines|select-string|measure-object|\bcat\b|\btype\b|\brg\b)'
+    $window = @($shell | Where-Object { $_ -match $launch -and $_ -notmatch $reading }).Count -gt 0
     $right = if ($case.screen) { $worked -and -not $window } else { -not $used }
     $results += [pscustomobject]@{
         case = $case.name; needsScreen = $case.screen; usedDeskweave = $used; deskweaveWorked = $worked

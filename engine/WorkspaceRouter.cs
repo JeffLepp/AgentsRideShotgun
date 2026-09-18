@@ -7,7 +7,7 @@ namespace HiveMind.AgentWorkspaces;
 
 /// <summary>
 /// Which outside agents a workspace takes, kept on its record as one string. Empty: none, just the
-/// owner and the boss. "*": any agent. "folder:C:\x": agents working in that folder or below it.
+/// owner. "*": any agent. "folder:C:\x": agents working in that folder or below it.
 /// "agent:codex": one agent app, by the name its MCP client reports.
 /// </summary>
 public static class WorkspaceHome

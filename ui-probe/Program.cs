@@ -236,7 +236,6 @@ static class Program
         var second = WorkspaceStore.Create("Build desk");
         WorkspaceStore.Create("Review desk");
         await Settle();
-        await RunPanelRegressions(WorkspaceStore.Find(created.Id)!, second, runtime);
         await RunAgentRouting();
         runtime.Dispose();
         Check(WorkspaceStore.Find(created.Id) is not null && WorkspaceStore.Find(second.Id) is not null,
@@ -368,54 +367,6 @@ static class Program
         AppSettingsStore.Update(settings => settings with { Theme = ThemeChoice.FollowWindows, CornerPinned = false });
     }
 
-    static async Task RunPanelRegressions(StoredWorkspace first, StoredWorkspace second, WorkspaceRuntime firstRuntime)
-    {
-        WorkspaceAccessStore.Write(second.Id, new WorkspaceAccessPolicy { PrewarmBrowser = false });
-        using var secondRuntime = WorkspaceRuntime.Start(second);
-        ModuleEntry.Selected = first.Id;
-        using var panel = new AgentWorkspacesPanel();
-        panel.SetWorkspace(first);
-        Check(((DemoWorkspace)((WorkspaceFrame)panel.FindName("ComputerFrame")).DataContext).State == WorkspaceVisualState.Ready,
-            "A running desktop awaiting capture is never labeled stopped");
-        const string sentinel = "queued-only-for-the-first-workspace";
-        var said = typeof(WorkspaceRuntime).GetField("Said", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(firstRuntime) as Action<string>;
-        Check(said is not null, "Panel subscribes to its actual runtime transcript");
-        said!(sentinel);
-        panel.SetWorkspace(second);
-        await Settle();
-        var transcript = (StackPanel)panel.FindName("Transcript");
-        Check(transcript.Children.OfType<TextBlock>().All(t => !t.Text.Contains(sentinel)),
-            "Queued transcript from the prior workspace cannot enter the new workspace");
-        panel.SetWorkspace(first);
-        InvokePanel(panel, "DrawFrame", null, EventArgs.Empty);
-        panel.SetWorkspace(second);
-        for (int i = 0; i < 80 && (bool)typeof(AgentWorkspacesPanel).GetField("_drawing", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(panel)!; i++)
-            await Task.Delay(50);
-        Check(!(bool)typeof(AgentWorkspacesPanel).GetField("_drawing", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(panel)!,
-            "An in-flight desktop capture completes within the test bound");
-        Check(((Image)panel.FindName("LiveScreen")).Source is null && ReferenceEquals(WorkspaceRuntime.Of(second.Id), secondRuntime),
-            "A stale screenshot cannot paint or stop the newly selected desktop");
-        WorkspaceStore.Update(second.Id, current => current with
-        {
-            Mission = MissionState.Done,
-            Outcome = "independently saved result",
-            Announced = MissionState.Done,
-            SessionReadUntrustedContent = true,
-            Session = "retained-provider-session"
-        });
-        ((TextBox)panel.FindName("WorkspaceNameText")).Text = "Renamed build desk";
-        InvokePanel(panel, "CommitName");
-        var record = WorkspaceStore.Find(second.Id)!;
-        Check(record.Name == "Renamed build desk" && record.Mission == MissionState.Done
-            && record.Outcome == "independently saved result" && record.Announced == MissionState.Done
-            && record.SessionReadUntrustedContent && record.Session == "retained-provider-session",
-            "Renaming from an older panel preserves current mission, session, notification and browser state");
-        Check(panel.SelectedWorkspaceId == second.Id, "Panel selection contract identifies the actual workspace");
-        panel.Dispose();
-        Check(ReferenceEquals(firstRuntime, WorkspaceRuntime.Of(first.Id)) && ReferenceEquals(secondRuntime, WorkspaceRuntime.Of(second.Id)),
-            "Disposing a workspace view retains both independent desktops");
-    }
-
     static async Task RunAgentRouting()
     {
         // The rules, without starting anything.
@@ -504,11 +455,9 @@ static class Program
         await RoutingChecks.Run(_output);
     }
 
-    static void InvokePanel(AgentWorkspacesPanel panel, string method, params object?[] args) =>
-        typeof(AgentWorkspacesPanel).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(panel, args);
 
     /// <summary>Calls a private instance member on <paramref name="target"/> - the same reflection
-    /// pattern as <see cref="InvokePanel"/>, for members on the window itself (a data-templated card
+    /// pattern as the reflection helpers, for members on the window itself (a data-templated card
     /// or row has no name of its own to find and click, and a filter field opened by keyboard has no
     /// button to click either).</summary>
     static void InvokePrivate(object target, string method, params object?[] args) =>

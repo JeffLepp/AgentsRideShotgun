@@ -254,26 +254,6 @@ public sealed partial class WorkspaceControl : IDisposable
             : "page content is in the mission - owner has disabled program blocking");
     }
 
-    /// <summary>
-    /// Carries the taint onto a fresh control plane when a parked mission wakes. A wake builds a new
-    /// desktop but hands the agent back the conversation it slept on, so the flag has to come with
-    /// the conversation. Without this, sleeping over a page is how execution comes back.
-    /// </summary>
-    public void CarryUntrustedContent() => Untrusted("the conversation this mission woke with");
-
-    /// <summary>
-    /// A conversation the agent has never spoken in, so nothing it read is in it. The only thing
-    /// that clears the taint, and the reason the rule is "for the rest of this mission" rather than
-    /// "for the life of this workspace" - a workspace that browsed once would otherwise never run a
-    /// program again. Continuing a conversation, including waking from sleep, does not come here.
-    /// </summary>
-    public void NewConversation()
-    {
-        if (!ReadUntrustedContent) return;
-        _readUntrustedContent = false;
-        _evidence.Note("untrusted", "new conversation", "cleared - programs are available again");
-    }
-
     // --- perception --------------------------------------------------------------------------
 
     public IReadOnlyList<AgentWindow> Windows() => _desktop.Windows();
@@ -651,43 +631,6 @@ public sealed partial class WorkspaceControl : IDisposable
                 pid == 0 ? "REFUSED" : "pid " + pid);
         return pid;
     }
-
-    /// <summary>
-    /// Something the owner typed while the agent was working. It is handed over on the agent's next
-    /// tool call rather than interrupting it.
-    ///
-    /// A workspace used to have one way to say anything to a running mission, which was to stop it.
-    /// So a correction that would have taken a sentence cost the whole run, and the owner sat
-    /// watching an agent go the wrong way rather than pay that. A tool call comes round every few
-    /// seconds, costs nothing extra to carry a line of text, and lands inside the conversation the
-    /// agent is already having, so it reads it in context and carries on with what it was doing.
-    /// </summary>
-    public void Interject(string said)
-    {
-        if (said.Trim() is not { Length: > 0 } line) return;
-        lock (_fromOwner) _fromOwner.Add(line);
-    }
-
-    /// <summary>Whether anything the owner said is still waiting to be handed over.</summary>
-    public bool OwnerIsWaiting { get { lock (_fromOwner) return _fromOwner.Count > 0; } }
-
-    /// <summary>
-    /// Everything the owner has said since the last time this was asked, and clears it. Taking and
-    /// clearing in one step is deliberate: two tool calls in flight at once must not both deliver
-    /// the same sentence.
-    /// </summary>
-    public string TakeOwnerMessages()
-    {
-        lock (_fromOwner)
-        {
-            if (_fromOwner.Count == 0) return string.Empty;
-            string said = string.Join("\n", _fromOwner);
-            _fromOwner.Clear();
-            return said;
-        }
-    }
-
-    readonly List<string> _fromOwner = [];
 
     /// <summary>
     /// The process id of a copy of this program already running outside this workspace, or null.

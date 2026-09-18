@@ -336,6 +336,18 @@ static class CornerScenes
                 runtime.Access.Handoffs.CancelPending();
             }
             finally { ModuleEntry.AttentionNeeded -= listen; }
+
+            // Results out (MVP_SPEC): once an agent's run ends, the chip offers the file that run made.
+            AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Always });
+            InvokeHost("Driven", stored.Id, Driver.Agent);
+            await Task.Delay(100);
+            string made = Path.Combine(runtime.Plane!.Folder, "result-" + Guid.NewGuid().ToString("N")[..6] + ".txt");
+            File.WriteAllText(made, "made by the run");
+            InvokeHost("StirFrom", stored.Id);
+            await Task.Delay(100);
+            Program.Check(typeof(WorkspacePeekHost).GetField("_resultPath", BindingFlags.NonPublic | BindingFlags.Static)!
+                .GetValue(null) as string == made,
+                "When an agent's run ends, the corner offers the file that run made");
         }
         finally
         {

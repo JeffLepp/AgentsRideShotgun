@@ -3,16 +3,6 @@ using System.Text.Json;
 
 namespace HiveMind.AgentWorkspaces;
 
-/// <summary>Which Claude credential source a workspace boss is allowed to use.</summary>
-public enum WorkspaceAgentCredentialMode
-{
-    /// <summary>Use the Claude subscription sign-in and ignore inherited API/provider overrides.</summary>
-    Subscription,
-
-    /// <summary>Use the API key or provider configuration already owned by Claude Code.</summary>
-    ClaudeConfiguration,
-}
-
 /// <summary>
 /// What a workspace is allowed to be. Not a security setting: see FREE_ROAM.md.
 /// </summary>
@@ -39,7 +29,6 @@ public sealed record StoredWorkspace
 {
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
-    public string Task { get; init; } = string.Empty;
     /// <summary>
     /// Fast by default, because a workspace that is slower than the owner's own desktop is not the
     /// product. Fast is not a cap - it schedules by weight - so an idle machine is given over to
@@ -52,92 +41,12 @@ public sealed record StoredWorkspace
     public WorkspaceMode Mode { get; init; } = WorkspaceMode.Free;
 
     /// <summary>
-    /// Which outside agents Deskweave sends here. Empty: none, just the owner and the boss. See
+    /// Which outside agents Deskweave sends here. Empty: none, just the owner. See
     /// <see cref="WorkspaceHome"/> for the other values.
     /// </summary>
     public string Agents { get; init; } = string.Empty;
     public DateTimeOffset Created { get; init; } = DateTimeOffset.Now;
     public DateTimeOffset LastUsed { get; init; } = DateTimeOffset.Now;
-
-    /// <summary>How this workspace's boss authenticates. The choice is per workspace.</summary>
-    public WorkspaceAgentCredentialMode AgentCredentials { get; init; } =
-        WorkspaceAgentCredentialMode.Subscription;
-
-    /// <summary>
-    /// Optional provider-reported dollar ceiling for one CLI invocation. Null means HiveMind does
-    /// not add a ceiling; it never changes provider account limits.
-    /// </summary>
-    public long? RunUsageCeilingTokens { get; init; } = WorkspaceAgent.DefaultRunUsageCeilingTokens;
-
-    /// <summary>
-    /// Every token this workspace's boss agent has used, added up as each run ends. A workspace
-    /// runs with its panel closed and over days, so the only place a total like this can live is
-    /// the record; nothing in the process outlives the runs it would be counting.
-    /// </summary>
-    public long UsageTokensTotal { get; init; }
-
-    /// <summary>
-    /// The same runs at API prices, as the CLI reported them. A real charge only for credentials
-    /// that are actually billed that way - a subscription is metered in tokens and in nothing else.
-    /// </summary>
-    public double UsageUsdTotal { get; init; }
-
-    /// <summary>How many finished CLI invocations those two totals cover.</summary>
-    public int UsageRuns { get; init; }
-
-    /// <summary>
-    /// This record with one finished run added to its totals. A run that used nothing - no CLI on
-    /// the PC, not signed in, refused before it reached the model - is not a run and does not move
-    /// the count, or a workspace that cannot run at all would report a history of runs it never
-    /// made.
-    /// </summary>
-    public StoredWorkspace WithRun(long tokens, double usd) =>
-        tokens <= 0 && usd <= 0 ? this : this with
-        {
-            UsageTokensTotal = UsageTokensTotal + Math.Max(0, tokens),
-            UsageUsdTotal = UsageUsdTotal + (double.IsFinite(usd) && usd > 0 ? usd : 0),
-            UsageRuns = UsageRuns + 1,
-        };
-
-    /// <summary>
-    /// The agent CLI's own conversation for this workspace's mission. It is written down because a
-    /// mission that outlives HiveMind has to be picked up by a different process than started it.
-    /// </summary>
-    public string Session { get; init; } = string.Empty;
-
-    /// <summary>When a parked mission is to be woken. Null when nothing is waiting.</summary>
-    public DateTimeOffset? WakeAt { get; init; }
-
-    /// <summary>What the agent said it was waiting for, in its own words. Given back to it on waking.</summary>
-    public string WakeNote { get; init; } = string.Empty;
-
-    /// <summary>
-    /// Whether the parked conversation has web page content in it. This has to be on the record
-    /// rather than only on the control plane, because a parked mission tears its desktop down and
-    /// wakes against a fresh one - so the flag would clear itself while the page text the flag
-    /// exists for is still sitting in the conversation being handed back. That is the bypass, and
-    /// it is why the taint travels with the session and not with the process.
-    /// </summary>
-    public bool SessionReadUntrustedContent { get; init; }
-
-    /// <summary>
-    /// How this workspace's mission was last left. Written down because an outcome the owner has
-    /// not seen yet must survive closing the panel, closing HiveMind, and the machine restarting.
-    /// A record still saying Working when HiveMind starts is a mission that was interrupted.
-    /// </summary>
-    public MissionState Mission { get; init; } = MissionState.Idle;
-
-    /// <summary>What the mission said about itself when it reached that state.</summary>
-    public string Outcome { get; init; } = string.Empty;
-
-    /// <summary>When it reached that state, for the card, the panel and the notification.</summary>
-    public DateTimeOffset? MissionAt { get; init; }
-
-    /// <summary>
-    /// The last state the owner was actually told about. Kept so a restart does not re-announce an
-    /// outcome he has already seen, which is the "no duplicate or stale alerts" half of the rule.
-    /// </summary>
-    public MissionState Announced { get; init; } = MissionState.Idle;
 }
 
 /// <summary>
@@ -305,18 +214,7 @@ public static class WorkspaceStore
         string folder = FolderOf(id);
         if (!Directory.Exists(folder)) return false;
 
-        // The record first, and the wake record with it. A parked mission is woken off the disk by
-        // a clock that asks no panel's permission, so clearing the wake before the files go removes
-        // the window where the waker starts a workspace whose app data is being deleted under it.
-        workspace = Update(id, stored => stored with
-        {
-            Task = string.Empty,
-            Session = string.Empty,
-            WakeAt = null,
-            WakeNote = string.Empty,
-            SessionReadUntrustedContent = false,
-            LastUsed = DateTimeOffset.Now,
-        });
+        workspace = Update(id, stored => stored with { LastUsed = DateTimeOffset.Now });
         if (workspace is null) return false;
 
         bool clean = true;

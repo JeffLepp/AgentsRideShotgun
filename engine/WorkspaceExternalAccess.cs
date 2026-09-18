@@ -14,15 +14,14 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     // Whose conversation the plane's "has read a page" flag belongs to right now. A conversation is
     // the agent's session as the router knows it, which outlives this workspace: sleeping and
     // waking hands a new client id to the same conversation. The others' flags wait in PagesRead.
-    // The built-in boss holds the plane first. ponytail: in memory only, so a Deskweave restart
-    // mid-session forgets a flag; persist it if restarts under a live agent turn out to matter.
+    // ponytail: in memory only, so a Deskweave restart mid-session forgets a flag; persist it if
+    // restarts under a live agent turn out to matter.
     string? _conversation;
     readonly Dictionary<Guid, string> _conversations = [];
     static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> PagesRead = new();
 
     /// <summary>The router's session ended: its conversation is over and its flag goes with it.</summary>
     internal static void Forget(string conversation) => PagesRead.TryRemove(conversation, out _);
-    bool _supervisor;
     int _activeUses;
     long _lastActive;
     bool _disposed;
@@ -51,7 +50,6 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         _id = id;
         _control = control;
         Policy = WorkspaceAccessStore.Read(id);
-        _conversation = Boss;
         Handoffs = new(id, control.Folder);
         _letGo = new Timer(_ => LetGoIfQuiet());
         Handoffs.Changed += Notify;
@@ -63,7 +61,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         {
             if (_disposed) return;
             Policy = policy;
-            // The shared control plane includes the built-in boss, even with external access off.
+            // The page-safety setting lives on the shared control plane, even with agent access off.
             _control.ConfigureWebContentBlocking(policy.BlockProgramsAfterWebContent);
             if (!policy.Enabled)
             {
@@ -125,7 +123,6 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         {
             if (_retired) return "This workspace just went to sleep. Try again; the next call wakes it.";
             if (_disposed || !Policy.Enabled || !_clients.ContainsKey(client)) return "Agent access is off. Ask the owner to enable it.";
-            if (_supervisor) return "The built-in boss is working. Wait for it to finish.";
             if (_activeUses > 0 && _driver != client) return "The previous controller is stopping. Try again after it releases its current action.";
             if (_control.Driving == Driver.Owner) return "Paused: the owner has control. Do not retry until they give it back.";
             if (_driver is { } other && other != client)
@@ -155,7 +152,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     {
         lock (_gate)
         {
-            if (_disposed || _driver is not null || _supervisor || _activeUses > 0) return false;
+            if (_disposed || _driver is not null || _activeUses > 0) return false;
             _retired = true;
             return true;
         }
@@ -263,8 +260,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         Notify();
     }
 
-    string Boss => "boss:" + _id;
-    string ConversationOf(Guid who) => who == Guid.Empty ? Boss : _conversations.GetValueOrDefault(who, who.ToString("N"));
+    string ConversationOf(Guid who) => _conversations.GetValueOrDefault(who, who.ToString("N"));
 
     /// <summary>Gives the plane this one's own "has read a page" flag, keeping the last holder's.</summary>
     void Converse(Guid who)
@@ -285,17 +281,6 @@ internal sealed class WorkspaceExternalAccess : IDisposable
             return _conversation == conversation ? _control.ReadUntrustedContent : PagesRead.GetValueOrDefault(conversation);
         }
     }
-    internal bool BeginSupervisor()
-    {
-        lock (_gate)
-        {
-            if (_disposed || _driver is not null || _supervisor || _activeUses > 0) return false;
-            _supervisor = true;
-            Converse(Guid.Empty);
-            return true;
-        }
-    }
-    internal void EndSupervisor() { lock (_gate) _supervisor = false; Notify(); }
     internal object Status(Guid client) => new
     {
         workspace = _id, folder = _control.Folder, enabled = Policy.Enabled,

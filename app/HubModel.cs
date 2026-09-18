@@ -143,9 +143,7 @@ internal sealed class HubViewModel : IDisposable
             WorkspaceRuntime? runtime = WorkspaceRuntime.Of(workspace.Id);
             bool isWorking = runtime is not null;
             entry.Working = isWorking;
-            MissionState state = runtime?.Agent?.State ?? workspace.Mission;
-            bool needsYou = runtime?.Access?.Handoffs.All.Any(h => h.State == "pending") == true
-                || state is MissionState.NeedsYou or MissionState.Failed or MissionState.Interrupted;
+            bool needsYou = runtime?.Access?.Handoffs.All.Any(h => h.State == "pending") == true;
             entry.NeedsYou = needsYou;
             string driver = runtime?.Access?.LastController ?? string.Empty;
             string kept = WorkspaceHome.Label(workspace.Agents);

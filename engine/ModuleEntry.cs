@@ -75,20 +75,13 @@ public static class ModuleEntry
     public static event Action? AllPausedChanged;
 
     /// <summary>
-    /// The module now has a background runtime, and it is one clock. Without it a mission parked for
-    /// an hour only woke if the owner happened to have this app open when the hour was up, which is
-    /// the opposite of the reason to park one.
-    ///
-    /// What runs here is a timer over the workspace records on disk. It starts nothing by itself: it
-    /// only starts a workspace whose own agent asked to be woken at a time that has now passed.
+    /// App start: the screenshot sweep, the corner window, the one router every connected agent
+    /// uses, and the keep-up loop for agents installed later. None of them starts a workspace.
     /// </summary>
     public static void Initialize()
     {
-        WorkspaceRuntime.Watch();
         WorkspaceRuntime.SweepEvidence();
-        // The corner view watches the same background runtime. It costs nothing until the owner
-        // turns it on, and turning it on in the panel must not be the only way to get it back after
-        // a restart - a mission that works while HiveMind is minimised is exactly when it is wanted.
+        // The corner window: it shows nothing until an agent works.
         WorkspacePeekHost.Start();
         // One named pipe for every connected agent. It starts nothing until an agent uses a tool.
         WorkspaceRouter.Start();
@@ -96,7 +89,7 @@ public static class ModuleEntry
         WorkspaceConnections.KeepUp();
     }
 
-    /// <summary>App exit. Stops the clock and every workspace still running under it.</summary>
+    /// <summary>App exit. Stops every workspace still running.</summary>
     public static void Shutdown()
     {
         WorkspaceConnections.StopKeepingUp();
@@ -104,10 +97,6 @@ public static class ModuleEntry
         WorkspacePeekHost.Stop();
         WorkspaceRuntime.Rest();
     }
-
-    public static UIElement CreatePanel() => new AgentWorkspacesPanel();
-
-    public static UIElement CreateDashboardWidget() => new WorkspaceWidget();
 
     /// <summary>Optional uninstall/storage-inventory contract. This root contains only workspaces
     /// created by this private app, their records/evidence, and transient setup staging.</summary>
