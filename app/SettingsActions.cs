@@ -237,7 +237,7 @@ internal static class SettingsActions
                 RemoveEntry(entry);
     }
 
-    static StoredWorkspace? ScratchWorkspace() => WorkspaceStore.All().FirstOrDefault(w => w.Name == "Scratch");
+    static StoredWorkspace? ScratchWorkspace() => WorkspaceStore.All().FirstOrDefault(w => w.Agents == WorkspaceHome.Scratch);
 
     static string? ScratchFolder()
     {

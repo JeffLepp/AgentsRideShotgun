@@ -5,7 +5,9 @@ param(
     # Connect through the real `claude mcp add` and `codex mcp add`, into isolated roots under the output.
     [switch]$ProviderCli,
     # Fail unless the agent lands in a workspace that already existed before this run.
-    [switch]$RequireExisting
+    [switch]$RequireExisting,
+    # Optional repo-owned local browser fixture; never navigates a remote site.
+    [switch]$BrowserFixture
 )
 # Checks the running out/Deskweave.exe the way a connected agent reaches it: the entry an agent app
 # was configured with, the packaged bridge, the router ticket, and a workspace. Harmless calls only
@@ -16,6 +18,26 @@ $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
 public static class DeskweavePipe {
+    delegate bool WindowCallback(System.IntPtr window, System.IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumWindows(WindowCallback callback, System.IntPtr data);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(System.IntPtr window, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(System.IntPtr window, System.Text.StringBuilder text, int length);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(System.IntPtr window);
+    public static System.IntPtr Corner(int pid) {
+        System.IntPtr found = System.IntPtr.Zero;
+        EnumWindows((window, data) => {
+            GetWindowThreadProcessId(window, out uint owner);
+            if (owner != pid || !IsWindowVisible(window)) return true;
+            var text = new System.Text.StringBuilder(256);
+            GetWindowText(window, text, 256);
+            if (text.ToString() != "Workspace corner view") return true;
+            found = window; return false;
+        }, System.IntPtr.Zero);
+        return found;
+    }
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr window, out Rect rect);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr window, System.IntPtr dc, uint flags);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "WaitNamedPipeW")]
     static extern bool WaitNamedPipe(string name, uint timeout);
     public static bool Served(string pipe) {
@@ -92,6 +114,29 @@ function Get-Workspaces {
         }
     }
 }
+function Save-Corner([string]$label) {
+    Add-Type -AssemblyName System.Drawing
+    Start-Sleep -Milliseconds 600
+    $app = Get-Process -Id $report.app.pid
+    $app.Refresh()
+    # A ShowInTaskbar=false WPF tool window is not Process.MainWindowHandle.
+    $window = [DeskweavePipe]::Corner($app.Id)
+    if ($window -eq [IntPtr]::Zero) { throw 'The published corner is not visible during browser work.' }
+    $rect = [DeskweavePipe+Rect]::new()
+    if (-not [DeskweavePipe]::GetWindowRect($window, [ref]$rect)) { throw 'The corner has no readable bounds.' }
+    $bitmap = [System.Drawing.Bitmap]::new($rect.Right - $rect.Left, $rect.Bottom - $rect.Top)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $dc = $graphics.GetHdc()
+    try { $captured = [DeskweavePipe]::PrintWindow($window, $dc, 2) }
+    finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+    try {
+        if (-not $captured) { throw 'Windows could not capture the corner.' }
+        $file = Join-Path $output "$label-corner.png"
+        $bitmap.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+        return [ordered]@{ file = $file; pid = $app.Id; left = $rect.Left; top = $rect.Top; width = $bitmap.Width; height = $bitmap.Height }
+    }
+    finally { $bitmap.Dispose() }
+}
 function Invoke-Tool([string]$command, [string[]]$arguments, [hashtable]$environment, [int]$seconds = 90) {
     $start = [Diagnostics.ProcessStartInfo]::new($command)
     $start.UseShellExecute = $false; $start.CreateNoWindow = $true
@@ -163,7 +208,17 @@ function Invoke-McpSession([string]$label, [string]$command, [string[]]$argument
         $process.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
         $tools = Request 'tools/list' @{}
         $before = Request 'tools/call' @{ name = 'status'; arguments = @{} }
+        $browserVerified = $false
+        if ($BrowserFixture) {
+            $fixture = [Uri]::new((Join-Path $PSScriptRoot 'fixtures\browser-check.html'))
+            $browse = Request 'tools/call' @{ name = 'browse'; arguments = @{ url = $fixture.AbsoluteUri } }
+            if ($browse.result.isError) { throw "$label browser fixture could not open: $($browse.result | ConvertTo-Json -Compress -Depth 5)" }
+            $clicked = Request 'tools/call' @{ name = 'page_click'; arguments = @{ selector = '#verify' } }
+            $page = Request 'tools/call' @{ name = 'page'; arguments = @{} }
+            $browserVerified = -not $clicked.result.isError -and ($page.result.content | Where-Object type -eq 'text' | ForEach-Object text) -match 'Workspace click verified\.'
+        }
         $shot = Request 'tools/call' @{ name = 'computer'; arguments = @{ screenshot = $true } }
+        $corner = if ($BrowserFixture) { Save-Corner $label } else { $null }
         $after = Request 'tools/call' @{ name = 'status'; arguments = @{} }
         $release = Request 'tools/call' @{ name = 'release'; arguments = @{} }
     }
@@ -180,6 +235,8 @@ function Invoke-McpSession([string]$label, [string]$command, [string[]]$argument
         statusBefore = $before.result.content[0].text
         screenshot = @($shot.result.content | Where-Object type -eq 'image').Count -eq 1
         screenshotText = @($shot.result.content | Where-Object type -eq 'text')[0].text
+        browserVerified = [bool]$browserVerified
+        corner = $corner
         workspace = $state.workspace; hasControl = $state.hasControl; controller = $state.controller
         released = $release.result.content[0].text
     }
@@ -207,6 +264,9 @@ try {
         if (Test-Path -LiteralPath $claude) {
             $isolated = @{ CLAUDE_CONFIG_DIR = $claudeHome }
             $report.provider.claudeVersion = (Invoke-Tool $claude @('--version') $isolated).output
+            if (Test-Path -LiteralPath (Join-Path $claudeHome '.claude.json')) {
+                $report.provider.claudeRemove = Invoke-Tool $claude @('mcp', 'remove', '--scope', 'user', 'deskweave') $isolated
+            }
             $add = Invoke-Tool $claude @('mcp', 'add', '--scope', 'user', 'deskweave', '--', $bridge, '--workspace', $ticket) $isolated
             $list = Invoke-Tool $claude @('mcp', 'list') $isolated 120
             $report.provider.claudeAdd = $add; $report.provider.claudeList = $list
@@ -221,6 +281,9 @@ try {
         if ($codex) {
             $isolated = @{ CODEX_HOME = $codexHome }
             $report.provider.codexVersion = (Invoke-Tool $codex @('--version') $isolated).output
+            if (Test-Path -LiteralPath (Join-Path $codexHome 'config.toml')) {
+                $report.provider.codexRemove = Invoke-Tool $codex @('mcp', 'remove', 'deskweave') $isolated
+            }
             $add = Invoke-Tool $codex @('mcp', 'add', 'deskweave', '--', $bridge, '--workspace', $ticket) $isolated
             $report.provider.codexAdd = $add
             $table = (Get-TomlTable (Get-Content -LiteralPath (Join-Path $codexHome 'config.toml')) 'deskweave') -join "`n"
@@ -234,6 +297,8 @@ try {
     if ($entries.Count -eq 0) { $entries.Add(@{ label = 'bridge'; client = 'deskweave-live-check'; command = $bridge; arguments = [string[]]@('--workspace', $ticket) }) }
 
     $sessions = [Collections.Generic.List[object]]::new()
+    # Retain the failing session's receipts too, not only a fully successful batch.
+    $report.sessions = $sessions
     foreach ($entry in $entries) {
         $session = Invoke-McpSession $entry.label $entry.command $entry.arguments $entry.client
         $sessions.Add($session)
@@ -241,6 +306,7 @@ try {
             "$($entry.label): the bridge initializes as deskweave and lists $($session.toolNames.Count) tools"
         Check ($session.screenshot -and $session.workspace) `
             "$($entry.label): a screenshot comes back from workspace '$($session.workspace)', and status names it"
+        if ($BrowserFixture) { Check $session.browserVerified "$($entry.label): the local browser fixture received its click and page readback confirms it" }
         Check ($session.exitCode -eq 0) "$($entry.label): closing the agent's end ends the bridge cleanly"
     }
     $workspacesAfter = @(Get-Workspaces)

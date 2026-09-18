@@ -371,6 +371,45 @@ static class CornerScenes
             WorkspacePeekWindow? window = GateWindow();
             Program.Check(window is { Watching: true }, "A real activity brings the real corner window up");
 
+            // Every host tick used to restart the rise from 10 DIP, leaving a settled window jiggling.
+            await Task.Delay(350);
+            var rise = (System.Windows.Media.TranslateTransform)((FrameworkElement)window!.FindName("Root")).RenderTransform;
+            for (int i = 0; i < 12; i++) { InvokeHost("Rethink"); await Task.Delay(25); }
+            Program.Check(Math.Abs(rise.Y) < 0.1 && window.Opacity > 0.99,
+                "Repeated preview refreshes leave the settled corner fully visible with zero entrance movement");
+            window.Leave();
+            await Task.Delay(65);
+            window.Arrive();
+            await Task.Delay(350);
+            Program.Check(window.Watching && window.Opacity > 0.99 && Math.Abs(rise.Y) < 0.1,
+                "Activity during a fade reverses it without hiding the window or restarting the rise");
+
+            // Keep the owner's saved front-card position when a back card joins and leaves.
+            AppSettingsStore.Update(s => s with { CornerLeft = 160, CornerTop = 160 });
+            using (WorkspaceRuntime second = WorkspaceRuntime.Start(WorkspaceStore.Create("Second corner fixture")))
+            {
+                window.ForceHoverForTests(true);
+                second.Plane!.OwnerTakes();
+                InvokeHost("StirFrom", second.Id);
+                Program.Check(Close(window.FrontRect.Left, 160) && Close(window.FrontRect.Top, 160),
+                    "Adding a stacked preview preserves the saved front-card position");
+                Program.Check((string?)typeof(WorkspacePeekHost).GetField("_frontId", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null) == stored.Id,
+                    "Another agent's activity cannot replace the screen under the owner's pointer");
+                // Mimic the OS moving a captured window between input events. A preview tick must
+                // not reapply the old saved geometry until the drag reports its final position.
+                typeof(WorkspacePeekWindow).GetField("_moving", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, true);
+                window.Place(new Rect(230, 220, window.VisibleSize.Width, window.VisibleSize.Height));
+                Rect moving = window.FrontRect;
+                InvokeHost("Rethink");
+                Program.Check(window.FrontRect == moving, "Preview refreshes do not snap a window back during a move");
+                typeof(WorkspacePeekWindow).GetField("_moving", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, false);
+                second.Plane.Release();
+                window.ForceHoverForTests(false);
+            }
+            InvokeHost("StirFrom", stored.Id);
+            Program.Check(Close(window.FrontRect.Left, 160) && Close(window.FrontRect.Top, 160),
+                "Removing a stacked preview preserves the saved front-card position");
+
             // Hover holds it up past the fixed five-second fade.
             window!.ForceHoverForTests(true);
             await Task.Delay(5800);

@@ -35,6 +35,8 @@ public partial class WorkspacePeekWindow : Window
     static readonly Duration Leaving = new(TimeSpan.FromMilliseconds(220));
 
     bool _leaving;
+    bool _moving;
+    bool _activityAnimated;
     bool _hovered;
     double _stackExtra;
     string? _chipPath;
@@ -75,6 +77,7 @@ public partial class WorkspacePeekWindow : Window
 
     /// <summary>Whether the owner's pointer is over the card right now. Held, in the policy's terms.</summary>
     internal bool Hovered => _hovered;
+    internal bool Manipulating => _moving || _dragEdges != PeekEdges.None;
 
     /// <summary>The visible card's own bounding size, back-card peek included but shadow margin
     /// excluded - what <see cref="Configure"/> just laid out and the corner rule should place.</summary>
@@ -233,7 +236,10 @@ public partial class WorkspacePeekWindow : Window
     internal void SetActive(bool active)
     {
         ActivityLine.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        if (active && SystemParameters.ClientAreaAnimation)
+        bool animate = active && SystemParameters.ClientAreaAnimation;
+        if (animate == _activityAnimated) return;
+        _activityAnimated = animate;
+        if (animate)
         {
             var transform = new TranslateTransform();
             ActivityBrush.RelativeTransform = transform;
@@ -368,8 +374,11 @@ public partial class WorkspacePeekWindow : Window
     /// at all with Windows' own animations off.</summary>
     internal void Arrive()
     {
+        // The host calls this on every preview tick. Only a visibility transition gets motion.
+        if (Watching) return;
+        bool wasHidden = !IsVisible;
         _leaving = false;
-        if (!IsVisible) Show();
+        if (wasHidden) { Opacity = 0; Show(); }
         // Another program may have gone topmost since this last appeared - a game, an installer.
         Topmost = true;
         bool animate = SystemParameters.ClientAreaAnimation;
@@ -378,7 +387,7 @@ public partial class WorkspacePeekWindow : Window
         var rise = Root.RenderTransform as TranslateTransform ?? new TranslateTransform();
         Root.RenderTransform = rise;
         rise.BeginAnimation(TranslateTransform.YProperty, animate
-            ? new DoubleAnimation(10, 0, Arriving) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } }
+            ? new DoubleAnimation(wasHidden ? 10 : rise.Y, 0, Arriving) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } }
             : new DoubleAnimation(0, new Duration(TimeSpan.Zero)));
     }
 
@@ -440,9 +449,10 @@ public partial class WorkspacePeekWindow : Window
 
     void Pill_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        _moving = true;
         try { DragMove(); }
-        catch (InvalidOperationException) { return; }
-        Moved?.Invoke(FrontRect);
+        catch (InvalidOperationException) { }
+        finally { _moving = false; Moved?.Invoke(FrontRect); }
     }
 
     void BackCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => PromoteRequested?.Invoke();
@@ -528,6 +538,7 @@ public partial class WorkspacePeekWindow : Window
         _dragAnchor = ScreenDip();
         zone.MouseMove += ResizeZone_MouseMove;
         zone.MouseLeftButtonUp += ResizeZone_MouseLeftButtonUp;
+        zone.LostMouseCapture += ResizeZone_LostMouseCapture;
         e.Handled = true;
     }
 
@@ -549,11 +560,18 @@ public partial class WorkspacePeekWindow : Window
     }
 
     void ResizeZone_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        => EndResize((UIElement)sender);
+
+    void ResizeZone_LostMouseCapture(object sender, MouseEventArgs e)
+        => EndResize((UIElement)sender);
+
+    void EndResize(UIElement zone)
     {
-        var zone = (UIElement)sender;
-        zone.ReleaseMouseCapture();
         zone.MouseMove -= ResizeZone_MouseMove;
         zone.MouseLeftButtonUp -= ResizeZone_MouseLeftButtonUp;
+        zone.LostMouseCapture -= ResizeZone_LostMouseCapture;
+        _dragEdges = PeekEdges.None;
+        if (zone.IsMouseCaptured) zone.ReleaseMouseCapture();
         Resized?.Invoke(FrontRect);
     }
 

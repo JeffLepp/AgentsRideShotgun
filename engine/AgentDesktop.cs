@@ -299,21 +299,19 @@ public sealed partial class AgentDesktop : IDisposable
     /// shutdown. What it could not photograph is reported rather than quietly missing.
     /// </summary>
     public DesktopFrame Capture(int width, int height)
+        => _capture.Take(width, height, CaptureBound, () =>
     {
-        // One capture at a time. Queueing a second one behind a pump that is busy would build a
-        // backlog at two frames a second and hand every caller an ever-staler picture.
-        if (Interlocked.CompareExchange(ref _capturing, 1, 0) != 0)
-            return new DesktopFrame(null, 0, 0, true);
+        // The corner and agent may ask simultaneously. Share that bounded frame; never queue
+        // duplicate composites or return no first image just because the preview got here first.
         try
         {
             DesktopFrame? frame = Run(() => CaptureOnPump(width, height), CaptureBound);
             return frame ?? new DesktopFrame(null, 0, 0, true);
         }
         catch (ObjectDisposedException) { return new DesktopFrame(null, 0, 0, false); }
-        finally { Interlocked.Exchange(ref _capturing, 0); }
-    }
+    });
 
-    int _capturing;
+    readonly WorkspaceCaptureGate _capture = new();
 
     /// <summary>
     /// How long a caller will wait for the desktop pump before taking the last picture instead.
@@ -325,7 +323,8 @@ public sealed partial class AgentDesktop : IDisposable
     DesktopFrame CaptureOnPump(int width, int height)
     {
         IReadOnlyList<AgentWindow> windows = WindowsOnScreen();
-        if (windows.Count == 0) return new DesktopFrame(null, 0, 0, false);
+        // A new workspace can be observed before its first app has painted. Its empty background
+        // is still a valid screenshot; returning null here made first tool calls intermittently fail.
         int skipped = windows.Count(window => !window.Responding);
 
         nint screenDc = Native.GetDC(0);

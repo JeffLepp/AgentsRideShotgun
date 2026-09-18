@@ -149,8 +149,8 @@ internal static class FirstRunConnections
 
             // The scoped instruction that comes with connecting, in both directions.
             Check(WorkspaceMcp.RouterInstructions.Contains(WorkspaceMcp.Scope, StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("Use Deskweave whenever your work needs a window", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("Do this without being asked", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("Use Deskweave automatically for agent-operated browser and GUI work", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("do not silently divert that request into Deskweave", StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("Do not use Deskweave for anything else", StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("builds, unit tests", StringComparison.Ordinal),
                 "A connected agent is told to use Deskweave for windows by itself, and not for code, builds, tests or file work");

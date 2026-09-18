@@ -399,37 +399,38 @@ static class Program
         // The rules, without starting anything.
         string project = Path.Combine(_output, "projects", "Alpha");
         Directory.CreateDirectory(Path.Combine(project, "src"));
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
         WorkspaceHome.Route fresh = WorkspaceHome.Decide([], project, "claude-code", _ => false);
         Check(fresh.Existing is null && fresh.Name == "Alpha" && fresh.Rule == WorkspaceHome.Folder(project),
             "An agent nothing fits gets a new workspace named for, and kept for, its project folder");
         WorkspaceHome.Route home = WorkspaceHome.Decide([], Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "claude-code", _ => false);
-        Check(home.Existing is null && home.Name == "Claude Code" && home.Rule == WorkspaceHome.Agent("claude-code"),
-            "An agent started from its home folder gets a workspace kept for that agent, not one for home");
+        Check(home.Existing is null && home.Name == "Scratch" && home.Rule == WorkspaceHome.Scratch,
+            "An agent started from its home folder gets Scratch");
         static StoredWorkspace Fixture(string id, string rule) => new() { Id = id, Name = id, Agents = rule };
         StoredWorkspace[] set = [Fixture("shared", WorkspaceHome.Anyone), Fixture("codex", WorkspaceHome.Agent("codex")),
             Fixture("alpha", WorkspaceHome.Folder(project)), Fixture("outer", WorkspaceHome.Folder(_output)), Fixture("mine", "")];
         Check(WorkspaceHome.Decide(set, Path.Combine(project, "src"), "codex-mcp-client", _ => false).Existing == "alpha",
             "The deepest matching project folder beats a shallower folder, a named agent and a shared workspace");
-        Check(WorkspaceHome.Decide(set, Path.GetTempPath(), "codex-mcp-client", _ => false).Existing == "codex",
-            "A workspace kept for Codex takes Codex outside any assigned folder");
-        Check(WorkspaceHome.Decide(set, Path.GetTempPath(), "another-agent", _ => false).Existing == "shared",
-            "Any other agent goes to the shared workspace and never to one kept for the owner");
-        StoredWorkspace[] pair = [Fixture("busy", WorkspaceHome.Anyone), Fixture("free", WorkspaceHome.Anyone)];
-        Check(WorkspaceHome.Decide(pair, "", "x", id => id == "busy").Existing == "free",
-            "Between shared workspaces an agent goes to the one nobody is using");
+        Check(WorkspaceHome.Decide(set, "", "codex-mcp-client", _ => false).Rule == WorkspaceHome.Scratch,
+            "Legacy agent-specific rules do not intercept Scratch");
+        Check(WorkspaceHome.Decide(set, "", "another-agent", _ => false).Existing is null,
+            "Unrelated shared and private workspaces are left alone");
+        StoredWorkspace[] pair = [Fixture("scratch", WorkspaceHome.Scratch), Fixture("free", WorkspaceHome.Anyone)];
+        Check(WorkspaceHome.Decide(pair, "", "x", id => id == "scratch").Existing == "scratch",
+            "Scratch keeps its identity even when another agent is using it");
 
         // End to end: a real bridge process, the real router, a real desktop.
-        StoredWorkspace shared = WorkspaceStore.Create("Shared desk");
+        StoredWorkspace shared = WorkspaceHome.EnsureScratch();
         WorkspaceAccessStore.Write(shared.Id, new WorkspaceAccessPolicy { PrewarmBrowser = false });
-        WorkspaceHome.Set(shared.Id, WorkspaceHome.Anyone);
         WorkspaceRouter.Start();
         Check(File.Exists(WorkspaceAccessStore.RouterTicket) && File.Exists(WorkspaceConnections.Bridge),
             "Deskweave publishes one connection for every outside agent, reached through its packaged bridge");
         var start = new ProcessStartInfo(WorkspaceConnections.Bridge)
         {
-            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetTempPath(),
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
         };
+        start.Environment.Remove("CLAUDE_PROJECT_DIR");
         start.ArgumentList.Add("--workspace");
         start.ArgumentList.Add(WorkspaceAccessStore.RouterTicket);
         using Process bridge = Process.Start(start) ?? throw new InvalidOperationException("The bridge did not start.");
@@ -478,6 +479,7 @@ static class Program
         WorkspaceRouter.Stop();
         Check(!File.Exists(WorkspaceAccessStore.RouterTicket), "Quitting Deskweave withdraws the agent connection");
         sharedRuntime.Dispose();
+        await RoutingChecks.Run(_output);
     }
 
     static void InvokePanel(AgentWorkspacesPanel panel, string method, params object?[] args) =>

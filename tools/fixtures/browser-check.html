@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Deskweave browser check</title>
+<style>
+  body { margin: 48px; font: 18px/1.5 "Segoe UI", sans-serif; background: #f7f8fa; color: #15181d; }
+  h1 { font-size: 28px; font-weight: 600; }
+  button { padding: 10px 18px; border: 0; border-radius: 6px; background: #2e6bf6; color: white; font: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid #15181d; outline-offset: 3px; }
+</style>
+<h1>Deskweave browser check</h1>
+<p>This local test page is running inside the agent workspace.</p>
+<p id="result" role="status">Waiting for workspace input.</p>
+<button id="verify" onclick="document.getElementById('result').textContent='Workspace click verified.'">Test the workspace</button>
+</html>

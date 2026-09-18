@@ -1,11 +1,6 @@
 # Deskweave
 
-Linux/Mac hardware testing now has a separate [portable test kit](portable/README.md):
-Linux virtual desktops and native Chromium browser workspaces behind the same local viewer.
-See its [validation record](portable/VALIDATION.md) for actual platform coverage. This does
-not replace the Windows app described below.
-
-**Your agents. Room to work.** A native Windows app for local agent workspaces.
+**Agents get their own screen. You keep yours.** A native Windows app for local agent testing.
 
 Deskweave is an independent private copy of HiveMind Agent Workspaces. Its source,
 dependencies, native shell, and local publishing tools live in this folder. You can move
@@ -15,48 +10,38 @@ the whole folder to another checkout without linking back to HiveMind's source t
 
 The private **0.2.0** package is available: double-click **Start Deskweave.cmd**, or open
 **out/Deskweave.exe** directly. It includes the .NET desktop runtime and MCP bridge.
-The 76-check native UI gate and actual published-app appearance/lifecycle checks passed
-on the owner's PC. Exact hashes, current scope and earlier engine/browser evidence are
-recorded separately in [VALIDATION.md](VALIDATION.md).
+Exact package hashes, test results and remaining MVP gates are in [VALIDATION.md](VALIDATION.md).
 
-Use **Appearance** in the top toolbar to choose **Windows** (cool graphite and blue),
-**Mac** (silver and light), or **Linux** (graphite and mint). Your choice is saved; Windows
-is the default on this PC. Mac moves the existing window controls to the left as traffic
-lights; Windows and Linux keep them on the right. All three looks use the same Windows
-workspace engine and preserve running work when switched.
+First launch detects **Claude Code** and **Codex**. **Start** consents to connecting the enabled
+agents; closing it connects nothing. Settings > Agents can connect later. Already-open agent
+sessions may need reconnecting. No Deskweave sign-in is required.
 
-**New workspace** creates one and starts its computer. To let an outside agent in, click
-the link icon in the rail and connect **Claude Code** or **Codex** (or copy the setup for any
-other MCP client). A connected agent gets a workspace the first time it uses one:
+A connected agent's first workspace tool call creates or reuses its project's workspace.
+Subfolders of a repository share it; nested repositories and Git worktrees get their own.
+Without a repository, Deskweave recognizes common project manifests. Work outside a project
+goes to one **Scratch** workspace. Connecting or listing tools starts no computer.
+Private workspaces and old records are retained, never reassigned automatically.
 
-- a workspace kept for its project folder, if there is one;
-- else one kept for that agent (**Only Claude Code**, **Only Codex**);
-- else a shared one (**Any agent**), the idle one first;
-- else a new workspace named after its folder and kept for it, so the next session and any
-  other agent working there land in the same place.
+The connection tells agents to use Deskweave for their own browser/GUI work and app testing.
+An explicit request to open a page for you in your own browser stays a desktop request through
+the agent's normal approved tools. Code, builds, unit tests and ordinary files stay in those
+tools too. These are connected-agent instructions, not interception of arbitrary programs;
+real model adoption remains a separate acceptance gate.
 
-Right-click a tile and choose **Agents** to change this. **Just me** keeps outside agents
-out. Several agents in one workspace take turns; one that goes quiet for 30 seconds hands
-over. Clicking a workspace's screen pauses whichever agent is working; it carries on 20
-seconds after you stop. At most one running workspace per 3 GB of memory (2 to 10) is started
-for agents; past that they are told to ask you. Nothing is asked at first run and nothing
-needs a sign-in; the built-in Claude supervisor keeps its own setup.
+- **Corner window:** appears for activity, fades when quiet, and stays while hovered or pinned.
+  Move it by its name pill and resize from its edges. Click the screen to use it while the
+  agent waits. The preview stays on the same workspace while your pointer is over it.
+- **Hub:** shows working and recent workspaces. Open one for its screen, history and files.
+- **Settings:** agent connections, light/dark theme, corner visibility, startup and available
+  privacy controls. Off / Automatic / All agent windows is planned, not yet a visible choice.
+- **Tray:** show the corner, pause/resume every agent, open Settings, or quit. Closing the hub
+  hides it; quitting ends running desktops while retaining saved files.
 
-- **Overview:** see actual workspaces, running state, attention, and desktop previews.
-- **Workspace actions:** rename a tile, open its folder, or delete it. Deletion asks for
-  confirmation and stops that workspace's desktop before removing its saved files.
-- **Focus:** open a workspace's desktop, conversation, controls, and connection settings.
-- **Compact:** keep the monitor beside another app. Collapse it to a small bar, or pin it
-  on top. Expanding returns to the same workspaces.
-- **Window memory:** full and compact positions, size, pin state, view mode, and selected
-  workspace are saved and restored.
-- **Close:** hide to the notification area and keep work running. **Quit Deskweave** in
-  the tray ends this app and its running desktops; saved files remain.
-
-Keyboard: **Ctrl+N** creates, **Ctrl+F** searches workspaces, **Ctrl+1** opens overview,
-**Ctrl+2** opens the selected workspace, **Ctrl+Shift+M** switches compact mode, and
-**F1** opens help. The optional engine corner view has a separate **Ctrl+Alt+D** shortcut
-when enabled.
+The default pause shortcut is **Ctrl+Alt+P** (Settings shows the actual shortcut if Windows
+already uses it). Sleep/wake, waiting at capacity, complete history/accounts behavior, and
+final accessibility and scaling acceptance remain on the MVP plan. This is a private build,
+not a signed public installer. The separate [portable test kit](portable/README.md) is outside
+this Windows product's delivery.
 
 ## Browser work
 

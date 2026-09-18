@@ -55,7 +55,7 @@ public partial class MainWindow : Window, IDisposable
     void Window_Loaded(object sender, RoutedEventArgs e)
     {
         // Never empty (brief A.4): a fresh install always has something under Recent to show.
-        if (WorkspaceStore.All().Count == 0) WorkspaceStore.Create("Scratch");
+        WorkspaceHome.EnsureScratch();
         RestorePreferences();
         _hub.Refresh();
         UpdateVisibleWork();

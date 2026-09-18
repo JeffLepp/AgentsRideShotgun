@@ -13,6 +13,7 @@ namespace HiveMind.AgentWorkspaces;
 public static class WorkspaceHome
 {
     public const string Anyone = "*";
+    public const string Scratch = "scratch";
     const string FolderPrefix = "folder:";
     const string AgentPrefix = "agent:";
 
@@ -22,7 +23,8 @@ public static class WorkspaceHome
 
     /// <summary>The rule in a word or two, for the tile and the menus. Empty for "just me".</summary>
     public static string Label(string rule) =>
-        rule == Anyone ? "Any agent"
+        rule == Scratch ? "Scratch"
+        : rule == Anyone ? "Any agent"
         : IsFolder(rule) ? Leaf(rule[FolderPrefix.Length..])
         : rule.StartsWith(AgentPrefix, StringComparison.Ordinal) ? DisplayName(rule[AgentPrefix.Length..])
         : string.Empty;
@@ -62,59 +64,78 @@ public static class WorkspaceHome
     internal sealed record Route(string? Existing, string Name, string Rule);
 
     /// <summary>
-    /// The best fit for an agent working in <paramref name="cwd"/> that calls itself
-    /// <paramref name="client"/>. A folder beats a named agent beats "any agent"; a deeper folder
-    /// beats a shallower one; among shared workspaces an idle one beats a busy one. When nothing
-    /// fits, a new workspace kept for the agent's project folder, so its next session and any other
-    /// agent working there land in the same place.
+    /// Automatic placement is stable across agent apps and activity: one workspace per project,
+    /// and one Scratch outside projects. Legacy agent/shared rules must not swallow new projects.
+    /// An empty rule is always private, even on a record named Scratch.
     /// </summary>
     internal static Route Decide(IEnumerable<StoredWorkspace> all, string cwd, string client, Func<string, bool> busy)
     {
-        string here = Normal(cwd);
-        StoredWorkspace? best = null;
-        int bestFit = 0;
-        foreach (StoredWorkspace workspace in all)
-        {
-            string rule = workspace.Agents;
-            int fit = IsFolder(rule) ? (Inside(here, rule[FolderPrefix.Length..]) ? 1000 + rule.Length : 0)
-                : rule.StartsWith(AgentPrefix, StringComparison.Ordinal)
-                    ? (client.Length > 0 && rule[AgentPrefix.Length..] == Key(client) ? 100 : 0)
-                : rule == Anyone ? (busy(workspace.Id) ? 1 : 2)
-                : 0;
-            if (fit > bestFit) { best = workspace; bestFit = fit; }
-        }
-        if (best is not null) return new(best.Id, best.Name, best.Agents);
-        string project = ProjectFolder(here);
-        if (project.Length > 0) return new(null, Leaf(project), Folder(project));
-        if (client.Length > 0) return new(null, DisplayName(client), Agent(client));
-        return new(null, "Agents", Anyone);
+        string project = ProjectFolder(cwd);
+        string rule = project.Length > 0 ? Folder(project) : Scratch;
+        StoredWorkspace? existing = all
+            .Where(w => string.Equals(w.Agents, rule, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(w => w.Created).ThenBy(w => w.Id, StringComparer.Ordinal).FirstOrDefault();
+        return existing is not null ? new(existing.Id, existing.Name, existing.Agents)
+            : new(null, project.Length > 0 ? Leaf(project) : "Scratch", rule);
+    }
+
+    /// <summary>Creates only the saved Scratch record, never a desktop, browser or agent.</summary>
+    internal static StoredWorkspace EnsureScratch()
+    {
+        StoredWorkspace? existing = WorkspaceStore.All().FirstOrDefault(w => w.Agents == Scratch);
+        if (existing is not null) return existing;
+        StoredWorkspace created = WorkspaceStore.Create("Scratch");
+        return WorkspaceStore.Update(created.Id, w => w with { Agents = Scratch }) ?? created;
     }
 
     /// <summary>
-    /// The folder an agent's work is about, or empty when its folder says nothing: home, a drive,
-    /// Desktop, Documents, Windows, Program Files or Deskweave's own folders. One workspace for every
-    /// agent started from home would pile unrelated work into one place.
+    /// The nearest repository (including a worktree's .git file), else the nearest project
+    /// manifest. A repository wins over its package subfolders, so monorepos stay together;
+    /// a nested repository is its own project. Broad personal/system roots are never projects.
     /// </summary>
     internal static string ProjectFolder(string cwd)
     {
         string full = Normal(cwd);
         if (full.Length == 0 || !Directory.Exists(full)) return string.Empty;
-        if (string.Equals(Path.GetPathRoot(full + "\\")?.TrimEnd('\\'), full, StringComparison.OrdinalIgnoreCase)) return string.Empty;
-        foreach (Environment.SpecialFolder vague in new[] { Environment.SpecialFolder.UserProfile,
-            Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.MyDocuments })
-            if (full.Equals(Normal(Environment.GetFolderPath(vague)), StringComparison.OrdinalIgnoreCase)) return string.Empty;
         foreach (string owned in new[] { Environment.GetFolderPath(Environment.SpecialFolder.Windows),
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             AppContext.BaseDirectory, WorkspaceStore.Root, WorkspaceAccessStore.Root })
             if (Inside(full, Normal(owned))) return string.Empty;
-        return full;
+        string? manifest = null;
+        try
+        {
+            for (DirectoryInfo? folder = new(full); folder is not null && !BroadRoot(folder.FullName); folder = folder.Parent)
+            {
+                string path = folder.FullName;
+                if (Directory.Exists(Path.Combine(path, ".git")) || File.Exists(Path.Combine(path, ".git"))
+                    || Directory.Exists(Path.Combine(path, ".hg")) || Directory.Exists(Path.Combine(path, ".svn")))
+                    return Normal(path);
+                if (manifest is null && HasProjectManifest(path)) manifest = Normal(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // A missing or unreadable parent is not a reason to route into a guessed project.
+            return string.Empty;
+        }
+        return manifest ?? string.Empty;
     }
+
+    static bool BroadRoot(string path) => string.Equals(Normal(path), Normal(Path.GetPathRoot(path) ?? ""), StringComparison.OrdinalIgnoreCase)
+        || new[] { Environment.SpecialFolder.UserProfile, Environment.SpecialFolder.DesktopDirectory,
+            Environment.SpecialFolder.MyDocuments }.Any(f => string.Equals(Normal(path), Normal(Environment.GetFolderPath(f)), StringComparison.OrdinalIgnoreCase));
+
+    static bool HasProjectManifest(string path) => new[] { "package.json", "pyproject.toml", "Cargo.toml", "go.mod",
+        "pom.xml", "build.gradle", "build.gradle.kts", "CMakeLists.txt", "composer.json", "Gemfile" }
+        .Any(name => File.Exists(Path.Combine(path, name)))
+        || Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly).Any(file =>
+            Path.GetExtension(file).ToLowerInvariant() is ".sln" or ".slnx" or ".csproj" or ".fsproj" or ".vbproj");
 
     static string Normal(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return string.Empty;
-        try { return Path.GetFullPath(path.Trim()).TrimEnd('\\', '/'); }
+        try { return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim())); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return string.Empty; }
     }
 

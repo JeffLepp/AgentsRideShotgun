@@ -197,7 +197,10 @@ internal static class WorkspacePeekHost
             .Where(r => r is not null).Select(r => r!).ToList();
         List<WorkspaceRuntime> busy = ordered.Where(Busy).ToList();
         WorkspaceRuntime? front = busy.Count > 0 ? busy[0] : ordered.FirstOrDefault();
-        WorkspaceRuntime? back = busy.Count > 1 ? busy[1] : null;
+        // Never replace the screen under the owner's pointer or mid-drag when another agent acts.
+        if (_window is { Hovered: true } or { Manipulating: true }
+            && ordered.FirstOrDefault(r => r.Id == _frontId) is { } held) front = held;
+        WorkspaceRuntime? back = busy.FirstOrDefault(r => r.Id != front?.Id);
         return (front, back);
     }
 
@@ -207,7 +210,7 @@ internal static class WorkspacePeekHost
     {
         if (!_started || _owner is null) return;
         (WorkspaceRuntime? front, WorkspaceRuntime? back) = PickTwo();
-        bool held = _window?.Hovered == true || _pausedAll && front is not null;
+        bool held = _window?.Hovered == true || _window?.Manipulating == true || _pausedAll && front is not null;
         bool busy = front is not null && Busy(front);
         TimeSpan quiet = DateTimeOffset.Now - _stirred;
         TimeSpan fade = TimeSpan.FromSeconds(5);
@@ -237,13 +240,19 @@ internal static class WorkspacePeekHost
         Size card = WorkspacePeekPlacement.Card(_settings);
         bool grown = card.Width > WorkspacePeekPlacement.SmallWidth + 0.5;
         if (grown) _lastGrownWidth = card.Width;
-        window.Configure(card, back is not null, grown, !grown && _lastGrownWidth is not null);
-        window.Place(PlaceRect(window.VisibleSize));
+        if (!window.Manipulating)
+        {
+            window.Configure(card, back is not null, grown, !grown && _lastGrownWidth is not null);
+            // Saved positions describe the front card, not the union with a temporary back card.
+            Rect frontRect = PlaceRect(card);
+            double extra = window.VisibleSize.Height - card.Height;
+            window.Place(new Rect(frontRect.Left, frontRect.Top - extra, card.Width, window.VisibleSize.Height));
+        }
         window.SetPinned(_settings.CornerPinned);
 
         (string message, PeekTone tone) = Status(front);
         window.Describe(WorkspaceName(front), message, tone);
-        window.SetActive((front.Agent?.State ?? MissionState.Idle) == MissionState.Working);
+        window.SetActive(front.Agent?.State == MissionState.Working || front.Access?.HasDriver == true);
         if (back is not null)
         {
             (string backMessage, PeekTone backTone) = Status(back);
@@ -406,6 +415,7 @@ internal static class WorkspacePeekHost
     {
         if (r.Access?.Handoffs.All.Any(request => request.State == "pending") == true)
             return (AgentName(r) + " wants you", PeekTone.Attention);
+        if (r.Access?.HasDriver == true) return (AgentName(r), PeekTone.Working);
         MissionState state = r.Agent?.State ?? MissionState.Idle;
         if (state == MissionState.Done) return (AgentName(r), PeekTone.Quiet);
         return state switch

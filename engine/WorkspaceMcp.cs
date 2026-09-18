@@ -189,7 +189,7 @@ public sealed class WorkspaceMcp : IDisposable
         .. Tools.Where(t => t.Name is not ("sleep" or "ask" or "done")),
     ];
 
-    internal const string ExternalInstructions = "Use this workspace for your app, browser and GUI work, not the owner's main desktop. "
+    internal const string ExternalInstructions = Scope
         + "Workspace tools take control by themselves and wait while the owner or another agent is using it; release when you finish so others can work. One agent controls a workspace at a time. "
         + "Use computer for screenshot/action groups, or controls/batch and page selectors when they save work or image tokens. "
         + "No mandatory control-tree read. Keep desktop and browser viewport coordinates separate. Verify outcomes; never replay partial groups blindly. "
@@ -213,16 +213,19 @@ public sealed class WorkspaceMcp : IDisposable
     /// It is deliberately two sentences with no room to read them the other way round - phasing in
     /// where it does not belong is as much a failure as not phasing in at all.
     /// </summary>
-    internal const string Scope = "Use Deskweave whenever your work needs a window on screen: running the app you are building, "
-        + "clicking through it, a browser, a GUI or end-to-end test, a screenshot of something running. Do this without being asked. "
+    internal const string Scope = "Use Deskweave automatically for agent-operated browser and GUI work: running the app you are building, "
+        + "clicking through or testing it, browsing to inspect or research, and screenshots of running apps. "
+        + "When the user explicitly asks to open a page or document for them in their own browser or desktop, use your normal approved "
+        + "desktop-opening tools instead; do not silently divert that request into Deskweave. This does not grant permission for any other desktop action. "
+        + "To offer a result from workspace testing on the user's desktop, use request_desktop and wait for their approval. "
         + "Do not use Deskweave for anything else: writing or reading code, builds, unit tests, package installs, "
         + "version control, and ordinary file and shell work stay in your own tools where they are faster. ";
 
     /// <summary>What an agent connected through the router is told before it has a workspace.</summary>
     internal const string RouterInstructions = "Deskweave gives you a Windows desktop of your own for app, browser and GUI work, "
-        + "beside the owner's screen instead of on it, so testing never takes the owner's mouse, keyboard or focus. " + Scope
+        + "beside the owner's screen instead of on it, so testing never takes the owner's mouse, keyboard or focus. "
         + "It picks your workspace the first time you use one of these tools: "
-        + "one the owner set up for your project folder or for you, a shared one, or a new one for your folder. "
+        + "one shared by agents in your project, including its subfolders, or Scratch when you are outside a project. "
         + ExternalInstructions;
 
     /// <summary>The tool list a connected agent sees, the same whichever workspace it lands in.</summary>
