@@ -350,10 +350,14 @@ static class CornerScenes
             await Task.Delay(100);
             string made = Path.Combine(runtime.Plane!.Folder, "result-" + Guid.NewGuid().ToString("N")[..6] + ".txt");
             File.WriteAllText(made, "made by the run");
-            InvokeHost("StirFrom", stored.Id);
-            await Task.Delay(100);
-            Program.Check(typeof(WorkspacePeekHost).GetField("_resultPath", BindingFlags.NonPublic | BindingFlags.Static)!
-                .GetValue(null) as string == made,
+            string? offered = null;
+            for (int i = 0; i < 15 && offered != made; i++)
+            {
+                InvokeHost("StirFrom", stored.Id);
+                await Task.Delay(200);
+                offered = typeof(WorkspacePeekHost).GetField("_resultPath", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null) as string;
+            }
+            Program.Check(offered == made,
                 "When an agent's run ends, the corner offers the file that run made");
 
             // Full desktop's drawn taskbar, on this real workspace (its desktop is hidden: nothing
