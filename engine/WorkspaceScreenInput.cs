@@ -135,6 +135,15 @@ public sealed class WorkspaceScreenInput : IDisposable
         if (_held is not null && _deadline is { } deadline && _now() >= deadline) Release();
     }
 
+    /// <summary>
+    /// The owner acted on this workspace from beside the picture (its taskbar): the agent waits,
+    /// and carries on as it does after the pointer leaves the screen.
+    /// </summary>
+    internal void Touch()
+    {
+        if (_runtime()?.Plane is { } plane) { TakeOver(plane); Acted(); }
+    }
+
     internal void UseClockForTests(Func<DateTimeOffset> now) => _now = now;
     internal void SimulateEnterForTests() => Enter();
     internal void SimulateLeaveForTests() => Leave();

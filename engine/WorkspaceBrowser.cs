@@ -31,10 +31,30 @@ public sealed partial class WorkspaceBrowser : IDisposable
     /// Edge is last on purpose and matters most: it ships with Windows, it is Chromium, and it speaks
     /// the same DevTools protocol. It is what makes the browser layer work on a PC where nothing has
     /// been installed. Resolved once - a browser does not move while HiveMind is running.
+    ///
+    /// Finding nothing is remembered only briefly. Deskweave starts with Windows and stays in the
+    /// tray, so a fresh PC with no browser installs one while we are running; a permanent miss left
+    /// the browser layer dead until the app was restarted, with no hint why. Looking again is a
+    /// handful of registry reads and File.Exists calls.
     /// </summary>
-    public static string ChromePath => _browser ??= FindBrowser() ?? string.Empty;
+    public static string ChromePath
+    {
+        get
+        {
+            lock (Gate)
+            {
+                if (_browser is { Length: > 0 }) return _browser;
+                if (_browser is not null && Environment.TickCount64 < _lookAgainAt) return _browser;
+                _browser = FindBrowser() ?? string.Empty;
+                if (_browser.Length == 0) _lookAgainAt = Environment.TickCount64 + 30_000;
+                return _browser;
+            }
+        }
+    }
 
+    static readonly Lock Gate = new();
     static string? _browser;
+    static long _lookAgainAt;
 
     static string? FindBrowser()
     {

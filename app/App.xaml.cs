@@ -15,7 +15,7 @@ public partial class App : Application
     Mutex? _instance;
     EventWaitHandle? _activate;
     RegisteredWaitHandle? _activationWait;
-    System.Windows.Forms.NotifyIcon? _tray;
+    TrayIcon? _tray;
     bool _ownsInstance;
     bool _quitting;
     bool _hiddenNotice;
@@ -98,6 +98,7 @@ public partial class App : Application
 
     void CreateTray()
     {
+        if (_tray is not null || !_ownsInstance || _quitting) return;
         var menu = TrayMenu.Build(
             () => Dispatcher.BeginInvoke(ShowWorkspace),
             () => Dispatcher.BeginInvoke(ModuleEntry.RequestShowCorner),
@@ -108,24 +109,18 @@ public partial class App : Application
         ModuleEntry.AllPausedChanged += _refreshTrayPause;
         using var source = GetResourceStream(new Uri("pack://application:,,,/Assets/Deskweave.ico")).Stream;
         using var icon = new System.Drawing.Icon(source);
-        _tray = new System.Windows.Forms.NotifyIcon
-        {
-            Text = "Deskweave",
-            Icon = (System.Drawing.Icon)icon.Clone(),
-            ContextMenuStrip = menu,
-            Visible = true
-        };
-        _tray.DoubleClick += (_, _) => Dispatcher.BeginInvoke(ShowWorkspace);
+        _tray = new TrayIcon(icon, menu, TrayIcon.IdentityFor(Environment.ProcessPath!));
+        _tray.OpenRequested += () => Dispatcher.BeginInvoke(ShowWorkspace);
         // An agent needs the owner and the corner can't show it. Clicking brings the corner up
         // with the question on it, even when Settings has the corner off, as the tray's own item does.
         _attention = (title, text, workspace, request) => Dispatcher.BeginInvoke(() =>
         {
             _infoShowing = false;
             _attentionFor = (workspace, request);
-            _tray?.ShowBalloonTip(10000, title, text, System.Windows.Forms.ToolTipIcon.Info);
+            if (!_quitting) _tray?.ShowBalloonTip(title, text);
         });
         ModuleEntry.AttentionNeeded += _attention;
-        _tray.BalloonTipClicked += (_, _) =>
+        _tray.BalloonClicked += () =>
         {
             if (_infoShowing) { _infoShowing = false; return; }
             var clicked = _attentionFor;
@@ -141,7 +136,7 @@ public partial class App : Application
     internal void Tell(string title, string text)
     {
         _infoShowing = true;   // clicking it opens nothing
-        _tray?.ShowBalloonTip(8000, title, text, System.Windows.Forms.ToolTipIcon.Info);
+        if (!_quitting) _tray?.ShowBalloonTip(title, text);
     }
 
     void WindowClosing(object? sender, CancelEventArgs e)
@@ -151,9 +146,8 @@ public partial class App : Application
         if (_hiddenNotice || _tray is null) return;
         _hiddenNotice = true;
         _infoShowing = true;
-        _tray.ShowBalloonTip(3500, "Deskweave is still running",
-            "Agents can keep working. Quit from this icon.",
-            System.Windows.Forms.ToolTipIcon.Info);
+        _tray.ShowBalloonTip("Deskweave is still running",
+            "Agents can keep working. Quit from this icon.");
     }
 
     void ShowWorkspace()
@@ -185,6 +179,13 @@ public partial class App : Application
         _quitting = true;
         _activationWait?.Unregister(null);
         _activate?.Dispose();
+        if (_refreshTrayPause is not null) ModuleEntry.AllPausedChanged -= _refreshTrayPause;
+        if (_attention is not null) ModuleEntry.AttentionNeeded -= _attention;
+        // Remove the shell entry while this instance still owns the lock, even if engine cleanup
+        // is slow or fails. A new process must never inherit an icon the old process can delete.
+        try { _tray?.Dispose(); }
+        catch (Exception failure) { LogFailure(failure); }
+        _tray = null;
         if (_ownsInstance)
         {
             try { (MainWindow as IDisposable)?.Dispose(); }
@@ -194,15 +195,6 @@ public partial class App : Application
             finally { _instance?.ReleaseMutex(); }
         }
         _instance?.Dispose();
-        if (_refreshTrayPause is not null) ModuleEntry.AllPausedChanged -= _refreshTrayPause;
-        if (_attention is not null) ModuleEntry.AttentionNeeded -= _attention;
-        if (_tray is not null)
-        {
-            _tray.Visible = false;
-            _tray.ContextMenuStrip?.Dispose();
-            _tray.Icon?.Dispose();
-            _tray.Dispose();
-        }
         base.OnExit(e);
     }
 

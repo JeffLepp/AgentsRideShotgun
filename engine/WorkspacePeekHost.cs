@@ -42,8 +42,10 @@ internal static class WorkspacePeekHost
     /// under it. Null when the corner is not pinned or shows nothing.</summary>
     internal static string? PinnedOn => _started && _settings.CornerPinned ? _frontId : null;
     static DateTimeOffset _stirred = DateTimeOffset.MinValue;
-    static BitmapSource? _background;
-    static DateTimeOffset _backgroundAt;
+    // The last whole-screen picture, tagged with the workspace it was taken on. Only ever written
+    // here on the UI thread, from what the capture hands back; the tag, not the timing of this
+    // assignment, is what keeps it from being paired with another workspace's window.
+    static WorkspacePeekCapture.Cached? _background;
     static bool _started, _dismissed, _summoned, _drawing, _hooked, _pausedAll;
 
     // Remembered only for this run: the width the owner last grew it to, so the shrink button can
@@ -187,12 +189,12 @@ internal static class WorkspacePeekHost
 
     static void Touch(string id) { _recent.Remove(id); _recent.Insert(0, id); }
 
-    /// <summary>Changes which workspace is on screen, dropping the cached whole frame whenever it
-    /// really changes - otherwise the new workspace's first in-use tick would draw its window over
-    /// the previous one's stale desktop until the once-a-second background refresh caught up.</summary>
+    /// <summary>Changes which workspace is on screen, letting go of the cached whole frame whenever
+    /// it really changes so the old screen is not held in memory. A tick that lands late cannot use
+    /// it either way: a background carries the workspace it was taken on and is only reused there.</summary>
     static void SetFront(string? id)
     {
-        if (_frontId != id) { _background = null; _backgroundAt = DateTimeOffset.MinValue; }
+        if (_frontId != id) _background = null;
         _frontId = id;
     }
 
@@ -525,18 +527,20 @@ internal static class WorkspacePeekHost
         if (!inUse && WorkspacePeekCapture.OnBattery()) return;
         _drawing = true;
         string capturedFor = id;
+        WorkspacePeekCapture.Cached? cached = _background;
         Task.Run(() =>
         {
             // Any capture failure - the desktop tearing down mid-shot, a window closing between the
             // list and the print, anything Windows hands back - costs this one tick, never the UI
             // dispatcher: there is always a next tick.
-            try { return WorkspacePeekCapture.Take(desktop, ref _background, ref _backgroundAt, inUse); }
+            try { return WorkspacePeekCapture.Take(desktop, capturedFor, cached, inUse); }
             catch (Exception) { return default; }
         }).ContinueWith(taken => owner.BeginInvoke(() =>
         {
             _drawing = false;
             WorkspacePeekCapture.Frame frame = taken.Result;
             if (frame.Background is null || capturedFor != _frontId) return;
+            _background = frame.Cache;
             if (_window is not { Watching: true } current) return;
             current.ShowFrame(frame.Background);
             if (frame.Patch is { } patch) current.ShowFramePatch(patch, frame.PatchX, frame.PatchY);

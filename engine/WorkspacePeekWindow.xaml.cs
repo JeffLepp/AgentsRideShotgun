@@ -90,7 +90,19 @@ public partial class WorkspacePeekWindow : Window
         _input?.Dispose();
         _input = new WorkspaceScreenInput(LiveScreen, runtime);
         _input.OwnerActed += () => OwnerActed?.Invoke();
+        if (_taskbar is not null) CardBody.Children.Remove(_taskbar);
+        _runtime = runtime;
+        _taskbar = new WorkspaceTaskbar(runtime, () => _input?.Touch(), 30) { Visibility = Visibility.Collapsed };
+        // Above the live picture and the activity line, under the pill, actions, chip, sheet and toast.
+        CardBody.Children.Insert(CardBody.Children.IndexOf(ActivityLine) + 1, _taskbar);
+        UpdateChrome();
     }
+
+    WorkspaceTaskbar? _taskbar;
+    Func<WorkspaceRuntime?>? _runtime;
+
+    /// <summary>The strip, for the gate.</summary>
+    internal WorkspaceTaskbar? Taskbar => _taskbar;
 
     /// <summary>Gives back whatever the input is holding. Called before the window moves to another
     /// workspace or goes away, so no agent is left waiting on a view that stopped looking.</summary>
@@ -362,6 +374,13 @@ public partial class WorkspacePeekWindow : Window
         Chip.Visibility = !dropping && !string.IsNullOrEmpty(ChipText.Text)
             ? Visibility.Visible : Visibility.Collapsed;
         Pill.Margin = new Thickness(show ? 22 : 8, 8, 0, 0);
+        // The taskbar comes with the hover chrome: a permanent strip at this size would eat the view.
+        bool strip = show && _taskbar is not null && _runtime?.Invoke() is not null
+            && AppSettingsStore.Current.AgentScreen == AgentScreenLook.Full && Sheet.Visibility != Visibility.Visible;
+        if (_taskbar is not null) _taskbar.Visibility = strip ? Visibility.Visible : Visibility.Collapsed;
+        double lift = strip ? _taskbar!.Height : 0;
+        Chip.Margin = new Thickness(8, 0, 0, 9 + lift);
+        Toast.Margin = new Thickness(0, 0, 0, 10 + lift);
     }
 
     void SetDropOverlay(bool shown)

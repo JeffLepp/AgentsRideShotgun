@@ -30,7 +30,7 @@ static class Program
                         using (RegistryKey? run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
                             run?.DeleteValue("Deskweave", false);
                         ProductContext.Configure("Deskweave");
-                        ModuleEntry.Uninstall(removeData: false);
+                        ModuleEntry.Uninstall();
                     }
                     catch { /* an uninstall that throws is worse than one that misses something */ }
                 })

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
@@ -92,8 +93,42 @@ public static class WorkspaceHome
     /// The nearest repository (including a worktree's .git file), else the nearest project
     /// manifest. A repository wins over its package subfolders, so monorepos stay together;
     /// a nested repository is its own project. Broad personal/system roots are never projects.
+    /// Bounded: this decides on the UI thread while a connected agent waits for its first tool
+    /// call, and on a disconnected mapped drive or an unreachable UNC host every folder test below
+    /// sits out the SMB timeout - 20 to 45 seconds, per level of the walk, with nothing to cancel.
+    /// Past the bound the answer is no project, which is already what an unreadable parent or an
+    /// owned folder gets, and <see cref="Decide"/> reads that as Scratch.
     /// </summary>
     internal static string ProjectFolder(string cwd)
+    {
+        string found = string.Empty;
+        ExceptionDispatchInfo? failed = null;
+        long until = Environment.TickCount64 + (long)ProjectBound.TotalMilliseconds;
+        // One probe at a time, and the bound covers the queue as well as the walk. A wedged
+        // filesystem call cannot be cancelled, so the one thread left behind is waited out where a
+        // thread per call would pile up; a healthy probe holds this for microseconds.
+        if (!_probing.Wait(ProjectBound)) return string.Empty;
+        var probe = new Thread(() =>
+        {
+            try { found = Identify(cwd); }
+            catch (Exception ex) { failed = ExceptionDispatchInfo.Capture(ex); }
+            finally { _probing.Release(); }
+        })
+        { IsBackground = true, Name = "Deskweave project folder" };
+        probe.Start();
+        if (!probe.Join((int)Math.Max(0, until - Environment.TickCount64))) return string.Empty;
+        // Whatever it could not read is still the caller's to handle, on the caller's thread.
+        failed?.Throw();
+        return found;
+    }
+
+    /// <summary>How long any caller waits for a folder to identify itself before settling for Scratch.</summary>
+    static readonly TimeSpan ProjectBound = TimeSpan.FromSeconds(2);
+
+    static readonly SemaphoreSlim _probing = new(1, 1);
+
+    /// <summary>The walk itself, off the caller's thread so a stalled drive cannot hold it.</summary>
+    static string Identify(string cwd)
     {
         string full = Normal(cwd);
         if (full.Length == 0 || !Directory.Exists(full)) return string.Empty;
@@ -126,11 +161,20 @@ public static class WorkspaceHome
         || new[] { Environment.SpecialFolder.UserProfile, Environment.SpecialFolder.DesktopDirectory,
             Environment.SpecialFolder.MyDocuments }.Any(f => string.Equals(Normal(path), Normal(Environment.GetFolderPath(f)), StringComparison.OrdinalIgnoreCase));
 
-    static bool HasProjectManifest(string path) => new[] { "package.json", "pyproject.toml", "Cargo.toml", "go.mod",
-        "pom.xml", "build.gradle", "build.gradle.kts", "CMakeLists.txt", "composer.json", "Gemfile" }
-        .Any(name => File.Exists(Path.Combine(path, name)))
-        || Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly).Any(file =>
-            Path.GetExtension(file).ToLowerInvariant() is ".sln" or ".slnx" or ".csproj" or ".fsproj" or ".vbproj");
+    static readonly string[] ManifestNames = new[] { "package.json", "pyproject.toml", "Cargo.toml", "go.mod",
+        "pom.xml", "build.gradle", "build.gradle.kts", "CMakeLists.txt", "composer.json", "Gemfile" };
+
+    static readonly string[] ManifestExtensions = new[] { ".sln", ".slnx", ".csproj", ".fsproj", ".vbproj" };
+
+    // Ask Windows for those five extensions instead of listing the folder and sorting it out here.
+    // The walk runs this on every parent level, and reading every name costs the whole listing in a
+    // downloads-sized folder and a round trip per level on a network path. A three-letter pattern
+    // matches more than it looks like ("*.sln" also finds .slnx, and old 8.3 aliases), so the name
+    // that came back is checked again and still only these five count.
+    static bool HasProjectManifest(string path) => ManifestNames.Any(name => File.Exists(Path.Combine(path, name)))
+        || ManifestExtensions.Any(extension =>
+            Directory.EnumerateFiles(path, "*" + extension, SearchOption.TopDirectoryOnly)
+                .Any(file => string.Equals(Path.GetExtension(file), extension, StringComparison.OrdinalIgnoreCase)));
 
     static string Normal(string path)
     {

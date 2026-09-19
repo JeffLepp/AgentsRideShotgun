@@ -75,8 +75,19 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         Reload();
         // Clicking the screen takes over right there (brief A.3), the same as the corner window.
         _input = new WorkspaceScreenInput(ScreenImage, () => WorkspaceRuntime.Of(_id));
+        // Full desktop: the agent's screen gets its taskbar here too, under the Last seen pill.
+        _taskbar = new WorkspaceTaskbar(() => _id is { } shown ? WorkspaceRuntime.Of(shown) : null, () => _input?.Touch(), 40)
+        {
+            Visibility = Visibility.Collapsed,
+        };
+        ScreenLayers.Children.Insert(1, _taskbar);
         StartScreenTimer();
     }
+
+    WorkspaceTaskbar? _taskbar;
+
+    /// <summary>The strip, for the gate.</summary>
+    internal WorkspaceTaskbar? Taskbar => _taskbar;
 
     void Reload()
     {
@@ -202,6 +213,9 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         WorkspaceControl? plane = WorkspaceRuntime.Of(id)?.Plane;
         // Asleep: the picture is the last one it had, and says so rather than looking live.
         LastSeenPill.Visibility = plane is null && ScreenImage.Source is not null ? Visibility.Visible : Visibility.Collapsed;
+        if (_taskbar is not null)
+            _taskbar.Visibility = plane is not null && AppSettingsStore.Current.AgentScreen == AgentScreenLook.Full
+                ? Visibility.Visible : Visibility.Collapsed;
         if (plane is null)
         {
             if (WorkspaceStore.Find(id) is { } stored)
@@ -364,6 +378,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     {
         if (_screenTimer is not null) { _screenTimer.Stop(); _screenTimer.Tick -= ScreenTick; _screenTimer = null; }
         if (_input is not null) { _input.Dispose(); _input = null; }
+        if (_taskbar is not null) { ScreenLayers.Children.Remove(_taskbar); _taskbar = null; }
     }
 
     public void Dispose()

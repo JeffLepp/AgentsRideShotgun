@@ -109,6 +109,17 @@ internal static class WorkspacePrograms
     static string _cachedFor = string.Empty;
     static long _cachedAt;
 
+    /// <summary>Every app a person could pick from the Start Menu, by name, once each, uninstallers
+    /// left out. The same cached scan `open` uses; the first call can take seconds, so call it off
+    /// the UI thread.</summary>
+    internal static IReadOnlyList<Shortcut> Apps() =>
+    [
+        .. Shortcuts(StartMenus())
+            .Where(s => !s.Name.Contains("uninstall", StringComparison.OrdinalIgnoreCase) && s.Name.Length > 0)
+            .GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+            .OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase),
+    ];
+
     /// <summary>Forgets the Start Menu scan, so the next lookup reads the shortcuts again.</summary>
     internal static void Forget()
     {

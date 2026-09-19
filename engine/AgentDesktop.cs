@@ -327,54 +327,83 @@ public sealed partial class AgentDesktop : IDisposable
         // is still a valid screenshot; returning null here made first tool calls intermittently fail.
         int skipped = windows.Count(window => !window.Responding);
 
+        // A process gets 10,000 GDI handles. Anything thrown between taking a handle and giving it
+        // back - running out of memory converting a 4K frame is the realistic one - used to leak a
+        // DC and a bitmap per attempt, so every handle below is given back in a finally, and one
+        // Windows refused is never drawn on.
         nint screenDc = Native.GetDC(0);
-        nint canvasDc = Native.CreateCompatibleDC(screenDc);
-        nint canvas = Native.CreateCompatibleBitmap(screenDc, width, height);
-        nint previousCanvas = Native.SelectObject(canvasDc, canvas);
-        WorkspaceWall.Paint(canvasDc, screenDc, width, height);
-
-        // Back to front, so the window the agent is actually using ends up on top.
-        for (int i = windows.Count - 1; i >= 0; i--)
-        {
-            AgentWindow window = windows[i];
-            // PrintWindow sends WM_PRINT and waits for the window's own thread to draw. A window
-            // that is not pumping never answers, and there is no timeout on that call, so it is
-            // left out of the picture instead of taking the capture down with it.
-            if (!window.Responding) continue;
-            nint windowDc = Native.CreateCompatibleDC(screenDc);
-            nint bitmap = Native.CreateCompatibleBitmap(screenDc, window.Width, window.Height);
-            nint previous = Native.SelectObject(windowDc, bitmap);
-            // PW_RENDERFULLCONTENT: a secondary desktop is not DWM-composited, and without this flag
-            // hardware-accelerated windows print as black.
-            if (Native.PrintWindow(window.Handle, windowDc, Native.PwRenderFullContent))
-                Native.BitBlt(canvasDc, window.X, window.Y, window.Width, window.Height,
-                    windowDc, 0, 0, Native.SrcCopy);
-            Native.SelectObject(windowDc, previous);
-            Native.DeleteObject(bitmap);
-            Native.DeleteDC(windowDc);
-        }
-
-        Native.SelectObject(canvasDc, previousCanvas);
-        BitmapSource? image = null;
+        if (screenDc == 0) return new DesktopFrame(null, windows.Count, skipped, false);
+        nint canvasDc = 0, canvas = 0, previousCanvas = 0;
         try
         {
-            BitmapSource raw = Imaging.CreateBitmapSourceFromHBitmap(canvas, 0, Int32Rect.Empty,
-                BitmapSizeOptions.FromEmptyOptions());
-            raw.Freeze();
-            // A device bitmap carries no alpha, so every pixel arrives fully transparent and WPF
-            // blends the frame into whatever is behind it. Bgr32 drops the channel and makes it opaque.
-            image = new FormatConvertedBitmap(raw, PixelFormats.Bgr32, null, 0);
-            image.Freeze();
-        }
-        catch (Exception ex) when (ex is COMException or ArgumentException)
-        {
-            // A window died mid-capture. The next frame is 500ms away.
-        }
+            canvasDc = Native.CreateCompatibleDC(screenDc);
+            if (canvasDc == 0) return new DesktopFrame(null, windows.Count, skipped, false);
+            canvas = Native.CreateCompatibleBitmap(screenDc, width, height);
+            if (canvas == 0) return new DesktopFrame(null, windows.Count, skipped, false);
+            previousCanvas = Native.SelectObject(canvasDc, canvas);
+            WorkspaceWall.Paint(canvasDc, screenDc, width, height);
 
-        Native.DeleteObject(canvas);
-        Native.DeleteDC(canvasDc);
-        Native.ReleaseDC(0, screenDc);
-        return new DesktopFrame(image, windows.Count, skipped, false);
+            // Back to front, so the window the agent is actually using ends up on top.
+            for (int i = windows.Count - 1; i >= 0; i--)
+            {
+                AgentWindow window = windows[i];
+                // PrintWindow sends WM_PRINT and waits for the window's own thread to draw. A window
+                // that is not pumping never answers, and there is no timeout on that call, so it is
+                // left out of the picture instead of taking the capture down with it.
+                if (!window.Responding) continue;
+                nint windowDc = Native.CreateCompatibleDC(screenDc);
+                if (windowDc == 0) continue;
+                // The pair this iteration owns is given back on its own, so one bad window does not
+                // leak another DC and bitmap on every frame after it.
+                nint bitmap = 0, previous = 0;
+                try
+                {
+                    bitmap = Native.CreateCompatibleBitmap(screenDc, window.Width, window.Height);
+                    if (bitmap == 0) continue;
+                    previous = Native.SelectObject(windowDc, bitmap);
+                    // PW_RENDERFULLCONTENT: a secondary desktop is not DWM-composited, and without this
+                    // flag hardware-accelerated windows print as black.
+                    if (Native.PrintWindow(window.Handle, windowDc, Native.PwRenderFullContent))
+                        Native.BitBlt(canvasDc, window.X, window.Y, window.Width, window.Height,
+                            windowDc, 0, 0, Native.SrcCopy);
+                }
+                finally
+                {
+                    if (previous != 0) Native.SelectObject(windowDc, previous);
+                    if (bitmap != 0) Native.DeleteObject(bitmap);
+                    Native.DeleteDC(windowDc);
+                }
+            }
+
+            // Out of the device context before it is read, exactly as before. The finally below then
+            // has nothing left to restore.
+            Native.SelectObject(canvasDc, previousCanvas);
+            previousCanvas = 0;
+            BitmapSource? image = null;
+            try
+            {
+                BitmapSource raw = Imaging.CreateBitmapSourceFromHBitmap(canvas, 0, Int32Rect.Empty,
+                    BitmapSizeOptions.FromEmptyOptions());
+                raw.Freeze();
+                // A device bitmap carries no alpha, so every pixel arrives fully transparent and WPF
+                // blends the frame into whatever is behind it. Bgr32 drops the channel and makes it opaque.
+                image = new FormatConvertedBitmap(raw, PixelFormats.Bgr32, null, 0);
+                image.Freeze();
+            }
+            catch (Exception ex) when (ex is COMException or ArgumentException)
+            {
+                // A window died mid-capture. The next frame is 500ms away.
+            }
+
+            return new DesktopFrame(image, windows.Count, skipped, false);
+        }
+        finally
+        {
+            if (previousCanvas != 0) Native.SelectObject(canvasDc, previousCanvas);
+            if (canvas != 0) Native.DeleteObject(canvas);
+            if (canvasDc != 0) Native.DeleteDC(canvasDc);
+            Native.ReleaseDC(0, screenDc);
+        }
     }
 
     /// <summary>
@@ -391,31 +420,47 @@ public sealed partial class AgentDesktop : IDisposable
         int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
         if (width <= 0 || height <= 0) return null;
 
+        // The same handle discipline as the whole-screen capture: nothing taken here survives an
+        // exception on the way out, and a handle Windows refused is not printed into.
         nint screenDc = Native.GetDC(0);
-        nint windowDc = Native.CreateCompatibleDC(screenDc);
-        nint bitmap = Native.CreateCompatibleBitmap(screenDc, width, height);
-        nint previous = Native.SelectObject(windowDc, bitmap);
-        BitmapSource? image = null;
-        if (Native.PrintWindow(window, windowDc, Native.PwRenderFullContent))
+        if (screenDc == 0) return null;
+        nint windowDc = 0, bitmap = 0, previous = 0;
+        try
         {
-            try
+            windowDc = Native.CreateCompatibleDC(screenDc);
+            if (windowDc == 0) return null;
+            bitmap = Native.CreateCompatibleBitmap(screenDc, width, height);
+            if (bitmap == 0) return null;
+            previous = Native.SelectObject(windowDc, bitmap);
+            BitmapSource? image = null;
+            if (Native.PrintWindow(window, windowDc, Native.PwRenderFullContent))
             {
-                BitmapSource raw = Imaging.CreateBitmapSourceFromHBitmap(bitmap, 0, Int32Rect.Empty,
-                    BitmapSizeOptions.FromEmptyOptions());
-                raw.Freeze();
-                image = new FormatConvertedBitmap(raw, PixelFormats.Bgr32, null, 0);
-                image.Freeze();
+                // Out of the device context before it is read, exactly as the whole-screen capture
+                // does. The finally below then has nothing left to restore.
+                Native.SelectObject(windowDc, previous);
+                previous = 0;
+                try
+                {
+                    BitmapSource raw = Imaging.CreateBitmapSourceFromHBitmap(bitmap, 0, Int32Rect.Empty,
+                        BitmapSizeOptions.FromEmptyOptions());
+                    raw.Freeze();
+                    image = new FormatConvertedBitmap(raw, PixelFormats.Bgr32, null, 0);
+                    image.Freeze();
+                }
+                catch (Exception ex) when (ex is COMException or ArgumentException)
+                {
+                    // The window died between the rect and the print.
+                }
             }
-            catch (Exception ex) when (ex is COMException or ArgumentException)
-            {
-                // The window died between the rect and the print.
-            }
+            return image;
         }
-        Native.SelectObject(windowDc, previous);
-        Native.DeleteObject(bitmap);
-        Native.DeleteDC(windowDc);
-        Native.ReleaseDC(0, screenDc);
-        return image;
+        finally
+        {
+            if (previous != 0) Native.SelectObject(windowDc, previous);
+            if (bitmap != 0) Native.DeleteObject(bitmap);
+            if (windowDc != 0) Native.DeleteDC(windowDc);
+            Native.ReleaseDC(0, screenDc);
+        }
     });
 
     /// <summary>
@@ -727,6 +772,16 @@ public sealed partial class AgentDesktop : IDisposable
             found.Add(new AgentWindow(handle, title, kind, rect.Left, rect.Top, width, height, responding));
             return true;
         }, 0);
+        // Windows recycles handle values. A verdict left behind by a window that has since been
+        // destroyed would be inherited by whatever new window lands on that number, and leave it out
+        // of a frame it was answering perfectly well for. Swept here on the pump thread that owns the
+        // map, which is the same thread that just enumerated - no lock, and none wanted.
+        if (_notAnswering.Count > 0)
+        {
+            HashSet<nint> live = found.Select(window => window.Handle).ToHashSet();
+            foreach (nint handle in _notAnswering.Keys.ToArray())
+                if (!live.Contains(handle)) _notAnswering.Remove(handle);
+        }
         return found;
     }
 

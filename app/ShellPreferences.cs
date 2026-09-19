@@ -40,7 +40,18 @@ internal sealed record ShellPreferences
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(temporary, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            // UTF-8 with no byte order mark, the same bytes File.WriteAllText put here before. The
+            // rename is atomic, but the contents are not on the disk yet when it runs: a power loss
+            // between the two leaves a shell.json that is named right and empty, and the owner's window
+            // placement is gone. Flushing to the device first means the disk holds either the old file
+            // or the whole new one.
+            byte[] bytes = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
+                .GetBytes(JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(temporary, path, overwrite: true);
             return true;
         }
@@ -83,9 +94,8 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
         if (handle == 0) return false;
         var screens = System.Windows.Forms.Screen.AllScreens;
         var screen = screens.FirstOrDefault(s => s.DeviceName == Display)
-            ?? screens.FirstOrDefault(s => s.WorkingArea.Contains((int)Left, (int)Top))
-            ?? Home();
-        var work = screen.WorkingArea;
+            ?? screens.FirstOrDefault(s => s.WorkingArea.Contains((int)Left, (int)Top));
+        var work = screen?.WorkingArea ?? HomeArea().Work;
         double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), window);
         double availableWidth = work.Width / scale;
         double availableHeight = work.Height / scale;
@@ -107,35 +117,53 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
     }
 
     /// <summary>The monitor a window goes to when it has no saved place: the primary one. The UI
-    /// probe points it at another monitor, so a test run leaves the owner's screen alone.</summary>
-    internal static Func<System.Windows.Forms.Screen> Home = () => System.Windows.Forms.Screen.PrimaryScreen!;
+    /// probe points it at another monitor, so a test run leaves the owner's screen alone. Null in a
+    /// session with no attached display, where Windows reports no primary screen.</summary>
+    internal static Func<System.Windows.Forms.Screen?> Home = () => System.Windows.Forms.Screen.PrimaryScreen;
+
+    /// <summary>
+    /// The home monitor's work area in native pixels and its device name. Screen.PrimaryScreen is
+    /// nullable and is null on a session with no display and on some RDP and headless paths, where
+    /// dereferencing it threw inside window construction and the owner got "Deskweave couldn't open."
+    /// with a null-reference message. Screen has no public constructor and AllScreens can be empty,
+    /// so there is no Screen to fall back to: the work area comes from WPF instead, with an empty
+    /// device name - the lookup in <see cref="Restore"/> already falls through when nothing matches.
+    /// </summary>
+    static (System.Drawing.Rectangle Work, string Device) HomeArea()
+    {
+        if (Home() is { } screen) return (screen.WorkingArea, screen.DeviceName);
+        Rect work = SystemParameters.WorkArea;
+        if (!double.IsFinite(work.Width) || !double.IsFinite(work.Height) || work.Width < 1 || work.Height < 1
+            || !double.IsFinite(work.X) || !double.IsFinite(work.Y))
+            work = new Rect(0, 0, 1280, 800);
+        return (new System.Drawing.Rectangle((int)work.X, (int)work.Y, (int)work.Width, (int)work.Height),
+            string.Empty);
+    }
 
     /// <summary>Where the reference puts the stack by default: 24 from the top and right of the
     /// primary monitor's work area, 340 wide, the work area's height minus 48.</summary>
     internal static ShellPlacement DefaultStack()
     {
-        var screen = Home();
-        var work = screen.WorkingArea;
+        var (work, device) = HomeArea();
         double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), null);
         double width = 340;
         double height = Math.Max(480, work.Height / scale - 48);
         double leftPx = work.Right - width * scale - 24 * scale;
         double topPx = work.Top + 24 * scale;
-        return new ShellPlacement(leftPx, topPx, width, height, screen.DeviceName);
+        return new ShellPlacement(leftPx, topPx, width, height, device);
     }
 
     /// <summary>1200 x 826, centered on the primary monitor; fitted with 20 DIP margins on a
     /// smaller work area.</summary>
     internal static ShellPlacement DefaultWide()
     {
-        var screen = Home();
-        var work = screen.WorkingArea;
+        var (work, device) = HomeArea();
         double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), null);
         double width = Math.Min(1200, Math.Max(960, work.Width / scale - 40));
         double height = Math.Min(826, Math.Max(600, work.Height / scale - 40));
         double leftPx = work.Left + (work.Width - width * scale) / 2;
         double topPx = work.Top + (work.Height - height * scale) / 2;
-        return new ShellPlacement(leftPx, topPx, width, height, screen.DeviceName);
+        return new ShellPlacement(leftPx, topPx, width, height, device);
     }
 
     static double ScaleAt(NativePoint point, Window? window)

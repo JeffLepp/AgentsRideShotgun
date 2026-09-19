@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using System.Windows.Media.Imaging;
 using HiveMind.AgentWorkspaces;
 
 /// <summary>
@@ -73,8 +72,7 @@ internal static class CornerRate
     {
         TimeSpan interval = inUse ? WorkspacePeekHost.InUseIntervalFor(smoothness) : WorkspacePeekHost.IdleIntervalFor(smoothness);
         double targetFps = 1.0 / interval.TotalSeconds;
-        BitmapSource? background = null;
-        DateTimeOffset backgroundAt = default;
+        WorkspacePeekCapture.Cached? background = null;
         Dictionary<int, TimeSpan> before = Owned(desktop);
         TimeSpan self = Process.GetCurrentProcess().TotalProcessorTime;
         var times = new List<double>();
@@ -84,7 +82,8 @@ internal static class CornerRate
         while (clock.Elapsed < span)
         {
             long start = Stopwatch.GetTimestamp();
-            WorkspacePeekCapture.Frame frame = WorkspacePeekCapture.Take(desktop, ref background, ref backgroundAt, inUse);
+            WorkspacePeekCapture.Frame frame = WorkspacePeekCapture.Take(desktop, desktop.Name, background, inUse);
+            background = frame.Cache;
             double ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             if (frame.Background is not null) { frames++; times.Add(ms); } else empty++;
             double wait = 1000 / targetFps - ms;

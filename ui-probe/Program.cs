@@ -40,6 +40,7 @@ static class Program
     static readonly List<string> Passed = [];
     static MainWindow _window = null!;
     static string _output = "";
+    internal static string Output => _output;
 
     static readonly ThemeChoice[] Themes = [ThemeChoice.Light, ThemeChoice.Dark];
 
@@ -102,6 +103,7 @@ static class Program
 
     static async Task Run()
     {
+        await TrayChecks.Run();
         _window = new MainWindow { ShowActivated = false, Left = TestScreen.Work.Left + 20, Top = TestScreen.Work.Top + 20 };
         _window.Show();
         await Settle();

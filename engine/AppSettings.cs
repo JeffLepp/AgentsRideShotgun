@@ -155,28 +155,66 @@ public static class AppSettingsStore
     {
         try
         {
-            if (!System.IO.File.Exists(File) || new FileInfo(File).Length > MaxBytes) return new AppSettings().Sane();
+            if (!System.IO.File.Exists(File)) return new AppSettings().Sane();
+            if (new FileInfo(File).Length > MaxBytes) return Unusable();
             AppSettings? read = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(File), Json);
             return read is { Schema: 1 } ? read.Sane() : new AppSettings().Sane();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (JsonException)
         {
+            return Unusable();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Locked or unreadable right now, which says nothing about what is in it. Leave it alone.
             return new AppSettings().Sane();
         }
+    }
+
+    /// <summary>
+    /// A settings file that exists and cannot be used - truncated by a power loss, or past the size
+    /// both sides agree on. Starting again from the defaults silently takes away first run, the
+    /// connected agents, the theme, the hotkey and the corner placement with no evidence left, so the
+    /// file is kept next door as settings.bad.json first. A failed rename changes nothing and is not
+    /// allowed to escape: defaults either way.
+    /// </summary>
+    static AppSettings Unusable()
+    {
+        try
+        {
+            string? folder = Path.GetDirectoryName(File);
+            if (!string.IsNullOrEmpty(folder))
+                System.IO.File.Move(File, Path.Combine(folder, "settings.bad.json"), true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or ArgumentException or NotSupportedException) { }
+        return new AppSettings().Sane();
     }
 
     // The same bound both ways, so the store never writes a file it would refuse to read.
     const int MaxBytes = 1_048_576;
 
+    // UTF-8 with no byte order mark: the same bytes File.WriteAllText put here before.
+    static readonly System.Text.UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     static bool Write(AppSettings settings)
     {
-        string json = JsonSerializer.Serialize(settings, Json);
-        if (System.Text.Encoding.UTF8.GetByteCount(json) > MaxBytes) return false;
+        byte[] bytes = Utf8.GetBytes(JsonSerializer.Serialize(settings, Json));
+        if (bytes.Length > MaxBytes) return false;
         string temporary = File + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(File)!);
-            System.IO.File.WriteAllText(temporary, json);
+            // The rename is atomic, but the contents are not on the disk yet when it runs: Windows can
+            // record the rename while the bytes are still in the file cache, and a power loss then
+            // leaves a settings.json that is named right and empty - the file Read has to move aside as
+            // unusable. Flushing to the device first means the disk holds either the old file or the
+            // whole new one.
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
             System.IO.File.Move(temporary, File, true);
             return true;
         }

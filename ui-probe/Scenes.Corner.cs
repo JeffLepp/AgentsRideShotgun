@@ -355,6 +355,71 @@ static class CornerScenes
             Program.Check(typeof(WorkspacePeekHost).GetField("_resultPath", BindingFlags.NonPublic | BindingFlags.Static)!
                 .GetValue(null) as string == made,
                 "When an agent's run ends, the corner offers the file that run made");
+
+            // Full desktop's drawn taskbar, on this real workspace (its desktop is hidden: nothing
+            // opens on the owner's screen).
+            AppSettingsStore.Update(s => s with { AgentScreen = AgentScreenLook.Full });
+            var strip = new WorkspaceTaskbar(() => runtime, () => { }, 40);
+            await strip.Refresh();
+            Program.Check(strip.Titles.Count >= 1 && AgentDesktop.TaskbarBand == (int)Math.Round(48.0 * AgentDesktop.ScreenWidth / 1440),
+                "The taskbar lists the workspace's open windows, and a filled window leaves its band free");
+            string notepad = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "notepad.exe");
+            int started = await strip.Launch(new WorkspacePrograms.Shortcut("Notepad", notepad, ""));
+            bool opened = false;
+            for (int i = 0; i < 40 && !opened; i++)
+            {
+                await Task.Delay(250);
+                await strip.Refresh();
+                opened = strip.Titles.Any(t => t.Contains("Notepad", StringComparison.OrdinalIgnoreCase));
+            }
+            Program.Check(started > 0 && opened && runtime.Computer!.OwnsProcess(started),
+                "The taskbar's launcher opens an app inside the workspace, not on the owner's desktop");
+            System.Windows.Controls.Button behind = strip.WindowButtons.Last();
+            string wanted = (string)behind.Tag;
+            behind.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            bool fronted = false;
+            for (int i = 0; i < 20 && !fronted; i++)
+            {
+                await Task.Delay(250);
+                await strip.Refresh();
+                fronted = strip.Titles.FirstOrDefault() == wanted;
+            }
+            Program.Check(fronted, "A window button brings that window to the front");
+            // A picture of the real corner with the strip up, for a person to judge.
+            if (GateWindow() is { } shown)
+            {
+                AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Always });
+                InvokeHost("StirFrom", stored.Id);
+                shown.ForceHoverForTests(true);
+                await Task.Delay(1500);
+                Program.Check(shown.Taskbar is { Visibility: Visibility.Visible }, "Hovering the corner shows the taskbar in Full desktop");
+                if (((System.Windows.Controls.Image)shown.PhotographCard()).Source is System.Windows.Media.Imaging.BitmapSource card)
+                {
+                    var png = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(card));
+                    using var file = File.Create(Path.Combine(Program.Output, "corner-taskbar.png"));
+                    png.Save(file);
+                }
+                shown.ForceHoverForTests(false);
+            }
+            Program.Check(WorkspaceTaskbar.Short("Untitled - Notepad") == "Untitled"
+                && WorkspaceTaskbar.Short("Tiny shop - Google Chrome") == "Tiny shop"
+                && WorkspaceTaskbar.Short(@"C:\Windows\system32\WindowsPowerShell\v1.0\powershell.exe") == "powershell",
+                "Taskbar buttons read the document or page, not the app's whole title or a path");
+            // The workspace page's roomier strip, photographed on its own.
+            var page = new WorkspaceTaskbar(() => runtime, () => { }, 40) { Width = 900 };
+            await page.Refresh();
+            page.Measure(new Size(900, 40));
+            page.Arrange(new Rect(0, 0, 900, 40));
+            page.UpdateLayout();
+            var shot = new System.Windows.Media.Imaging.RenderTargetBitmap(900, 40, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            shot.Render(page);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(shot));
+            using (var file = File.Create(Path.Combine(Program.Output, "page-taskbar.png"))) encoder.Save(file);
+            AppSettingsStore.Update(s => s with { AgentScreen = AgentScreenLook.Simple });
+            Program.Check(AgentDesktop.TaskbarBand == 0, "Simple leaves no taskbar band");
+            AppSettingsStore.Update(s => s with { AgentScreen = AgentScreenLook.Full });
         }
         finally
         {

@@ -21,28 +21,40 @@ internal static class WorkspacePeekCapture
 {
     static readonly TimeSpan BackgroundAge = TimeSpan.FromSeconds(1);
 
+    /// <summary>A whole-screen background kept for the next tick, carrying the workspace it was
+    /// photographed on. The id travels with the picture so a background can only ever be reused for
+    /// the workspace it belongs to: a capture still in flight when the front workspace changes can
+    /// no longer restamp a stale screen and have the next tick compose one workspace's desktop with
+    /// another's front window.</summary>
+    internal readonly record struct Cached(string WorkspaceId, BitmapSource Image, DateTimeOffset At);
+
     /// <summary>One tick's picture: the whole-screen background to show underneath, and - only while
     /// in use and a front window exists - the small patch to lay over it at its own screen position.
-    /// <see cref="Background"/> is null only when even the background capture failed; the caller
-    /// should then leave whatever was on screen alone rather than blank it.</summary>
-    internal readonly struct Frame(BitmapSource? background, BitmapSource? patch, int patchX, int patchY)
+    /// <see cref="Frame.Background"/> is null only when even the background capture failed; the caller
+    /// should then leave whatever was on screen alone rather than blank it. <see cref="Frame.Cache"/>
+    /// is what the caller keeps and hands back on the next tick.</summary>
+    internal readonly struct Frame(Cached? background, BitmapSource? patch, int patchX, int patchY)
     {
-        internal BitmapSource? Background { get; } = background;
+        internal Cached? Cache { get; } = background;
+        internal BitmapSource? Background => Cache?.Image;
         internal BitmapSource? Patch { get; } = patch;
         internal int PatchX { get; } = patchX;
         internal int PatchY { get; } = patchY;
     }
 
-    internal static Frame Take(AgentDesktop desktop, ref BitmapSource? background,
-        ref DateTimeOffset backgroundAt, bool inUse)
+    /// <summary>Takes one tick for <paramref name="workspaceId"/>, reusing <paramref name="cached"/>
+    /// only when it was captured for that same workspace. Nothing is written through to the caller:
+    /// what it should keep comes back in the frame, so a pool thread never stores into the host.</summary>
+    internal static Frame Take(AgentDesktop desktop, string workspaceId, Cached? cached, bool inUse)
     {
+        Cached? background = cached is { } held && held.WorkspaceId == workspaceId ? held : null;
         if (!inUse)
         {
-            if (desktop.CaptureScreen() is { } whole) { background = whole; backgroundAt = DateTimeOffset.Now; }
+            if (desktop.CaptureScreen() is { } whole) background = new Cached(workspaceId, whole, DateTimeOffset.Now);
             return new Frame(background, null, 0, 0);
         }
-        if (background is null || DateTimeOffset.Now - backgroundAt >= BackgroundAge)
-            if (desktop.CaptureScreen() is { } whole) { background = whole; backgroundAt = DateTimeOffset.Now; }
+        if (background is not { } kept || DateTimeOffset.Now - kept.At >= BackgroundAge)
+            if (desktop.CaptureScreen() is { } whole) background = new Cached(workspaceId, whole, DateTimeOffset.Now);
         if (background is not { } frame) return new Frame(null, null, 0, 0);
         IReadOnlyList<AgentWindow> windows = desktop.Windows();
         if (windows.Count == 0) return new Frame(frame, null, 0, 0);

@@ -157,8 +157,12 @@ internal sealed class WorkspacePipeServer : IDisposable
             }
         }
         }
+        // InvalidDataException is a SystemException, not an IOException: a malformed length prefix or
+        // an oversized response ends this connection, as it does for the bridge, and never faults the
+        // handler task - an unobserved fault here closed the pipe and told the agent Deskweave had
+        // closed while its request was running, about an app that was running perfectly well.
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException
-            or ObjectDisposedException or System.Text.DecoderFallbackException) { }
+            or ObjectDisposedException or InvalidDataException or System.Text.DecoderFallbackException) { }
         finally { connection.Cancel(); peer?.Closed(); }
     }
 

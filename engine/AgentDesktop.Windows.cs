@@ -47,6 +47,11 @@ public sealed partial class AgentDesktop
         return moved ? WindowsOnPump() : windows;
     }
 
+    /// <summary>The strip along the bottom of the screen that <see cref="WorkspaceTaskbar"/> covers in
+    /// Full desktop: 48 at a 1440-wide screen, as in the mockups. Nothing in Simple.</summary>
+    internal static int TaskbarBand => AppSettingsStore.Current.AgentScreen == AgentScreenLook.Full
+        ? (int)Math.Round(48.0 * ScreenWidth / 1440) : 0;
+
     /// <summary>
     /// Sizes a window to the whole workspace screen. A workspace desktop has no taskbar, and
     /// maximizing leaves room for one: an empty strip along the bottom of every corner preview.
@@ -55,7 +60,7 @@ public sealed partial class AgentDesktop
     {
         if (!OwnsWindow(window)) return false;
         if (Native.IsZoomed(window)) Native.ShowWindow(window, Native.SwRestore);
-        return Native.SetWindowPos(window, 0, 0, 0, ScreenWidth, ScreenHeight,
+        return Native.SetWindowPos(window, 0, 0, 0, ScreenWidth, ScreenHeight - TaskbarBand,
             Native.SwpNoZOrder | Native.SwpNoActivate | Native.SwpNoOwnerZOrder);
     });
 

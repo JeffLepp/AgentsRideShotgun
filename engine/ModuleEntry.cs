@@ -102,7 +102,10 @@ public static class ModuleEntry
     /// created by this private app, their records/evidence, and transient setup staging.</summary>
     public static string[] GetDataPaths() => [WorkspaceStore.Root, WorkspaceAccessStore.Root];
 
-    public static void Uninstall(bool removeData)
+    /// <summary>Uninstall: stops everything this install is running and takes its bridge out of the
+    /// agents' configs. The owner's workspaces, records and settings are left where they are; nothing
+    /// here deletes data.</summary>
+    public static void Uninstall()
     {
         WorkspaceConnections.StopKeepingUp();
         WorkspaceRouter.Stop();
