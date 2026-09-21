@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -126,6 +126,13 @@ static partial class Native
     public const uint WmChar = 0x0102;
     public const uint WmKeyDown = 0x0100;
     public const uint WmKeyUp = 0x0101;
+    // Reading a control back is how typing stops being a claim and becomes a fact. WM_GETTEXT on a
+    // control is its contents; on a top-level window it is only the title, which is why the caller
+    // checks the class first and treats an unknown class as unverifiable rather than as empty.
+    public const uint WmGetText = 0x000D;
+    public const uint WmGetTextLength = 0x000E;
+    public const uint EmSetSel = 0x00B1;
+    public const uint EmReplaceSel = 0x00C2;
     public const uint WmMouseMove = 0x0200;
     public const uint WmLButtonDown = 0x0201;
     public const uint WmLButtonUp = 0x0202;
@@ -145,6 +152,11 @@ static partial class Native
     // modal loop that reads the real cursor, which is on the owner's desktop and nowhere near them.
     // WM_SYSCOMMAND is the same command without the loop. Measured 2026-08-23.
     public const int HtMinButton = 8, HtMaxButton = 9, HtClose = 20;
+    // The same trap on the rest of the frame: a title bar starts a move loop and a resize edge or a
+    // system menu starts one of its own, all of them reading that same motionless cursor. None of
+    // them is ever posted; see AgentDesktop.Click for what each one does instead.
+    public const int HtCaption = 2, HtSysMenu = 3, HtGrowBox = 4, HtMenu = 5;
+    public const int HtLeft = 10, HtBorder = 18;
     public const uint WmSysCommand = 0x0112;
     public const nint ScMinimize = 0xF020, ScMaximize = 0xF030, ScClose = 0xF060, ScRestore = 0xF120;
 
@@ -171,7 +183,7 @@ static partial class Native
 
     public const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoZOrder = 0x0004,
         SwpNoActivate = 0x0010, SwpNoOwnerZOrder = 0x0200;
-    public const nint HwndTopmost = -1, HwndNoTopmost = -2;
+    public const nint HwndTopmost = -1, HwndNoTopmost = -2, HwndBottom = 1;
     public const int SwMaximize = 3, SwMinimize = 6, SwRestore = 9;
     public const uint CreateSuspended = 0x00000004;
     public const uint CreateNewConsole = 0x00000010;
@@ -217,15 +229,6 @@ static partial class Native
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int GetMessageW(out Msg message, nint window, uint first, uint last);
-
-    /// <summary>
-    /// The virtual key that produces a character on the current layout, low byte, or -1 for one no
-    /// key produces. Needed because a WM_CHAR on its own is not a keystroke: a real key press is a
-    /// WM_KEYDOWN, then the character, then a WM_KEYUP, and a page reading keydown sees nothing at
-    /// all without the first of those.
-    /// </summary>
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern short VkKeyScanW(char letter);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern nint DispatchMessageW(ref Msg message);
@@ -357,8 +360,6 @@ static partial class Native
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool GetExitCodeProcess(nint process, out uint exitCode);
 
-    public const uint Infinite = 0xFFFFFFFF;
-
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern nint CreateFileW(string fileName, uint desiredAccess, uint shareMode,
         nint securityAttributes, uint creationDisposition, uint flagsAndAttributes,
@@ -383,9 +384,30 @@ static partial class Native
     [DllImport("user32.dll")]
     public static extern int GetWindowThreadProcessId(nint window, out int processId);
 
+    // --- making a window active on its own desktop before sending it input (see AgentDesktop.Click) --
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern nint SetActiveWindow(nint window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern nint SetFocus(nint window);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern nint SendMessageTimeoutW(nint window, uint message, nint wparam, nint lparam,
         uint flags, uint timeout, out nint result);
+
+    /// <summary>WM_GETTEXT, which writes into the caller's buffer instead of returning a handle.</summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageTimeoutW")]
+    public static extern nint SendMessageTimeoutText(nint window, uint message, nint wparam,
+        StringBuilder lparam, uint flags, uint timeout, out nint result);
+
+    /// <summary>EM_REPLACESEL and WM_SETTEXT, which read a string the caller owns.</summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageTimeoutW")]
+    public static extern nint SendMessageTimeoutString(nint window, uint message, nint wparam,
+        string lparam, uint flags, uint timeout, out nint result);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool OpenClipboard(nint window);
@@ -395,9 +417,6 @@ static partial class Native
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool EmptyClipboard();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern uint EnumClipboardFormats(uint format);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern uint RegisterClipboardFormatW(string name);
@@ -470,23 +489,6 @@ static partial class Native
     [DllImport("advapi32.dll", SetLastError = true)]
     public static extern bool OpenProcessToken(nint process, uint access, out nint token);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
-    public static extern bool DuplicateTokenEx(nint existing, uint access, nint attributes,
-        int impersonationLevel, int tokenType, out nint duplicate);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    public static extern bool SetTokenInformation(nint token, int tokenClass,
-        ref TokenMandatoryLabel info, int length);
-
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern bool ConvertStringSidToSidW(string sid, out nint result);
-
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern bool CreateProcessAsUserW(nint token, string? application,
-        StringBuilder command, nint processAttributes, nint threadAttributes, bool inheritHandles,
-        uint flags, nint environment, string? directory, ref StartupInfo startup,
-        out ProcessInfo created);
-
     // SetUserObjectSecurity accepts a label-only descriptor, returns true, and stores nothing.
     // SetSecurityInfo is the call that actually writes a mandatory label on a window object.
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -499,9 +501,6 @@ static partial class Native
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetUserObjectSecurity(nint handle, ref int information, byte[] descriptor);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern nint LocalFree(nint memory);
 
     // --- job object limits (Milestone 1C) -----------------------------------------------------
 
@@ -602,19 +601,6 @@ static partial class Native
         /// of those the flags asked for.
         /// </summary>
         public uint CpuRate;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct SidAndAttributes
-    {
-        public nint Sid;
-        public uint Attributes;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct TokenMandatoryLabel
-    {
-        public SidAndAttributes Label;
     }
 
     [StructLayout(LayoutKind.Sequential)]

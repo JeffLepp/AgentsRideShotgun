@@ -13,7 +13,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/Deskweave.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <RuntimeFrameworkVersion>10.0.11</RuntimeFrameworkVersion>
+    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
     <SelfContained>true</SelfContained>
     <StartupObject>Deskweave.Program</StartupObject>
   </PropertyGroup>

@@ -293,12 +293,6 @@ sealed class WorkspaceProcessGroup : IDisposable
     /// <summary>Kills this command and every descendant it placed in the nested job.</summary>
     public bool Terminate(uint exitCode) => !_disposed && Native.TerminateJobObject(_job, exitCode);
 
-    /// <summary>The job becomes signalled only when its last process has exited.</summary>
-    public Task WaitForEmptyAsync() => Task.Run(() =>
-    {
-        if (!_disposed) Native.WaitForSingleObject(_job, Native.Infinite);
-    });
-
     public void Dispose()
     {
         if (_disposed) return;

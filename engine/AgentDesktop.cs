@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -28,6 +29,38 @@ public sealed record DesktopFrame(BitmapSource? Image, int Windows, int Unrespon
 {
     /// <summary>Whether this frame shows everything that is on the screen.</summary>
     public bool Complete => Image is not null && Unresponsive == 0 && !TimedOut;
+}
+
+/// <summary>
+/// What became of one piece of typing.
+/// </summary>
+/// <param name="Landed">
+/// False means the text is not in the application. Never true merely because characters were sent.
+/// </param>
+/// <param name="Target">The control it went to, named the way the owner would name it.</param>
+/// <param name="How">Which route carried it, or why nothing did.</param>
+/// <param name="Verified">
+/// False when the control publishes no way to read it back. The text was delivered and the
+/// application probably took it, but this cannot prove it, and saying so is the point.
+/// </param>
+public sealed record TypedText(bool Landed, string Target, string How, bool Verified = true)
+{
+    /// <summary>The owner took the workspace mid-type. Nothing happened and nothing is claimed.</summary>
+    public static readonly TypedText Discarded = new(false, "", "discarded; the owner has the workspace");
+
+    /// <summary>The desktop pump ran out of patience, which means an application has wedged it.</summary>
+    public static readonly TypedText Wedged =
+        new(false, "", "the workspace stopped answering; nothing is known to have been typed");
+
+    /// <summary>One line for the agent and the evidence log, in that order of importance.</summary>
+    public override string ToString() => (Landed, Verified) switch
+    {
+        (true, true) => $"typed into {Target}, {How}, and it is there",
+        (true, false) => $"typed into {Target}, {How}. That window publishes no way to read it back,"
+            + " so this is delivery and not proof - look before relying on it",
+        _ when Target.Length == 0 => How,
+        _ => $"not typed: {How}. The keyboard was on {Target}",
+    };
 }
 
 /// <summary>
@@ -207,6 +240,17 @@ public sealed partial class AgentDesktop : IDisposable
     int LaunchCore(string exe, string? arguments, (nint In, nint Out)? handles, long lease,
         WorkspaceLimits? limits)
     {
+        // A WPF program chooses how it draws while it starts, and only a software renderer leaves
+        // pixels a desktop Windows does not compose can hand back. On before the process runs, off
+        // again once it is up: see WorkspaceRenderMode.
+        IDisposable? softened = WorkspaceRenderMode.Soften();
+        try { return LaunchCore(exe, arguments, handles, lease, limits, ref softened); }
+        finally { softened?.Dispose(); }
+    }
+
+    int LaunchCore(string exe, string? arguments, (nint In, nint Out)? handles, long lease,
+        WorkspaceLimits? limits, ref IDisposable? softened)
+    {
         var info = new Native.StartupInfo { cb = Marshal.SizeOf<Native.StartupInfo>() };
         // The only supported way to place a process on another desktop. The managed process API has no
         // field for it, which is why this goes straight to CreateProcessW.
@@ -254,6 +298,10 @@ public sealed partial class AgentDesktop : IDisposable
 
             ClipboardBroker.Shared.Touch(Name);
             StartMuting();
+            // The program owns the switch from here: it goes back once this one has drawn, not
+            // when this method returns, because nothing has put up a window yet.
+            WorkspaceRenderMode.ReleaseWhenStarted(softened, created.dwProcessId, HasWindow);
+            softened = null;
             return created.dwProcessId;
         }
         finally
@@ -275,6 +323,13 @@ public sealed partial class AgentDesktop : IDisposable
     /// <summary>An empty list means the pump did not answer in time, which reads the same to a
     /// caller as an empty desktop and is the only honest answer either way.</summary>
     public IReadOnlyList<AgentWindow> Windows() => Run(WindowsOnScreen) ?? [];
+
+    /// <summary>Whether one process has put a window on this desktop yet.</summary>
+    internal bool HasWindow(int pid) => Windows().Any(window =>
+    {
+        Native.GetWindowThreadProcessId(window.Handle, out int owner);
+        return owner == pid;
+    });
 
     /// <summary>
     /// A workspace desktop is the size of the owner's own screen, so that is the size a whole
@@ -472,6 +527,10 @@ public sealed partial class AgentDesktop : IDisposable
     /// <summary>The number an agent's input must still carry to be delivered. Zero means the owner.</summary>
     public long Lease => Interlocked.Read(ref _lease);
 
+    /// <summary>The window the last click was delivered to, for the gate that drives a real click
+    /// through the workspace page's picture and then asks where it landed.</summary>
+    internal nint LastClickedForTests => _lastClicked;
+
     bool Revoked(long lease) => lease != 0 && lease != Interlocked.Read(ref _lease);
 
     /// <summary>
@@ -507,8 +566,22 @@ public sealed partial class AgentDesktop : IDisposable
                 _lastClicked = target;
                 return true;
             }
-            // Everything else non-client - a scrollbar, a resize edge - gets the ordinary pair. Some
-            // of those also track the real cursor, so the element tree is the reliable route there.
+            // A title bar is the same trap as those buttons: WM_NCLBUTTONDOWN with HTCAPTION puts
+            // the window into DefWindowProc's move loop, which waits on a cursor that is on the
+            // owner's desktop and will never move, so the click does nothing at all and the window
+            // is left mid-drag. What a click on a title bar means to someone watching a picture of
+            // a screen is "bring this window forward", so that is what it does.
+            if ((int)area == Native.HtCaption)
+            {
+                _lastClicked = target;
+                return Arrange(target, WindowArrangement.Front, lease: lease);
+            }
+            // A resize edge, the grow box, the system menu and the menu bar each start a loop of
+            // their own on that same cursor. None of them is worth wedging a window for, so the
+            // click is refused here and the caller is told it did not land.
+            if ((int)area is Native.HtSysMenu or Native.HtGrowBox or Native.HtMenu
+                or (>= Native.HtLeft and <= Native.HtBorder)) return false;
+            // Everything else non-client - a scrollbar, the help button - gets the ordinary pair.
             Native.PostMessageW(target, Native.WmNcMouseMove, area, screen);
             Native.PostMessageW(target, rightButton ? Native.WmNcRButtonDown : Native.WmNcLButtonDown,
                 area, screen);
@@ -522,6 +595,9 @@ public sealed partial class AgentDesktop : IDisposable
         Native.ScreenToClient(target, ref client);
         nint position = (client.Y & 0xFFFF) << 16 | (client.X & 0xFFFF);
 
+        // A workspace desktop has no foreground window - see Activate for what that does and does not
+        // fix.
+        Activate(target);
         if (Native.SendMessageTimeoutW(target, Native.WmMouseMove, 0, position,
             Native.SmtoAbortIfHung, 250, out _) == 0) return false;
         if (Revoked(lease)) return false;
@@ -532,8 +608,95 @@ public sealed partial class AgentDesktop : IDisposable
             0, position, Native.SmtoAbortIfHung, 250, out _) != 0;
         _lastPoint = new Native.Point { X = x, Y = y };
         _lastClicked = target;
+        // WPF hit-tests a mouse message against the real hardware pointer rather than the coordinates
+        // carried in the message, and that pointer lives on the window station, not this desktop, so
+        // it is wherever the owner left it and the message route can never raise Click here - measured
+        // 2026-09-20, activation included. See InvokeAtPoint for what does.
+        if (IsWpfWindow(Native.GetAncestor(target, 2)) && InvokeAtPoint(x, y)) return true;
         return pressed && released;
     });
+
+    /// <summary>
+    /// Makes a window's top-level owner the active window on this desktop, from the pump thread that
+    /// already lives on it. A workspace desktop has no foreground window of its own, which is a real
+    /// difference from the owner's desktop that some controls key their visual and interactive state
+    /// on - a WinForms combo box's drop button and a hover-styled control both read as "inactive"
+    /// without this.
+    ///
+    /// Measured 2026-09-20 with engine-probe's --click-proof, though: activating first did not make a
+    /// WPF button's Click fire, before or after this existed. WinForms and a plain Win32 button both
+    /// answered a coordinate click either way - they only need mouse capture, not window activation, to
+    /// raise Click. So this stays because it is cheap, correct, and the real difference from the
+    /// owner's desktop it exists to paper over, but it is not what makes WPF work - see
+    /// <see cref="InvokeAtPoint"/> for what was measured to actually do that.
+    ///
+    /// AttachThreadInput shares the calling thread's input state with the target's for the duration of
+    /// the call, which is what lets SetActiveWindow/SetFocus take effect for a window this thread does
+    /// not own without SetForegroundWindow's restrictions. Both threads already belong to this
+    /// desktop's own window station, so none of this is visible to the owner's real desktop.
+    /// </summary>
+    void Activate(nint target)
+    {
+        nint root = Native.GetAncestor(target, 2); // GA_ROOT
+        if (root == 0) root = target;
+        uint targetThread = (uint)Native.GetWindowThreadProcessId(root, out _);
+        uint ourThread = (uint)Native.GetCurrentThreadId();
+        if (targetThread == 0 || targetThread == ourThread) return;
+        bool attached = Native.AttachThreadInput(ourThread, targetThread, true);
+        try
+        {
+            Native.SetActiveWindow(root);
+            Native.SetFocus(root);
+        }
+        finally
+        {
+            if (attached) Native.AttachThreadInput(ourThread, targetThread, false);
+        }
+    }
+
+    /// <summary>
+    /// WPF names its top-level window's own class after itself - "HwndWrapper[...]" - which is a
+    /// reliable, no-cost way to know before sending a single message that the window ahead is one
+    /// where the message route cannot raise Click. Chrome, WinForms and plain Win32 windows carry
+    /// their own class names and never match this.
+    /// </summary>
+    static bool IsWpfWindow(nint window) => Text(window, Native.GetClassNameW).StartsWith("HwndWrapper", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Resolves the UI Automation element at a screen point and invokes it - one call, never a tree
+    /// walk, and only reached for a WPF window, where <see cref="Click"/> has already measured that
+    /// the message route cannot raise Click. This goes around WPF's own mouse pipeline instead of
+    /// fighting it: InvokePattern (and the same handful of verbs WorkspaceTree already presses)
+    /// call straight into the control's handler, so it does not matter that the real cursor never
+    /// moved here. False means the point resolved to nothing actionable - text, a blank pane, a
+    /// disabled control - which is not a fault; the caller falls back to reporting what the message
+    /// route itself managed.
+    /// </summary>
+    static bool InvokeAtPoint(int x, int y)
+    {
+        try
+        {
+            AutomationElement? element = AutomationElement.FromPoint(new System.Windows.Point(x, y));
+            if (element is null) return false;
+            if (element.TryGetCurrentPattern(InvokePattern.Pattern, out object? invoke))
+            { ((InvokePattern)invoke).Invoke(); return true; }
+            if (element.TryGetCurrentPattern(TogglePattern.Pattern, out object? toggle))
+            { ((TogglePattern)toggle).Toggle(); return true; }
+            if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out object? select))
+            { ((SelectionItemPattern)select).Select(); return true; }
+            if (element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out object? expand))
+            {
+                var it = (ExpandCollapsePattern)expand;
+                if (it.Current.ExpandCollapseState == ExpandCollapseState.Expanded) it.Collapse(); else it.Expand();
+                return true;
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Scrolls at a point in the agent's screen.</summary>
     public bool Scroll(int x, int y, int delta, long lease = 0) => Run(() =>
@@ -562,25 +725,129 @@ public sealed partial class AgentDesktop : IDisposable
     /// Types text. WM_CHAR per character, because SendInput returns 0 for a desktop that is not the
     /// input desktop - measured, not assumed. This is also how the agent itself will type.
     /// </summary>
-    public bool TypeText(string text, nint window = 0, long lease = 0) => Run(() =>
+    public bool TypeText(string text, nint window = 0, long lease = 0) => Type(text, window, lease).Landed;
+
+    /// <summary>
+    /// Types text and says where it went and whether the control now holds it.
+    ///
+    /// Delivery used to be the whole answer, and that was the defect: with no window named this
+    /// picks whatever window is topmost, so text meant for a page went into a browser's address bar
+    /// and the caller was still told "typed". Two calls in a row piled up somewhere nobody was
+    /// looking. Delivering a character is not evidence that an application took it, so where the
+    /// control can be read back this reads it back, and where it cannot this says so rather than
+    /// implying success.
+    /// </summary>
+    public TypedText Type(string text, nint window = 0, long lease = 0) => Run(() =>
     {
-        if (Revoked(lease)) return false;
+        if (Revoked(lease)) return TypedText.Discarded;
         ClipboardBroker.Shared.Touch(Name);
         nint target = Focused(window);
-        if (target == 0) return false;
+        if (target == 0) return new TypedText(false, "", "no window on this desktop had the keyboard");
+
+        string wanted = MessageText(text);
+        string where = Describe(target);
+        if (wanted.Length == 0) return new TypedText(true, where, "nothing to type");
+        bool readable = Readable(target, out string before);
+
         // Text is WM_CHAR only. Posting WM_KEYDOWN as well lets the app's TranslateMessage create
         // a second WM_CHAR, doubling every ordinary character (measured in the execution probe).
         // Browser keyboard events belong to DevTools; single non-text keys use SendKey below.
-        foreach (char letter in MessageText(text))
+        foreach (char letter in wanted)
         {
-            if (Revoked(lease)) return false;
+            if (Revoked(lease)) return TypedText.Discarded;
             // A bounded synchronous delivery means the following batch read observes this write,
             // and a full message queue or hung window cannot be reported as successful typing.
             if (Native.SendMessageTimeoutW(target, Native.WmChar, letter, 1,
-                Native.SmtoAbortIfHung, 250, out _) == 0) return false;
+                Native.SmtoAbortIfHung, 250, out _) == 0)
+                return new TypedText(false, where, "that window stopped accepting characters part way through");
         }
+
+        // A window whose class is not a text control answers WM_GETTEXT with its title, so reading
+        // it back would report every successful type as a failure and then type it again. Unverified
+        // is the honest answer for those, and the caller is told which window took the text.
+        if (!readable) return new TypedText(true, where, "by message", Verified: false);
+
+        // Unchanged is checked before the contents are searched, and that order is the point: a box
+        // already holding "cat" contains the "a" that was just swallowed, so searching first would
+        // call a failed type a success whenever the text was short.
+        string after = ControlText(target);
+        if (after != before)
+        {
+            if (Holds(after, wanted)) return new TypedText(true, where, "by message");
+            // Changed, but not to what was asked for. Something took the characters and did its own
+            // thing with them - an auto-complete, a shortcut, a validator. Retrying here would type
+            // it a second time on top of whatever landed, so this reports instead of escalating.
+            return new TypedText(false, where, "the control changed but does not hold that text");
+        }
+
+        // Untouched, so a second attempt cannot duplicate anything. Edit and RichEdit controls take
+        // their text directly when WM_CHAR is being swallowed, which is the common case behind a
+        // read-only-looking box that is not actually read-only.
+        if (Revoked(lease)) return TypedText.Discarded;
+        if (Native.SendMessageTimeoutString(target, Native.EmReplaceSel, 1, wanted,
+                Native.SmtoAbortIfHung, 500, out _) != 0
+            && ControlText(target) is { } replaced && replaced != before && Holds(replaced, wanted))
+            return new TypedText(true, where, "by replacing the selection");
+
+        return new TypedText(false, where, "it accepted nothing; the text is not in it");
+    }) ?? TypedText.Wedged;
+
+    /// <summary>How the owner would name the control that took the text.</summary>
+    static string Describe(nint window)
+    {
+        // Never the control's own WM_GETTEXT: for an edit box that is its contents, and the caller's
+        // own text would come back to it disguised as the name of the place it went.
+        string kind = Text(window, Native.GetClassNameW);
+        nint root = Native.GetAncestor(window, 2);
+        // InternalGetWindowText, never GetWindowTextW: naming the target must not send a message to
+        // the application, or an application that has stopped pumping parks the desktop pump on the
+        // way to reporting where text went. WordPad came up "(not responding)" while this was tested.
+        string title = root == 0 ? string.Empty : Text(root, Native.InternalGetWindowText);
+        if (title.Length > 60) title = title[..60] + "...";
+        if (title.Length == 0) return kind.Length > 0 ? kind : window.ToString();
+        return kind.Length > 0 && root != window ? $"{kind} in \"{title}\"" : $"\"{title}\"";
+    }
+
+    /// <summary>
+    /// The classes whose WM_GETTEXT is their contents rather than a window title. Deliberately a
+    /// list and not a guess: treating an unknown class as readable is what would turn a working
+    /// type into a duplicate one.
+    /// </summary>
+    static bool Readable(nint window, out string text)
+    {
+        text = string.Empty;
+        string kind = Text(window, Native.GetClassNameW);
+        bool known = kind.Equals("Edit", StringComparison.OrdinalIgnoreCase)
+            || kind.StartsWith("RichEdit", StringComparison.OrdinalIgnoreCase)
+            || kind.Equals("ComboBox", StringComparison.OrdinalIgnoreCase)
+            || kind.Equals("Scintilla", StringComparison.OrdinalIgnoreCase);
+        if (!known) return false;
+        text = ControlText(window);
         return true;
-    });
+    }
+
+    /// <summary>A control's contents, bounded, or empty when its thread will not answer.</summary>
+    static string ControlText(nint window)
+    {
+        if (Native.SendMessageTimeoutW(window, Native.WmGetTextLength, 0, 0,
+            Native.SmtoAbortIfHung, 250, out nint length) == 0) return string.Empty;
+        int count = (int)length;
+        if (count <= 0) return string.Empty;
+        var buffer = new StringBuilder(count + 1);
+        if (Native.SendMessageTimeoutText(window, Native.WmGetText, buffer.Capacity, buffer,
+            Native.SmtoAbortIfHung, 250, out _) == 0) return string.Empty;
+        return buffer.ToString();
+    }
+
+    /// <summary>
+    /// Whether a control now holds what was typed. Line endings are compared flattened: typing
+    /// sends CR and an edit control stores CRLF, so a literal comparison calls every multi-line
+    /// type a failure.
+    /// </summary>
+    static bool Holds(string contents, string wanted) =>
+        wanted.Length == 0 || Flat(contents).Contains(Flat(wanted), StringComparison.Ordinal);
+
+    static string Flat(string text) => text.Replace("\r\n", "\n").Replace('\r', '\n');
 
     /// <summary>Sends one virtual key, for the keys that produce no character (Enter, Tab, arrows).</summary>
     public bool SendKey(int virtualKey, nint window = 0, long lease = 0) => Run(() =>

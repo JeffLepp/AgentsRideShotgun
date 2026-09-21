@@ -12,7 +12,7 @@ public enum ThemeChoice { FollowWindows, Light, Dark }
 public enum AgentScreenLook { Full, Simple }
 public enum CornerShow { ComesAndGoes, Always, Off }
 public enum ScreenshotMode { KeySteps, Continuous, Off }
-public enum PreviewSmoothness { Balanced, Smooth, BatterySaver }
+public enum PreviewSmoothness { Balanced, BatterySaver }
 
 /// <summary>
 /// Every choice in Settings, with the defaults the MVP spec gives it (design/MVP_SPEC.md,

@@ -68,12 +68,20 @@ public sealed partial class WorkspaceControl
                 try
                 {
                     frame = browser is not null ? await browser.Screenshot(input.Token).ConfigureAwait(false) : Screen();
+                    // Down to the size it is sent at before the marks go on, not after. Drawing the
+                    // boxes builds a fresh bitmap the size of whatever it is drawing on, so marking
+                    // a whole 1920x1080 screen and shrinking it afterwards pays for a full-screen
+                    // render target nothing ever sees: measured 62-67 ms against 35-42 ms for the
+                    // same three-window desktop, and the numbers come out legible instead of
+                    // smeared, because the badge is no longer drawn at full size and then shrunk.
+                    if (frame is not null) frame = WorkspaceMarks.Resize(frame, width, height);
                     if (frame is not null && request.Marks && browser is null)
                     {
                         (IReadOnlyList<WorkspaceElement> found, System.Windows.Point origin) = MarksFor(0);
-                        frame = WorkspaceMarks.Draw(frame, found, origin, 1);
+                        // The same factor `ToSource` maps the model's coordinates back through, so a
+                        // box sits exactly where a press on it will land.
+                        frame = WorkspaceMarks.Draw(frame, found, origin, scale);
                     }
-                    if (frame is not null) frame = WorkspaceMarks.Resize(frame, width, height);
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 { receipt = receipt with { Reason = receipt.Reason + " Screenshot unavailable: " + ex.GetType().Name + ". Do not replay input." }; }

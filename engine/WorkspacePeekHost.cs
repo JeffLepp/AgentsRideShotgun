@@ -21,6 +21,7 @@ internal static class WorkspacePeekHost
     static WorkspacePeekWindow? _window;
     static WorkspacePeekHotkey? _pauseKey;
     static DispatcherTimer? _beat;
+    static DispatcherTimer? _presentationWatch;
     static WorkspacePeekDropHook? _dropHook;
 
     // Every running workspace this module is watching, so it knows which one most recently did
@@ -36,7 +37,12 @@ internal static class WorkspacePeekHost
     // not a workspace the owner was already driving before he paused.
     static readonly HashSet<string> _pausedByUs = [];
 
-    static string? _frontId, _backId, _resultForId, _resultName, _resultPath, _pendingId;
+    // The workspace the owner picked from the tabs. It wins over whatever is busiest for as long as
+    // this look lasts; once the corner goes away, the next one leads with what is working again.
+    static string? _chosenId;
+
+    static string? _frontId, _resultForId, _resultName, _resultPath, _pendingId;
+    static int _seq;
 
     /// <summary>The workspace a pinned corner window is showing, which must not be put to sleep
     /// under it. Null when the corner is not pinned or shows nothing.</summary>
@@ -47,6 +53,8 @@ internal static class WorkspacePeekHost
     // assignment, is what keeps it from being paired with another workspace's window.
     static WorkspacePeekCapture.Cached? _background;
     static bool _started, _dismissed, _summoned, _drawing, _hooked, _pausedAll;
+    static bool _explicitSummon;
+    static bool _lastPresentation;
 
     // Remembered only for this run: the width the owner last grew it to, so the shrink button can
     // offer to grow back once he has shrunk it again. Size and position that must survive a real
@@ -88,6 +96,8 @@ internal static class WorkspacePeekHost
         _recent.Clear();
         _pausedByUs.Clear();
         StopBeat();
+        _presentationWatch?.Stop();
+        _presentationWatch = null;
         StopDropHook();
         _pauseKey?.Dispose(); _pauseKey = null;
         _window?.HandBackInput();
@@ -95,9 +105,11 @@ internal static class WorkspacePeekHost
         _window = null;
         window?.Close();
         _dismissed = _summoned = _pausedAll = false;
+        _explicitSummon = false;
+        _lastPresentation = false;
         _announced.Clear();
         ModuleEntry.AllPaused = false;
-        _frontId = _backId = null;
+        _frontId = _chosenId = null;
         _background = null;
     }
 
@@ -137,12 +149,36 @@ internal static class WorkspacePeekHost
         foreach (WorkspaceRuntime r in running) if (!_followed.ContainsKey(r.Id)) FollowOne(r);
         _recent.RemoveAll(id => !ids.Contains(id));
         foreach (string id in ids) if (!_recent.Contains(id)) _recent.Add(id);
+        WatchPresentation();
         Rethink();
+    }
+
+    // No desktop captures here. Keep watching while hidden so an existing corner disappears when
+    // fullscreen starts and its normal policy is reconsidered when fullscreen ends.
+    static void WatchPresentation()
+    {
+        if (_followed.Count == 0)
+        {
+            _presentationWatch?.Stop();
+            _presentationWatch = null;
+            return;
+        }
+        if (_presentationWatch is not null || _owner is null) return;
+        _presentationWatch = new DispatcherTimer(DispatcherPriority.Background, _owner)
+            { Interval = TimeSpan.FromMilliseconds(500) };
+        _presentationWatch.Tick += (_, _) =>
+        {
+            bool presentation = WorkspacePresentation.Suppressed;
+            if (presentation == _lastPresentation) return;
+            _lastPresentation = presentation;
+            Rethink();
+        };
+        _presentationWatch.Start();
     }
 
     static void FollowOne(WorkspaceRuntime runtime)
     {
-        var follow = new Follow(runtime, () => StirFrom(runtime.Id), who => Driven(runtime.Id, who));
+        var follow = new Follow(runtime, () => StirFrom(runtime.Id), who => Driven(runtime.Id, who)) { Seq = _seq++ };
         follow.Attach();
         _followed[runtime.Id] = follow;
         if (_pausedAll && runtime.Plane is { Driving: not Driver.Owner } plane)
@@ -202,18 +238,20 @@ internal static class WorkspacePeekHost
         || r.Plane?.Driving == Driver.Owner
         || r.Access?.Handoffs.All.Any(request => request.State == "pending") == true;
 
-    static (WorkspaceRuntime? Front, WorkspaceRuntime? Back) PickTwo()
+    /// <summary>Every running workspace, in the order they started - one tab each - and which of them
+    /// the card shows: what the owner picked, else the busiest, else the most recent.</summary>
+    static (WorkspaceRuntime? Front, IReadOnlyList<WorkspaceRuntime> All) Pick()
     {
+        List<WorkspaceRuntime> all = _followed.Values.OrderBy(f => f.Seq).Select(f => f.Runtime).ToList();
         List<WorkspaceRuntime> ordered = _recent
             .Select(id => _followed.TryGetValue(id, out Follow? f) ? f.Runtime : null)
             .Where(r => r is not null).Select(r => r!).ToList();
-        List<WorkspaceRuntime> busy = ordered.Where(Busy).ToList();
-        WorkspaceRuntime? front = busy.Count > 0 ? busy[0] : ordered.FirstOrDefault();
+        WorkspaceRuntime? front = all.FirstOrDefault(r => r.Id == _chosenId)
+            ?? ordered.FirstOrDefault(Busy) ?? ordered.FirstOrDefault();
         // Never replace the screen under the owner's pointer or mid-drag when another agent acts.
         if (_window is { Hovered: true } or { Manipulating: true }
             && ordered.FirstOrDefault(r => r.Id == _frontId) is { } held) front = held;
-        WorkspaceRuntime? back = busy.FirstOrDefault(r => r.Id != front?.Id);
-        return (front, back);
+        return (front, all);
     }
 
     /// <summary>Decides, from the settings and what the workspaces are doing, whether the window is
@@ -221,8 +259,10 @@ internal static class WorkspacePeekHost
     static void Rethink()
     {
         if (!_started || _owner is null) return;
-        Announce();
-        (WorkspaceRuntime? front, WorkspaceRuntime? back) = PickTwo();
+        bool presentation = WorkspacePresentation.Suppressed;
+        _lastPresentation = presentation;
+        Announce(presentation);
+        (WorkspaceRuntime? front, IReadOnlyList<WorkspaceRuntime> all) = Pick();
         bool held = _window?.Hovered == true || _window?.Manipulating == true || _pausedAll && front is not null;
         bool busy = front is not null && Busy(front);
         TimeSpan quiet = DateTimeOffset.Now - _stirred;
@@ -230,11 +270,22 @@ internal static class WorkspacePeekHost
         // The hub can't answer a desktop request, so a question shows here even while it is open.
         bool asking = front?.Access?.Handoffs.All.Any(request => request.State == "pending") == true;
         bool wanted = WorkspacePeekPolicy.Wanted(_settings.CornerShow, front is not null,
-            ModuleEntry.HubShowing && !asking, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade);
+            ModuleEntry.HubShowing && !asking, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade,
+            presentation, _summoned && _explicitSummon);
         // A tray summon's own grace period (held or within the fixed fade after the last activity)
         // has ended: stop treating it as summoned, or it would keep forcing ComesAndGoes-like timing
         // on a mode (Off, say) that means something else once a later Settings change picks it up.
-        if (_summoned && !held && quiet >= fade) _summoned = false;
+        if (_summoned && !held && quiet >= fade) _summoned = _explicitSummon = false;
+
+        if (presentation && !(_summoned && _explicitSummon))
+        {
+            _window?.HandBackInput();
+            _window?.HideImmediately();
+            StopBeat();
+            StopDropHook();
+            SetFront(front?.Id);
+            return;
+        }
 
         if (front is null || !wanted)
         {
@@ -242,14 +293,15 @@ internal static class WorkspacePeekHost
             _window?.Leave();
             StopBeat();
             SetFront(front?.Id);
-            _backId = null;
+            // A pick lasts as long as the look does: the next time the corner comes up it leads with
+            // whatever is working, which is why it comes up at all.
+            _chosenId = null;
             StartDropHookIfIdle();
             return;
         }
 
         StopDropHook();
         SetFront(front.Id);
-        _backId = back?.Id;
 
         WorkspacePeekWindow window = _window ??= Build();
         Size card = WorkspacePeekPlacement.Card(_settings);
@@ -257,23 +309,21 @@ internal static class WorkspacePeekHost
         if (grown) _lastGrownWidth = card.Width;
         if (!window.Manipulating)
         {
-            window.Configure(card, back is not null, grown, !grown && _lastGrownWidth is not null);
-            // Saved positions describe the front card, not the union with a temporary back card.
+            window.SetTabs([.. all.Select(r => new PeekTab(r.Id, WorkspaceName(r), Status(r).Tone, r.Id == front.Id))]);
+            window.Configure(card, grown, !grown && _lastGrownWidth is not null);
+            // Saved positions describe the front card, not the union with the tab strip above it -
+            // so the box that has to fit on the monitor is the one the strip is part of, or a card
+            // saved at the top of the screen would draw its tabs off the top edge.
             Rect frontRect = PlaceRect(card);
             double extra = window.VisibleSize.Height - card.Height;
-            window.Place(new Rect(frontRect.Left, frontRect.Top - extra, card.Width, window.VisibleSize.Height));
+            Rect visible = new(frontRect.Left, frontRect.Top - extra, card.Width, window.VisibleSize.Height);
+            window.Place(WorkspacePeekPlacement.Fit(WorkspacePeekPlacement.MonitorFor(visible).WorkArea, visible));
         }
         window.SetPinned(_settings.CornerPinned);
 
         (string message, PeekTone tone) = Status(front);
         window.Describe(WorkspaceName(front), message, tone);
         window.SetActive(front.Access?.HasDriver == true);
-        if (back is not null)
-        {
-            (string backMessage, PeekTone backTone) = Status(back);
-            window.DescribeBack(WorkspaceName(back), backMessage, backTone);
-            window.ShowBackFrame(back.Plane?.Glance(TimeSpan.FromSeconds(1)));
-        }
 
         UpdateResultChip(window, front);
         UpdateNeedsYou(window, front);
@@ -300,7 +350,7 @@ internal static class WorkspacePeekHost
         };
         window.HideRequested += () => { _dismissed = true; AppSettingsStore.Update(s => s with { CornerPinned = false }); };
         window.HoverChanged += Rethink;
-        window.PromoteRequested += () => { if (_backId is { } id) Touch(id); Rethink(); };
+        window.ShowRequested += id => { _chosenId = id; Touch(id); Rethink(); };
         window.Moved += rect => AppSettingsStore.Update(s => s with { CornerLeft = rect.Left, CornerTop = rect.Top });
         window.Resized += rect => AppSettingsStore.Update(s => s with
             { CornerWidth = rect.Width, CornerLeft = rect.Left, CornerTop = rect.Top });
@@ -320,7 +370,7 @@ internal static class WorkspacePeekHost
         if (Application.Current?.MainWindow is not { } shell) return;
         if (shell.WindowState == WindowState.Minimized) shell.WindowState = WindowState.Normal;
         shell.Show();
-        shell.Activate();
+        if (shell.ShowActivated) shell.Activate();
     }
 
     /// <summary>Copies dropped files into the front workspace's folder, never moving the source.
@@ -381,7 +431,10 @@ internal static class WorkspacePeekHost
         {
             _resultForId = null; _resultName = null; _resultPath = null;
         }
-        else if (_resultForId != front.Id)
+        // Keep looking while this run has nothing to offer. The agent lets go and its last write
+        // lands a moment later, and picking once - the first tick after it let go - meant that file
+        // was never offered at all. Once there is something there is nothing left to look for.
+        else if (_resultForId != front.Id || _resultPath is null)
         {
             _resultForId = front.Id;
             (_resultName, _resultPath) = NewestFile(front.Plane?.Folder, since);
@@ -423,23 +476,24 @@ internal static class WorkspacePeekHost
     /// can't show it - turned off in Settings, or a full-screen app in front. Once per request; the
     /// hub shows its own. Windows' Do not disturb and sound settings apply to the notification.
     /// </summary>
-    static void Announce()
+    static void Announce(bool presentation)
     {
-        if (_settings.CornerShow != CornerShow.Off && !FullScreenInFront()) return;
+        if (presentation || _settings.CornerShow != CornerShow.Off) return;
         foreach (WorkspaceRuntime r in WorkspaceRuntime.Running)
             foreach (WorkspaceHandoff request in r.Access?.Handoffs.All ?? [])
                 if (request.State == "pending" && _announced.Add(request.Id))
                     ModuleEntry.RequestAttention(AgentName(r) + " wants you", Question(request), r.Id, request.Id);
     }
 
-    static bool FullScreenInFront() =>
-        SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4;   // busy, D3D full screen, presentation
-
-    [DllImport("shell32.dll")]
-    static extern int SHQueryUserNotificationState(out int state);
-
-    static string Question(WorkspaceHandoff request) =>
-        "Open " + (request.Kind == "file" ? Path.GetFileName(request.Target) : request.Target) + " on your desktop?";
+    /// <summary>The one line the owner answers. A takeover runs the other way round from every other
+    /// request - it closes his own copy of a program and starts it in the workspace - so it gets its
+    /// own sentence rather than a target worded to survive somebody else's.</summary>
+    static string Question(WorkspaceHandoff request) => request.Kind switch
+    {
+        "takeover" => "Close your copy of " + request.Target + " and start it in the workspace?",
+        "file" => "Open " + Path.GetFileName(request.Target) + " on your desktop?",
+        _ => "Open " + request.Target + " on your desktop?",
+    };
 
     static void UpdateToast(WorkspacePeekWindow window, WorkspaceRuntime front)
     {
@@ -472,6 +526,10 @@ internal static class WorkspacePeekHost
     static bool InUse(WorkspaceRuntime front) => _window?.Hovered == true
         || WorkspacePeekPlacement.Grown(_settings) || front.Plane?.Driving == Driver.Owner;
 
+    /// <summary>The pace to draw at right now. Battery slows it, on both counts, but never stops it:
+    /// most Windows machines are laptops, and a corner view frozen on its last frame is the feature
+    /// not working. Read fresh every tick, so plugging in speeds it back up and unplugging slows it
+    /// down without a restart.</summary>
     static PreviewSmoothness Rate => WorkspacePeekCapture.OnBattery()
         ? PreviewSmoothness.BatterySaver : PreviewSmoothness.Balanced;
     static TimeSpan IdleInterval => IdleIntervalFor(Rate);
@@ -481,14 +539,12 @@ internal static class WorkspacePeekHost
     /// to the engine probe too, so it measures the same rate this host actually paces itself to.</summary>
     internal static TimeSpan IdleIntervalFor(PreviewSmoothness smoothness) => smoothness switch
     {
-        PreviewSmoothness.Smooth => TimeSpan.FromSeconds(1 / 5.0),
         PreviewSmoothness.BatterySaver => TimeSpan.FromSeconds(1.0),
         _ => TimeSpan.FromSeconds(1 / 2.5),
     };
 
     internal static TimeSpan InUseIntervalFor(PreviewSmoothness smoothness) => smoothness switch
     {
-        PreviewSmoothness.Smooth => TimeSpan.FromSeconds(1 / 15.0),
         PreviewSmoothness.BatterySaver => TimeSpan.FromSeconds(1 / 8.0),
         _ => TimeSpan.FromSeconds(1 / 12.0),
     };
@@ -524,7 +580,6 @@ internal static class WorkspacePeekHost
         if (_drawing || _owner is not { } owner || _window is not { Watching: true } window) return;
         if (_frontId is not { } id || !_followed.TryGetValue(id, out Follow? f) || f.Runtime.Computer is not { } desktop) return;
         bool inUse = InUse(f.Runtime);
-        if (!inUse && WorkspacePeekCapture.OnBattery()) return;
         _drawing = true;
         string capturedFor = id;
         WorkspacePeekCapture.Cached? cached = _background;
@@ -553,7 +608,7 @@ internal static class WorkspacePeekHost
         if (_dropHook is not null || !_started) return;
         if (_settings.CornerShow == CornerShow.Off) return;
         if (_window is { Watching: true }) return;
-        if (PickTwo().Front is null) return;
+        if (Pick().Front is null) return;
         _dropHook = new WorkspacePeekDropHook(TargetScreenRect, Summon);
     }
 
@@ -577,7 +632,9 @@ internal static class WorkspacePeekHost
     {
         if (_owner is not { } owner) return;
         if (!owner.CheckAccess()) { owner.BeginInvoke(Summon); return; }
+        if (WorkspacePresentation.Suppressed) return;
         _summoned = true;
+        _explicitSummon = false;
         _dismissed = false;
         _stirred = DateTimeOffset.Now;
         Rethink();
@@ -655,6 +712,7 @@ internal static class WorkspacePeekHost
         if (!owner.CheckAccess()) { owner.BeginInvoke(ShowCornerNow); return; }
         if (!WorkspaceRuntime.AnyRunning) { OpenWorkspace(null); return; }
         _summoned = true;
+        _explicitSummon = true;
         _dismissed = false;
         _stirred = DateTimeOffset.Now;
         Rethink();
@@ -693,6 +751,11 @@ internal static class WorkspacePeekHost
     sealed class Follow(WorkspaceRuntime runtime, Action stir, Action<Driver> driven)
     {
         internal readonly WorkspaceRuntime Runtime = runtime;
+
+        /// <summary>When this workspace was first followed, so the tabs keep the order they started
+        /// in - a tab that moved every time another agent did something would be no use at all.</summary>
+        internal int Seq { get; init; }
+
         void Drove(Driver who)
         {
             driven(who);

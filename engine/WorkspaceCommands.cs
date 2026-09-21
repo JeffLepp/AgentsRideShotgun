@@ -110,6 +110,7 @@ public sealed class WorkspaceCommands : IDisposable
     readonly List<CommandJob> _jobs = [];
     readonly CancellationTokenSource _stop = new();
     bool _disposed;
+    long _lastActive;
 
     public WorkspaceCommands(WorkspaceControl control)
     {
@@ -139,6 +140,12 @@ public sealed class WorkspaceCommands : IDisposable
 
     /// <summary>Every job this workspace has run in this session, oldest first.</summary>
     public IReadOnlyList<CommandJob> Jobs { get { lock (_gate) return [.. _jobs]; } }
+
+    // A command outlives the agent's lease. Idle cleanup must retain it until it actually ends.
+    internal (bool Running, long LastActive) Activity
+    {
+        get { lock (_gate) return (_jobs.Any(job => job.Ended is null), _lastActive); }
+    }
 
     public CommandJob? Find(string id)
     {
@@ -220,6 +227,7 @@ public sealed class WorkspaceCommands : IDisposable
         lock (_gate)
         {
             _jobs.Add(job);
+            _lastActive = Environment.TickCount64;
             Reap();
         }
         _control.Evidence.Note("run", job.Id + " " + Short(command), "started, pid " + pid
@@ -252,15 +260,6 @@ public sealed class WorkspaceCommands : IDisposable
         if (!job.Running) { error = "that job already " + job.Status; return false; }
         Stop(job, CommandState.Cancelled, "cancelled by " + who);
         return true;
-    }
-
-    /// <summary>Cancels every running job, for the owner's one-click stop.</summary>
-    public int CancelAll(string who)
-    {
-        int stopped = 0;
-        foreach (CommandJob job in Jobs)
-            if (job.Running) { Stop(job, CommandState.Cancelled, "cancelled by " + who); stopped++; }
-        return stopped;
     }
 
     /// <summary>
@@ -356,6 +355,7 @@ public sealed class WorkspaceCommands : IDisposable
             // an agent reading "cancelled, exit code -1" reasonably concludes the command failed.
             if (job.Running) { job.State = state; job.Reason = reason; job.ExitCode = code; }
             job.Ended = DateTimeOffset.Now;
+            _lastActive = Environment.TickCount64;
         }
         Trim(job);
         foreach (string leftover in job.Scripts) Delete(leftover);
@@ -416,10 +416,10 @@ public sealed class WorkspaceCommands : IDisposable
     /// <summary>Keeps the newest finished jobs and deletes the output of the ones falling off.</summary>
     void Reap()
     {
-        int finished = _jobs.Count(j => !j.Running);
+        int finished = _jobs.Count(j => j.Ended is not null);
         for (int i = 0; i < _jobs.Count && finished > KeepFinished; i++)
         {
-            if (_jobs[i].Running) continue;
+            if (_jobs[i].Ended is null) continue;
             Clean(_jobs[i]);
             _jobs.RemoveAt(i--);
             finished--;

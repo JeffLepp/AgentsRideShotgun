@@ -18,6 +18,13 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
     internal event Action? Changed;
     internal IReadOnlyList<WorkspaceHandoff> All { get { lock (_gate) return _requests.ToArray(); } }
 
+    /// <summary>
+    /// What an approved "program" or "takeover" request does, set by the workspace that owns these
+    /// requests because both need its launcher: start a program on the owner's own desktop, or move
+    /// one he already has open into the workspace. Null when it went, one sentence when it did not.
+    /// </summary>
+    internal Func<WorkspaceHandoff, string?>? Perform { get; set; }
+
     internal WorkspaceHandoff Request(string kind, string target, string reason)
     {
         if (target.Length is < 1 or > 2048 || target.Any(char.IsControl)
@@ -37,11 +44,22 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
             using var file = File.Open(target, FileMode.Open, FileAccess.Read, FileShare.Read);
             hash = Convert.ToHexString(SHA256.HashData(file));
         }
-        else throw new ArgumentException("Request a document file or an HTTP(S) link, not a command or executable.");
+        // A program the owner asked for goes to his own desktop, and a program he already has open
+        // can be moved in here - both are his click, and both need the workspace's own launcher,
+        // which is what Perform is. Neither is a document, so neither is checked as one.
+        else if (kind is "program" or "takeover")
+        {
+            if (Perform is null) throw new ArgumentException("This workspace cannot start programs for the owner.");
+        }
+        else throw new ArgumentException("Request a program, a document file or an HTTP(S) link, not a command line.");
         WorkspaceHandoff request;
         lock (_gate)
         {
-            var existing = _requests.FirstOrDefault(r => r.State == "pending" && r.Target == target && r.Sha256 == hash);
+            // Kind is part of what makes a request the same request: "open Notepad on your desktop"
+            // and "close your copy of Notepad and start it in here" name the same program and ask
+            // opposite things, and answering one must never be taken for answering the other.
+            var existing = _requests.FirstOrDefault(r =>
+                r.State == "pending" && r.Kind == kind && r.Target == target && r.Sha256 == hash);
             if (existing is not null) return existing;
             if (_requests.Count(r => r.State == "pending") >= 8)
                 throw new InvalidOperationException("Eight desktop requests are already waiting. Wait for the owner.");
@@ -98,6 +116,13 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
                         if (Convert.ToHexString(SHA256.HashData(frozen)) != request.Sha256)
                             throw new IOException("The document changed after the request. Ask for approval again.");
                     target = snapshot;
+                }
+                if (request.Kind is "program" or "takeover")
+                {
+                    if (Perform!(request) is { } refused) throw new InvalidOperationException(refused);
+                    return Replace(index, request with { State = "opened", Detail = request.Kind == "program"
+                        ? "The owner approved. Windows started it on his desktop."
+                        : "The owner approved. His copy closed and the workspace started its own." });
                 }
                 (open ?? OpenOnDesktop)(target);
                 return Replace(index, request with { State = "opened", Detail = snapshot is null

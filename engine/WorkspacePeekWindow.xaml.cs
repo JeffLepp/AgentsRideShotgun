@@ -15,6 +15,10 @@ namespace HiveMind.AgentWorkspaces;
 /// uses everywhere a workspace shows its status.</summary>
 internal enum PeekTone { Working, Attention, Quiet }
 
+/// <summary>One workspace's tab: what it is called, how it is doing, and whether it is the one the
+/// card is showing right now.</summary>
+internal readonly record struct PeekTab(string Id, string Name, PeekTone Tone, bool Active);
+
 /// <summary>
 /// The corner view: a small always-on-top picture of the workspace that is working, in a corner of
 /// the owner's own screen. Clicking into the picture is using it, through
@@ -54,7 +58,6 @@ public partial class WorkspacePeekWindow : Window
         // Border does not clip its content to its own rounded corners; the live picture would
         // otherwise show square corners poking past the card's radius.
         CardBody.SizeChanged += (_, e) => CardBody.Clip = new RectangleGeometry(new Rect(e.NewSize), 12, 12);
-        BackBody.SizeChanged += (_, e) => BackBody.Clip = new RectangleGeometry(new Rect(e.NewSize), 12, 12);
         // The hover actions are also how a keyboard user reaches pin/shrink/open/hide: show them
         // whenever focus is anywhere inside the window, not only under the mouse.
         IsKeyboardFocusWithinChanged += (_, _) => UpdateChrome();
@@ -71,7 +74,9 @@ public partial class WorkspacePeekWindow : Window
     internal event Action? SheetOpenClicked;
     internal event Action? SheetKeepClicked;
     internal event Action? HoverChanged;
-    internal event Action? PromoteRequested;
+
+    /// <summary>The owner picked another workspace's tab, by mouse or by keyboard.</summary>
+    internal event Action<string>? ShowRequested;
     internal event Action? ResumeClicked;
     internal event Action<string>? ChipOpenRequested;
 
@@ -115,35 +120,88 @@ public partial class WorkspacePeekWindow : Window
     /// </summary>
     internal const double ShadowMargin = 60;
 
+    /// <summary>The band the tab strip takes above the card: a tab and the gap down to the card.</summary>
+    internal const double TabBand = 26;
+
+    IReadOnlyList<PeekTab> _tabs = [];
+    string _tabKey = "";
+
     /// <summary>
-    /// Lays out the card (and, once a second workspace is busy, the smaller card peeking above it).
+    /// The tabs above the card, in the order the workspaces started. Conventional tabs rather than a
+    /// deeper pile of cards: with three running, all three are named and reachable in one click,
+    /// which a stack of replicas stops being past two. One workspace shows no strip - it names itself
+    /// on the card's own pill, and a strip with one tab in it is filler. Rebuilt only when the set
+    /// really changes, so a preview tick does not throw away the tab the owner is pointing at.
+    /// </summary>
+    internal void SetTabs(IReadOnlyList<PeekTab> tabs)
+    {
+        string key = string.Join('\u001f', tabs.Select(t => $"{t.Id}|{t.Name}|{t.Tone}|{t.Active}"));
+        if (key == _tabKey) return;
+        _tabKey = key;
+        _tabs = tabs;
+        bool many = tabs.Count > 1;
+        TabStrip.Visibility = many ? Visibility.Visible : Visibility.Collapsed;
+        NameText.Visibility = many ? Visibility.Collapsed : Visibility.Visible;
+        TabStrip.Children.Clear();
+        if (!many) return;
+        foreach (PeekTab tab in tabs) TabStrip.Children.Add(MakeTab(tab));
+    }
+
+    System.Windows.Controls.Button MakeTab(PeekTab tab)
+    {
+        var dot = new Ellipse { Width = 7, Height = 7, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+        var text = new System.Windows.Controls.TextBlock
+        {
+            Text = tab.Name, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        SetTone(dot, text, tab.Tone);
+        var button = new System.Windows.Controls.Button
+        {
+            Style = (Style)Resources["TabPill"],
+            Tag = tab.Id,
+            ToolTip = tab.Active ? tab.Name : "Show " + tab.Name,
+            Content = new System.Windows.Controls.StackPanel
+            {
+                Orientation = System.Windows.Controls.Orientation.Horizontal,
+                Children = { dot, text },
+            },
+        };
+        if (tab.Active)
+        {
+            // The tab you are on is made of the same stuff as the card under it and outlined in the
+            // accent - the ordinary tab mark. Not a wash of AccentSoftBrush: that is 13% alpha, which
+            // reads as selected over a solid panel and as nothing at all over the owner's wallpaper.
+            text.FontWeight = FontWeights.SemiBold;
+            text.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "InkBrush");
+            button.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "CardBrush");
+            button.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "AccentBrush");
+        }
+        AutomationProperties.SetName(button, tab.Active ? tab.Name + ", showing" : "Show " + tab.Name);
+        button.Click += (_, _) => ShowRequested?.Invoke(tab.Id);
+        return button;
+    }
+
+    /// <summary>
+    /// Lays out the card, and the tab strip above it once <see cref="SetTabs"/> has more than one.
     /// <see cref="VisibleSize"/> is the card's own bounding size afterward - what the corner rule
     /// should place; <see cref="Place"/> adds the shadow margin around whatever rect it is given.
     /// <paramref name="canGrow"/> is whether a remembered grown size exists to return to - the
     /// shrink/grow button shows while grown, and while small only if there is somewhere to grow back to.
     /// </summary>
-    internal void Configure(Size card, bool hasBack, bool grown, bool canGrow)
+    internal void Configure(Size card, bool grown, bool canGrow)
     {
-        Rect front0 = new(0, 0, card.Width, card.Height);
-        double extra = 0;
-        if (hasBack)
-        {
-            Rect back0 = WorkspacePeekPlacement.Back(front0);
-            extra = Math.Ceiling(Math.Max(0, -back0.Top));
-        }
+        double extra = TabStrip.Visibility == Visibility.Visible ? TabBand : 0;
         _stackExtra = extra;
         VisibleSize = new Size(card.Width, card.Height + extra);
         FrontCard.Width = card.Width;
         FrontCard.Height = card.Height;
         FrontCard.Margin = new Thickness(ShadowMargin, extra + ShadowMargin, 0, 0);
-        BackCard.Visibility = hasBack ? Visibility.Visible : Visibility.Collapsed;
-        if (hasBack)
-        {
-            Rect back = WorkspacePeekPlacement.Back(new Rect(0, extra, card.Width, card.Height));
-            BackCard.Width = back.Width;
-            BackCard.Height = back.Height;
-            BackCard.Margin = new Thickness(back.Left + ShadowMargin, back.Top + ShadowMargin, 0, 0);
-        }
+        TabStrip.Margin = new Thickness(ShadowMargin, ShadowMargin, 0, 0);
+        // Share the card's width between the tabs rather than let the strip run off the side of it:
+        // a tab that does not fit ellipsizes its name, which is still a tab you can see and click.
+        foreach (UIElement child in TabStrip.Children)
+            if (child is FrameworkElement tab) tab.MaxWidth = Math.Max(48, card.Width / TabStrip.Children.Count - 4);
         bool showSizeButton = grown || canGrow;
         ShrinkButton.Visibility = showSizeButton ? Visibility.Visible : Visibility.Collapsed;
         if (showSizeButton)
@@ -179,13 +237,6 @@ public partial class WorkspacePeekWindow : Window
         DropText.Text = "Copy into " + workspaceName;
         SetTone(StateDot, WhoText, tone);
         AutomationProperties.SetName(Chip, "Open or drag the newest file " + workspaceName + " saved");
-    }
-
-    internal void DescribeBack(string workspaceName, string message, PeekTone tone)
-    {
-        BackName.Text = workspaceName;
-        BackWho.Text = message;
-        SetTone(BackDot, BackWho, tone);
     }
 
     static void SetTone(Ellipse dot, System.Windows.Controls.TextBlock who, PeekTone tone)
@@ -240,8 +291,6 @@ public partial class WorkspacePeekWindow : Window
         FrontPatch.Visibility = Visibility.Collapsed;
         FrontPatch.Source = null;
     }
-
-    internal void ShowBackFrame(BitmapSource? frame) => BackScreen.Source = frame;
 
     /// <summary>The 2 DIP line along the bottom while the agent works, sweeping unless Windows'
     /// animations are off.</summary>
@@ -423,7 +472,6 @@ public partial class WorkspacePeekWindow : Window
             _leaving = false;
             Hide();
             ShowFrame(null);
-            ShowBackFrame(null);
             HideFramePatch();
         };
         BeginAnimation(OpacityProperty, fade);
@@ -432,10 +480,21 @@ public partial class WorkspacePeekWindow : Window
     /// <summary>Whether it is on screen and not on its way off it.</summary>
     internal bool Watching => IsVisible && !_leaving;
 
+    /// <summary>A game or presentation takes the screen: remove this surface without an exit animation.</summary>
+    internal void HideImmediately()
+    {
+        _leaving = false;
+        BeginAnimation(OpacityProperty, null);
+        Opacity = 0;
+        Hide();
+        ShowFrame(null);
+        HideFramePatch();
+    }
+
     /// <summary>
     /// The shadow margin needs real window bounds to render into, but that margin is not the card:
     /// a click there must fall through to whatever is really at that point on the owner's desktop,
-    /// not land on this window. HTTRANSPARENT outside the card (or the back card) tells Windows to
+    /// not land on this window. HTTRANSPARENT outside the card (or the tab strip) tells Windows to
     /// keep looking; everything else hit-tests normally.
     /// </summary>
     protected override void OnSourceInitialized(EventArgs e)
@@ -451,7 +510,7 @@ public partial class WorkspacePeekWindow : Window
         long raw = lParam.ToInt64();
         var screen = new Point(unchecked((short)(raw & 0xFFFF)), unchecked((short)((raw >> 16) & 0xFFFF)));
         Point local = PointFromScreen(screen);
-        if (!Within(local, FrontCard) && !(BackCard.Visibility == Visibility.Visible && Within(local, BackCard)))
+        if (!Within(local, FrontCard) && !(TabStrip.Visibility == Visibility.Visible && Within(local, TabStrip)))
         {
             handled = true;
             return HtTransparent;
@@ -459,12 +518,42 @@ public partial class WorkspacePeekWindow : Window
         return 0;
     }
 
-    static bool Within(Point point, FrameworkElement card) =>
-        point.X >= card.Margin.Left && point.X < card.Margin.Left + card.Width
-        && point.Y >= card.Margin.Top && point.Y < card.Margin.Top + card.Height;
+    static bool Within(Point point, FrameworkElement element)
+    {
+        // The card is laid out at an exact size; the strip is as wide as its tabs came out.
+        double width = double.IsNaN(element.Width) ? element.ActualWidth : element.Width;
+        double height = double.IsNaN(element.Height) ? element.ActualHeight : element.Height;
+        return point.X >= element.Margin.Left && point.X < element.Margin.Left + width
+            && point.Y >= element.Margin.Top && point.Y < element.Margin.Top + height;
+    }
 
-    void FrontCard_MouseEnter(object sender, MouseEventArgs e) { SetHover(true); HoverChanged?.Invoke(); }
-    void FrontCard_MouseLeave(object sender, MouseEventArgs e) { SetHover(false); HoverChanged?.Invoke(); }
+    /// <summary>
+    /// Left and right move between workspaces, and so does Ctrl+Tab, which is what a row of tabs does
+    /// everywhere else. Only once the owner has clicked the corner: it never takes focus by appearing,
+    /// so it can never swallow a key meant for the window he is actually working in. A key the live
+    /// picture already sent into the workspace arrives here handled, and is left alone.
+    /// </summary>
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Handled || _tabs.Count < 2) return;
+        int step = e.Key switch
+        {
+            Key.Right => 1,
+            Key.Left => -1,
+            Key.Tab when Keyboard.Modifiers.HasFlag(ModifierKeys.Control) =>
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? -1 : 1,
+            _ => 0,
+        };
+        if (step == 0) return;
+        int at = 0;
+        for (int i = 0; i < _tabs.Count; i++) if (_tabs[i].Active) at = i;
+        ShowRequested?.Invoke(_tabs[(at + step + _tabs.Count) % _tabs.Count].Id);
+        e.Handled = true;
+    }
+
+    void Root_MouseEnter(object sender, MouseEventArgs e) { SetHover(true); HoverChanged?.Invoke(); }
+    void Root_MouseLeave(object sender, MouseEventArgs e) { SetHover(false); HoverChanged?.Invoke(); }
 
     void Pill_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -473,8 +562,6 @@ public partial class WorkspacePeekWindow : Window
         catch (InvalidOperationException) { }
         finally { _moving = false; Moved?.Invoke(FrontRect); }
     }
-
-    void BackCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => PromoteRequested?.Invoke();
 
     void PinButton_Click(object sender, RoutedEventArgs e) => PinClicked?.Invoke();
     void ShrinkButton_Click(object sender, RoutedEventArgs e) => ShrinkClicked?.Invoke();

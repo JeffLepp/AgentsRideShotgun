@@ -17,6 +17,12 @@
     <Window.Resources>
         <local:CountToVisibilityConverter x:Key="CountToVisibility"/>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <!-- Same crescent as the workspace page's own Icon.Sleep (WorkspaceFullView.xaml): the
+             card/row Sleep control (fix list item 2.2) and this window are separate resource scopes,
+             so it is defined once per file rather than pulled from HiveMind.AgentWorkspaces's sprite,
+             which is out of scope for this fix. -->
+        <Geometry x:Key="Icon.Sleep">M11.27,11.27 A6,6 0 1 1 4.74,4.74 A4.67,4.67 0 0 0 11.27,11.27 Z</Geometry>
+        <Geometry x:Key="Icon.Search">M10.5,10.5 L14,14 M12,7 A5,5 0 1 1 2,7 A5,5 0 1 1 12,7</Geometry>
 
         <!-- A stack card or row: no chrome of its own, a hover and pressed tint underneath. -->
         <Style x:Key="StackItemButton" TargetType="Button">
@@ -46,6 +52,10 @@
             <Setter Property="Fill" Value="{DynamicResource AsleepBrush}"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Working}" Value="True"><Setter Property="Fill" Value="{DynamicResource AccentBrush}"/></DataTrigger>
+                <!-- Idle wins over Working: running with nobody home reads the same grey as Recent's
+                     dot (fix list item 2) rather than the accent it wore whether it was mid-task or
+                     had done nothing for twenty minutes. NeedsYou (declared after) still wins over both. -->
+                <DataTrigger Binding="{Binding Idle}" Value="True"><Setter Property="Fill" Value="{DynamicResource AsleepBrush}"/></DataTrigger>
                 <DataTrigger Binding="{Binding NeedsYou}" Value="True"><Setter Property="Fill" Value="{DynamicResource NeedsYouBrush}"/></DataTrigger>
             </Style.Triggers>
         </Style>
@@ -57,28 +67,34 @@
         </Style>
 
         <DataTemplate x:Key="WorkingCardTemplate">
-            <Button Style="{StaticResource StackItemButton}" Click="WorkingCard_Click" Tag="{Binding Id}" AutomationProperties.Name="{Binding OpenLabel}">
-                <StackPanel>
-                    <Border CornerRadius="9" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
-                            Background="{DynamicResource PreviewBrush}" ClipToBounds="True" Loaded="AspectBorder_Loaded" Tag="0.625">
-                        <Image Source="{Binding Preview}" Stretch="UniformToFill"/>
-                    </Border>
-                    <Grid Margin="2,8,2,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <Ellipse Grid.Column="0" Style="{StaticResource StatusDot}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                        <!-- LineHeight matches the reference's 1.55 leading (13px * 1.55), the same fix AsleepRowTemplate
-                             uses below: WPF's own line box runs shorter, which was leaving this meta row short. -->
-                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" LineHeight="20" LineStackingStrategy="BlockLineHeight"
-                                   Foreground="{DynamicResource InkBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Grid.Column="3" Text="{Binding AgentText}" FontSize="12" Style="{StaticResource AgentTextStyle}" VerticalAlignment="Center"/>
+            <Grid Margin="0,3">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Button Grid.Column="0" Style="{StaticResource StackItemButton}" Click="WorkingCard_Click" Tag="{Binding Id}"
+                        ToolTip="{Binding Name}" AutomationProperties.Name="{Binding OpenLabel}">
+                    <Grid Margin="2,4">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="80" Height="50" CornerRadius="5" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
+                                Background="{DynamicResource PreviewBrush}" ClipToBounds="True" Margin="0,0,10,0">
+                            <Border.Clip><RectangleGeometry Rect="0,0,80,50" RadiusX="5" RadiusY="5"/></Border.Clip>
+                            <Image Source="{Binding Preview}" Stretch="UniformToFill"/>
+                        </Border>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource InkBrush}" TextTrimming="CharacterEllipsis"/>
+                            <Grid Margin="0,5,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Ellipse Style="{StaticResource StatusDot}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="{Binding AgentText}" FontSize="12" Style="{StaticResource AgentTextStyle}"
+                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding AgentText}"/>
+                            </Grid>
+                        </StackPanel>
                     </Grid>
-                </StackPanel>
-            </Button>
+                </Button>
+                <Button Grid.Column="1" Width="28" Height="28" Padding="0" Margin="4,0,0,0" Style="{StaticResource IconButton}"
+                        Click="SleepCard_Click" Tag="{Binding Id}" ToolTip="{Binding SleepLabel}" AutomationProperties.Name="{Binding SleepLabel}">
+                    <Path Style="{StaticResource Icon13}" Data="{StaticResource Icon.Sleep}"/>
+                </Button>
+            </Grid>
         </DataTemplate>
 
         <DataTemplate x:Key="AsleepRowTemplate">
@@ -90,7 +106,7 @@
                         <!-- LineHeight matches the reference's 1.55 leading (13px * 1.55) so the row's pitch matches; WPF's own line box runs shorter. -->
                         <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" LineHeight="20" LineStackingStrategy="BlockLineHeight"
                                    Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Grid.Column="2" Text="{Binding Age}" FontSize="12" Foreground="{DynamicResource FaintInkBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Age}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
             </Button>
@@ -101,7 +117,7 @@
             <RadioButton GroupName="HubSidebar" Style="{StaticResource SidebarItem}" Padding="8,7" IsChecked="{Binding Selected, Mode=OneWay}"
                          Checked="SidebarItem_Checked" AutomationProperties.Name="{Binding OpenLabel}">
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <Border Grid.Column="0" Width="64" Height="40" CornerRadius="5" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
                             Background="{DynamicResource PreviewBrush}" ClipToBounds="True" Margin="0,0,10,0">
                         <!-- ClipToBounds clips to the rectangular bounds only, not the rounded corners, so the
@@ -111,29 +127,31 @@
                     </Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource InkBrush}" TextTrimming="CharacterEllipsis"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                        <Grid Margin="0,3,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <Ellipse Style="{StaticResource StatusDot}" Margin="0,0,5,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding AgentText}" FontSize="11.5" Style="{StaticResource AgentTextStyle}"/>
-                        </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding AgentText}" FontSize="12" Style="{StaticResource AgentTextStyle}"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding AgentText}"/>
+                        </Grid>
                     </StackPanel>
+                    <!-- Same one-click Sleep control as the stack's card (fix list item 2.2), sized for
+                         this row instead of the wider card. -->
+                    <Button Grid.Column="2" Width="22" Height="22" Padding="0" Margin="4,0,0,0" VerticalAlignment="Center" Style="{StaticResource IconButton}"
+                            Click="SleepCard_Click" Tag="{Binding Id}" ToolTip="{Binding SleepLabel}" AutomationProperties.Name="{Binding SleepLabel}">
+                        <Path Style="{StaticResource Icon13}" Data="{StaticResource Icon.Sleep}"/>
+                    </Button>
                 </Grid>
             </RadioButton>
         </DataTemplate>
 
         <DataTemplate x:Key="SidebarAsleepTemplate">
-            <RadioButton GroupName="HubSidebar" Style="{StaticResource SidebarItem}" Padding="8,7" IsChecked="{Binding Selected, Mode=OneWay}"
-                         Checked="SidebarItem_Checked" AutomationProperties.Name="{Binding OpenLabel}">
+            <RadioButton GroupName="HubSidebar" Style="{StaticResource SidebarItem}" Padding="8,9" IsChecked="{Binding Selected, Mode=OneWay}"
+                         Checked="SidebarItem_Checked" ToolTip="{Binding Name}" AutomationProperties.Name="{Binding OpenLabel}">
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Width="64" Height="40" CornerRadius="5" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
-                            Background="{DynamicResource PreviewBrush}" ClipToBounds="True" Margin="0,0,10,0" Opacity="0.55">
-                        <Border.Clip><RectangleGeometry Rect="0,0,64,40" RadiusX="5" RadiusY="5"/></Border.Clip>
-                        <Image Source="{Binding Preview}" Stretch="UniformToFill"/>
-                    </Border>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource InkBrush}" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding SidebarAge}" FontSize="11.5" Foreground="{DynamicResource MutedInkBrush}" Margin="0,3,0,0"/>
-                    </StackPanel>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Ellipse Width="7" Height="7" Fill="{DynamicResource AsleepBrush}" Margin="0,0,9,0" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" Foreground="{DynamicResource InkBrush}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Column="2" Text="{Binding Age}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
                 </Grid>
             </RadioButton>
         </DataTemplate>
@@ -155,6 +173,9 @@
                 <TextBlock Grid.Column="1" Text="Deskweave" FontWeight="SemiBold" FontSize="12.5" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                     <!-- No new-workspace button (brief A.1): workspaces make themselves. -->
+                    <Button x:Name="FilterButton" Style="{StaticResource IconButton}" Click="Filter_Click" ToolTip="Find a workspace" AutomationProperties.Name="Find a workspace">
+                        <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Search}"/>
+                    </Button>
                     <Button x:Name="SettingsButton" Style="{StaticResource IconButton}" Click="Settings_Click" ToolTip="Settings" AutomationProperties.Name="Settings">
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Gear}"/>
                     </Button>
@@ -179,16 +200,15 @@
                             <Border x:Name="FilterHost" Visibility="Collapsed" Margin="0,0,0,10">
                                 <TextBox x:Name="FilterBox" TextChanged="FilterBox_TextChanged" AutomationProperties.Name="Filter workspaces by name"/>
                             </Border>
-                            <local:TrackedText Text="Working" TextFontSize="11" Margin="2,8,0,0" TextForeground="{DynamicResource FaintInkBrush}"
+                            <TextBlock x:Name="FilterEmptyText" Text="No matching workspaces" Foreground="{DynamicResource MutedInkBrush}" Margin="2,8" Visibility="Collapsed"/>
+                            <TextBlock Text="Working" FontSize="12" FontWeight="SemiBold" Margin="2,8,0,2" Foreground="{DynamicResource MutedInkBrush}"
                                                Visibility="{Binding Items.Count, ElementName=StackWorkingList, Converter={StaticResource CountToVisibility}}"/>
-                            <ItemsControl x:Name="StackWorkingList" Margin="0,10,0,0" ItemTemplate="{StaticResource WorkingCardTemplate}"
+                            <ItemsControl x:Name="StackWorkingList" Margin="0,4,0,0" ItemTemplate="{StaticResource WorkingCardTemplate}"
                                           Visibility="{Binding Items.Count, RelativeSource={RelativeSource Self}, Converter={StaticResource CountToVisibility}}">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemContainerStyle>
-                                    <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,0,12"/></Style>
-                                </ItemsControl.ItemContainerStyle>
                             </ItemsControl>
-                            <local:TrackedText Text="Recent" TextFontSize="11" Margin="2,8,0,3" TextForeground="{DynamicResource FaintInkBrush}"/>
+                            <TextBlock Text="Recent" FontSize="12" FontWeight="SemiBold" Margin="2,14,0,6" Foreground="{DynamicResource MutedInkBrush}"
+                                       Visibility="{Binding Items.Count, ElementName=StackAsleepList, Converter={StaticResource CountToVisibility}}"/>
                             <ItemsControl x:Name="StackAsleepList" ItemTemplate="{StaticResource AsleepRowTemplate}">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                             </ItemsControl>
@@ -201,7 +221,7 @@
                     <Border Grid.Column="0" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,1,0">
                         <ScrollViewer x:Name="SidebarScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Margin="8,10,8,10">
-                                <local:TrackedText Text="Working" TextFontSize="11" Margin="2,7,2,7" TextForeground="{DynamicResource FaintInkBrush}"
+                                <TextBlock Text="Working" FontSize="12" FontWeight="SemiBold" Margin="8,7,2,7" Foreground="{DynamicResource MutedInkBrush}"
                                                    Visibility="{Binding Items.Count, ElementName=SidebarWorkingList, Converter={StaticResource CountToVisibility}}"/>
                                 <!-- ItemContainerStyle's bottom margin (measured against reference 04's row pitch,
                                      see artifacts/cut/edge-hub.ps1): the row template alone renders a shade short
@@ -211,7 +231,8 @@
                                         <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,0,2"/></Style>
                                     </ItemsControl.ItemContainerStyle>
                                 </ItemsControl>
-                                <local:TrackedText Text="Recent" TextFontSize="11" Margin="2,10,2,7" TextForeground="{DynamicResource FaintInkBrush}"/>
+                                <TextBlock Text="Recent" FontSize="12" FontWeight="SemiBold" Margin="8,14,2,7" Foreground="{DynamicResource MutedInkBrush}"
+                                           Visibility="{Binding Items.Count, ElementName=SidebarAsleepList, Converter={StaticResource CountToVisibility}}"/>
                                 <ItemsControl x:Name="SidebarAsleepList" ItemTemplate="{StaticResource SidebarAsleepTemplate}">
                                     <ItemsControl.ItemContainerStyle>
                                         <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,0,2"/></Style>

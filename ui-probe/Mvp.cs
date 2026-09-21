@@ -33,7 +33,7 @@ sealed class SceneContext(string references) : IDisposable
     /// <summary>Right of every screen: a window there lays out and renders but is never seen.</summary>
     public static Point OffScreen => new(SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth + 400, 40);
 
-    public T Own<T>(T window) where T : Window { _windows.Add(window); return window; }
+    public T Own<T>(T window) where T : Window { _windows.Add(window); return ProbeWindow.OffScreen(window); }
 
     /// <summary>A stored workspace, with no computer running.</summary>
     public StoredWorkspace Workspace(string name)
@@ -108,20 +108,22 @@ static class Mvp
             JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    /// <summary>At 96 DPI, so one DIP is one pixel and sizes compare directly with the references.</summary>
-    static BitmapSource Photograph(FrameworkElement element)
+    /// <summary>At 96 DPI, so one DIP is one pixel and sizes compare directly with the references.
+    /// A <paramref name="scale"/> above 1 keeps the DIPs and adds device pixels, which is what a
+    /// 125% or 150% monitor does with the same layout (Scenes.Scaling.cs).</summary>
+    internal static BitmapSource Photograph(FrameworkElement element, double scale = 1)
     {
         element.UpdateLayout();
-        int width = Math.Max(1, (int)Math.Round(element.ActualWidth));
-        int height = Math.Max(1, (int)Math.Round(element.ActualHeight));
-        var image = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        double across = Math.Max(1, element.ActualWidth), down = Math.Max(1, element.ActualHeight);
+        var image = new RenderTargetBitmap((int)Math.Round(across * scale), (int)Math.Round(down * scale),
+            96 * scale, 96 * scale, PixelFormats.Pbgra32);
         if (element is Window) image.Render(element);
         else
         {
             // An element inside a window renders at its own offset; a brush of it does not.
             var visual = new DrawingVisual();
             using (DrawingContext context = visual.RenderOpen())
-                context.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, width, height));
+                context.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, across, down));
             image.Render(visual);
         }
         image.Freeze();
@@ -208,7 +210,7 @@ static class Mvp
         return image;
     }
 
-    static void Save(BitmapSource image, string path)
+    internal static void Save(BitmapSource image, string path)
     {
         var png = new PngBitmapEncoder();
         png.Frames.Add(BitmapFrame.Create(image));
@@ -216,7 +218,7 @@ static class Mvp
         png.Save(file);
     }
 
-    static string References()
+    internal static string References()
     {
         for (var folder = new DirectoryInfo(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
             if (Directory.Exists(Path.Combine(folder.FullName, "design", "reference")))

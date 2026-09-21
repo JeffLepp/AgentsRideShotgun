@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -13,6 +13,16 @@ internal static class Program
 
     [STAThread]
     static int Main(string[] args)
+    {
+        try { return RunMain(args); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex);
+            return 1;
+        }
+    }
+
+    static int RunMain(string[] args)
     {
         if (args.Length == 2 && args[0] == "--grandchild")
         {
@@ -40,6 +50,7 @@ internal static class Program
         // real agent command. Writes only inside the isolated root the caller names in the
         // environment, in each app's own format, and starts no model.
         if (args.Length > 0 && args[0] == "mcp") return FirstRunConnections.Cli(args);
+        if (args.Length == 3 && args[0] == "--render-mode-child") return RenderModeProbe.Child(args[1], args[2]);
         // ponytail: one probe at a time on this PC (see ui-probe); child modes above never wait for it.
         using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
         try { turn.WaitOne(); } catch (AbandonedMutexException) { }
@@ -47,6 +58,16 @@ internal static class Program
             return CaptureSpike.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--corner-rate" && Path.IsPathFullyQualified(args[1]))
             return CornerRate.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--capture-cost" && Path.IsPathFullyQualified(args[1]))
+            return CaptureCost.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--click-proof" && Path.IsPathFullyQualified(args[1]))
+            return ClickProof.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--native-dialog-press" && Path.IsPathFullyQualified(args[1]))
+            return NativeDialogPress.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--tree-budget" && Path.IsPathFullyQualified(args[1]))
+            return TreeBudgetProof.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--live-router" && Path.IsPathFullyQualified(args[1]))
+            return LiveRouter.RunStandalone(Path.GetFullPath(args[1]));
         if (args.Length != 1 || !Path.IsPathFullyQualified(args[0])) return 2;
         return Run(Path.GetFullPath(args[0]));
     }
@@ -186,8 +207,12 @@ internal static class Program
                 "Restart opens the same saved workspace folder with the result intact");
             WorkspaceRuntime.Rest();
             FirstRunConnections.Run(Path.Combine(fixture, "agents"), Check);
-            LiveRouter.Run(Check);
+            LiveRouter.Run(Check, output);
             ProjectRouting.Run(Check, output);
+            RenderModeProbe.Run(Check, output);
+            SleepGate.Run(Check);
+            PrewarmProbe.Run(Check);
+            OpenRouteProbe.Run(Check);
         }
         catch (Exception ex) { failure = ex.ToString(); }
         finally

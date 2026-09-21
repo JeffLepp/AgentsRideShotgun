@@ -15,7 +15,7 @@ using HiveMind.AgentWorkspaces;
 /// </summary>
 internal static class LiveRouter
 {
-    internal static void Run(Action<bool, string> Check)
+    internal static void Run(Action<bool, string> Check, string? outputDirectory = null)
     {
         string ticket = WorkspaceAccessStore.RouterTicket;
         WorkspaceRouter.RetryEvery = TimeSpan.FromSeconds(1);
@@ -48,6 +48,18 @@ internal static class LiveRouter
                     "After 400 clients drop before the handshake, the packaged bridge still initializes and lists the tools");
                 Check(Text(session.Tool("status")).StartsWith("No workspace yet", StringComparison.Ordinal),
                     "A status call through the router answers without starting a workspace");
+                int records = WorkspaceStore.All().Count, running = WorkspaceRuntime.Running.Count;
+                object[] malformed = [new { }, new { name = "no_such_tool" },
+                    new { name = "click", arguments = new { } },
+                    new { name = "browse", arguments = "invalid" },
+                    new { name = "click", arguments = new { x = "invalid", y = 1 } },
+                    new { name = "computer", arguments = new { actions = new[] { new { type = "click", x = 1 } } } },
+                    new { name = "batch", arguments = new { actions = new[] { new { action = "press", control = "invalid" } } } }];
+                Check(malformed.All(parameters => session.Request("tools/call", parameters)
+                        .GetProperty("error").GetProperty("code").GetInt32() == -32602)
+                    && WorkspaceStore.All().Count == records && WorkspaceRuntime.Running.Count == running
+                    && Text(session.Tool("status")).StartsWith("No workspace yet", StringComparison.Ordinal),
+                    "Unknown tools and malformed arguments are rejected before routing creates a record, desktop or client");
 
                 // Deskweave quits under a connected agent, then opens again.
                 WorkspaceRouter.Stop();
@@ -86,19 +98,19 @@ internal static class LiveRouter
             File.Delete(ticket);
 
             // Nothing is open: a missing ticket, a ticket from a crash, and one from another version.
-            (int code, string errors, string output, TimeSpan took) = Once(ticket);
+            (int code, string errors, string output, TimeSpan took) = Once(ticket, "missing", outputDirectory);
             Check(code == 1 && errors.Trim() == "Deskweave isn't open. Open Deskweave, then reconnect this MCP server."
                 && output.Length == 0 && took < TimeSpan.FromSeconds(5),
                 "With no ticket the bridge exits in under five seconds with one line and nothing on the MCP stream");
             File.WriteAllText(ticket, StaleTicket(dead));
-            (code, errors, output, took) = Once(ticket);
+            (code, errors, output, took) = Once(ticket, "stale", outputDirectory);
             Check(code == 1 && errors.Trim() == "Deskweave isn't open. Open Deskweave, then reconnect this MCP server."
                 && output.Length == 0 && took < TimeSpan.FromSeconds(5),
                 "A ticket naming a pipe nobody serves fails in under five seconds instead of waiting ten on it");
             File.WriteAllText(ticket, "{\"schema\":2}");
-            (code, errors, _, took) = Once(ticket);
+            (code, errors, output, took) = Once(ticket, "old-schema", outputDirectory);
             Check(code == 2 && errors.Trim().StartsWith("This MCP entry doesn't match the Deskweave on this PC.", StringComparison.Ordinal)
-                && took < TimeSpan.FromSeconds(2),
+                && output.Length == 0 && took < TimeSpan.FromSeconds(2),
                 "A ticket from another version says to connect the agent again, at once and not silently");
             File.Delete(ticket);
 
@@ -120,11 +132,88 @@ internal static class LiveRouter
                     "A tool call in flight when Deskweave closes is answered at once with one line");
             }
             WorkspaceAccessStore.Withdraw("in-flight");
+            CheckQueuedReplies(Check);
+            CheckQueuedDisconnect(Check);
+            CheckRevokedRoute(Check);
         }
         finally
         {
             WorkspaceRouter.Stop();
             WorkspaceRouter.RetryEvery = TimeSpan.FromSeconds(5);
+        }
+    }
+
+    static void CheckQueuedReplies(Action<bool, string> check)
+    {
+        using var server = new WorkspacePipeServer(async (request, cancel) =>
+        {
+            if (request == "first") await Task.Delay(100, cancel);
+            return request;
+        });
+        using var pipe = new NamedPipeClientStream(".", server.Name, PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        pipe.ConnectAsync(bound.Token).GetAwaiter().GetResult();
+        WorkspacePipeProtocol.Write(pipe, server.Capability, 256, bound.Token).GetAwaiter().GetResult();
+        if (WorkspacePipeProtocol.Read(pipe, 256, bound.Token).GetAwaiter().GetResult() != "workspace-pipe/1")
+            throw new IOException("Queued-replies probe did not authenticate.");
+        string[] requests = ["first", "second", "third"];
+        foreach (string request in requests)
+            WorkspacePipeProtocol.Write(pipe, request, 256, bound.Token).GetAwaiter().GetResult();
+        check(requests.All(request => WorkspacePipeProtocol.Read(pipe, 256, bound.Token).GetAwaiter().GetResult() == request),
+            "Pipelined requests each receive one reply in the original order");
+    }
+
+    static void CheckQueuedDisconnect(Action<bool, string> check)
+    {
+        using var started = new ManualResetEventSlim();
+        using var closed = new ManualResetEventSlim();
+        using var server = new WorkspacePipeServer(() => new(async (_, cancel) =>
+        {
+            started.Set();
+            await Task.Delay(Timeout.Infinite, cancel);
+            return null;
+        }, closed.Set));
+        using (var pipe = new NamedPipeClientStream(".", server.Name, PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+        {
+            using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            pipe.ConnectAsync(bound.Token).GetAwaiter().GetResult();
+            WorkspacePipeProtocol.Write(pipe, server.Capability, 256, bound.Token).GetAwaiter().GetResult();
+            if (WorkspacePipeProtocol.Read(pipe, 256, bound.Token).GetAwaiter().GetResult() != "workspace-pipe/1")
+                throw new IOException("Queued-disconnect probe did not authenticate.");
+            WorkspacePipeProtocol.Write(pipe, "first", 256, bound.Token).GetAwaiter().GetResult();
+            if (!started.Wait(TimeSpan.FromSeconds(2))) throw new IOException("The first request did not start.");
+            WorkspacePipeProtocol.Write(pipe, "queued", 256, bound.Token).GetAwaiter().GetResult();
+            Thread.Sleep(100); // let the server consume its read-ahead frame before the client exits
+        }
+        check(closed.Wait(TimeSpan.FromSeconds(3)),
+            "Bridge disconnect cancels the running request and releases its peer even with another request queued");
+    }
+
+    static void CheckRevokedRoute(Action<bool, string> check)
+    {
+        string project = Directory.CreateTempSubdirectory("Deskweave-revoked-route-").FullName;
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        StoredWorkspace workspace = WorkspaceStore.Create("Revoked route probe");
+        WorkspaceStore.Update(workspace.Id, w => w with { Agents = WorkspaceHome.Folder(project) });
+        var disabled = new WorkspaceAccessPolicy(false, false) { PrewarmBrowser = false };
+        WorkspaceAccessStore.Write(workspace.Id, disabled);
+        int running = WorkspaceRuntime.Running.Count;
+        try
+        {
+            var first = WorkspaceRouter.Place(project, "codex");
+            var reconnect = WorkspaceRouter.Place(project, "codex");
+            check(first.Runtime is null && reconnect.Runtime is null
+                && first.Why?.StartsWith("Agent access is off", StringComparison.Ordinal) == true
+                && reconnect.Why == first.Why && WorkspaceAccessStore.Read(workspace.Id) == disabled
+                && WorkspaceRuntime.Running.Count == running,
+                "Routing and reconnect both preserve a disabled workspace policy without starting its desktop");
+        }
+        finally
+        {
+            WorkspaceStore.Delete(workspace.Id);
+            Directory.Delete(project, recursive: true);
         }
     }
 
@@ -150,12 +239,50 @@ internal static class LiveRouter
         : reply.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
 
     /// <summary>Starts the bridge as an agent would, sends initialize, and waits for it to end.</summary>
-    static (int Code, string Errors, string Output, TimeSpan Took) Once(string ticket)
+    static (int Code, string Errors, string Output, TimeSpan Took) Once(string ticket, string scenario, string? outputDirectory)
     {
         var waited = Stopwatch.StartNew();
         using var bridge = new Bridge(ticket);
         bridge.Send("initialize", Hello);
-        return (bridge.Exit(TimeSpan.FromSeconds(20)), bridge.Errors, bridge.Output, waited.Elapsed);
+        int code = bridge.Exit(TimeSpan.FromSeconds(20));
+        TimeSpan exited = waited.Elapsed;
+        string errors = bridge.Errors, output = bridge.Output;
+        TimeSpan took = waited.Elapsed;
+        // Keep the existing end-to-end timing bound. Distinguish process startup/exit from stream
+        // drain delays so a heavily loaded test run leaves enough evidence to diagnose a failure.
+        if (outputDirectory is not null)
+            File.AppendAllText(Path.Combine(outputDirectory, "router-bridge-exits.jsonl"), JsonSerializer.Serialize(new
+            {
+                scenario, observedAt = DateTimeOffset.UtcNow, code, stdout = output, stderr = errors,
+                exitedMs = exited.TotalMilliseconds, elapsedMs = took.TotalMilliseconds,
+            }) + Environment.NewLine);
+        return (code, errors, output, took);
+    }
+
+    /// <summary>Repeats only the router/transport gate, with isolated stores and no visible windows.</summary>
+    internal static int RunStandalone(string output)
+    {
+        Directory.CreateDirectory(output);
+        using var scope = WorkspaceStore.UseRootForTests(Path.Combine(output, "w"));
+        using var settings = AppSettingsStore.UseFileForTests(Path.Combine(output, "settings.json"));
+        var claims = new List<string>();
+        string? failure = null;
+        try
+        {
+            Run((passed, claim) =>
+            {
+                if (!passed) throw new InvalidOperationException("Failed: " + claim);
+                claims.Add(claim);
+                File.AppendAllText(Path.Combine(output, "progress.log"), "PASS " + claim + Environment.NewLine);
+            }, output);
+        }
+        catch (Exception error) { failure = error.ToString(); }
+        File.WriteAllText(Path.Combine(output, "report.json"), JsonSerializer.Serialize(new
+        {
+            status = failure is null ? "passed" : "failed", observedAt = DateTimeOffset.UtcNow,
+            bridge = WorkspaceConnections.Bridge, claims, failure, globalInputEventsSent = 0,
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        return failure is null ? 0 : 1;
     }
 
     /// <summary>The packaged bridge on a ticket, driven over its standard streams like an MCP client.</summary>

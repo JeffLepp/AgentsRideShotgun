@@ -1,6 +1,7 @@
 using HiveMind.AgentWorkspaces;
 using HiveMind.Product;
 using Microsoft.Win32;
+using System.IO;
 using Velopack;
 
 namespace Deskweave;
@@ -13,7 +14,7 @@ namespace Deskweave;
 static class Program
 {
     [STAThread]
-    static void Main()
+    static int Main(string[] args)
     {
         // Inlined in Main: vpk checks statically that Run() is reached from here.
         try
@@ -25,21 +26,51 @@ static class Program
                     // every agent session afterwards tries a bridge that is gone. The owner's
                     // workspaces and settings stay; Settings has Delete all Deskweave data.
                     // Velopack ends this after 30 s, so the quick part goes first.
-                    try
+                    Cleanup("startup registration", () =>
                     {
-                        using (RegistryKey? run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
-                            run?.DeleteValue("Deskweave", false);
+                        using RegistryKey? run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                        // A different copy may now own startup. Remove only this install's value.
+                        string own = "\"" + Environment.ProcessPath + "\" " + StartWithWindows.Background;
+                        if (string.Equals(run?.GetValue("Deskweave") as string, own, StringComparison.OrdinalIgnoreCase))
+                            run!.DeleteValue("Deskweave", false);
+                    });
+                    Cleanup("agent connections", () =>
+                    {
                         ProductContext.Configure("Deskweave");
                         ModuleEntry.Uninstall();
-                    }
-                    catch { /* an uninstall that throws is worse than one that misses something */ }
+                    });
                 })
                 .Run();
         }
-        catch { /* a build that was not installed (out\, the probes) has nothing for Velopack to read */ }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            LogSetupFailure("bootstrap", error);
+            // Installer callbacks must never fall through to WPF, including when an installed
+            // payload is damaged. Velopack normally handles these arguments and exits itself.
+            if (args.Any(arg => arg.StartsWith("--veloapp-", StringComparison.OrdinalIgnoreCase))) return 1;
+        }
 
         var app = new App();
         app.InitializeComponent();
-        app.Run();
+        return app.Run();
+    }
+
+    static void Cleanup(string step, Action cleanup)
+    {
+        try { cleanup(); }
+        catch (Exception error) when (error is not OutOfMemoryException) { LogSetupFailure(step, error); }
+    }
+
+    static void LogSetupFailure(string step, Exception error)
+    {
+        try
+        {
+            string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deskweave");
+            Directory.CreateDirectory(folder);
+            // Exception types identify a failed cleanup without persisting provider configuration.
+            File.AppendAllText(Path.Combine(folder, "setup-errors.log"),
+                $"{DateTimeOffset.UtcNow:O} {step}: {error.GetType().Name} (0x{error.HResult:X8}){Environment.NewLine}");
+        }
+        catch { /* Logging must not keep an installer hook alive. */ }
     }
 }

@@ -7,7 +7,9 @@ param(
     # Fail unless the agent lands in a workspace that already existed before this run.
     [switch]$RequireExisting,
     # Optional repo-owned local browser fixture; never navigates a remote site.
-    [switch]$BrowserFixture
+    [switch]$BrowserFixture,
+    # Check background browser work while the owner is in fullscreen/presentation mode.
+    [switch]$ExpectQuietPreview
 )
 # Checks the running out/Deskweave.exe the way a connected agent reaches it: the entry an agent app
 # was configured with, the packaged bridge, the router ticket, and a workspace. Harmless calls only
@@ -15,6 +17,7 @@ param(
 # Code and Codex configuration is fingerprinted before and after, and nothing here starts or stops
 # Deskweave itself.
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'presentation-state.ps1')
 Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
 public static class DeskweavePipe {
@@ -121,6 +124,12 @@ function Save-Corner([string]$label) {
     $app.Refresh()
     # A ShowInTaskbar=false WPF tool window is not Process.MainWindowHandle.
     $window = [DeskweavePipe]::Corner($app.Id)
+    if ($ExpectQuietPreview) {
+        $presentation = Get-DeskweavePresentationState
+        Check ($presentation.Quiet) 'Windows reports a quiet state or an uncovered fullscreen app is visible on a monitor during the live browser check'
+        Check ($window -eq [IntPtr]::Zero) 'The published corner stays hidden during fullscreen browser work'
+        return [ordered]@{ suppressed = $true; notificationState = $presentation.NotificationState; presentation = $presentation; pid = $app.Id }
+    }
     if ($window -eq [IntPtr]::Zero) { throw 'The published corner is not visible during browser work.' }
     $rect = [DeskweavePipe+Rect]::new()
     if (-not [DeskweavePipe]::GetWindowRect($window, [ref]$rect)) { throw 'The corner has no readable bounds.' }

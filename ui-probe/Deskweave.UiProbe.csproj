@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Deskweave.UiProbe</AssemblyName>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <RuntimeFrameworkVersion>10.0.11</RuntimeFrameworkVersion>
+    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
     <SelfContained>true</SelfContained>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../app/Deskweave.csproj"/></ItemGroup>

@@ -39,7 +39,8 @@ public sealed class WorkspaceMcp : IDisposable
     static readonly Definition[] Tools =
     [
         new("windows", "Lists the windows open in the workspace, each with the number the other tools use and where it sits on the "
-            + "screen. The screen is one monitor and every window is kept on it, so a window is never off-screen for long.",
+            + "screen. Bounds are native workspace pixels, used by click and window. computer actions instead use its resized image pixels. "
+            + "The screen is one monitor and every window is kept on it, so a window is never off-screen for long.",
             [], [], false),
         new("window", "Arranges a window the way its title bar would: move (x, y, and optionally width, height), maximize, minimize, "
             + "restore, front, or close. Comes back with the window list.",
@@ -63,7 +64,8 @@ public sealed class WorkspaceMcp : IDisposable
             [("target", "string", "desktop (default) or browser"), ("actions", "array", "up to 16 computer actions"),
                 ("screenshot", "boolean", "return one final image, default true"),
                 ("marks", "boolean", "number the controls on the picture, default false")], [], true),
-        new("controls", "The controls one window publishes, each with the number press and write use. Much cheaper than look, but a browser page publishes nothing - use page for those.",
+        new("controls", "The controls one window publishes, each with the number press and write use. Centers are native workspace pixels "
+            + "for click; computer actions use coordinates from its resized screenshot instead. Much cheaper than look, but a browser page publishes nothing - use page for those.",
             [("window", "number", "a window number from windows"), ("everything", "boolean", "include controls that cannot be acted on")], ["window"], false),
         new("press", "Presses a control - a button, a menu item, a checkbox, a list row.",
             [("control", "number", "a control number from controls")], ["control"], true),
@@ -75,17 +77,33 @@ public sealed class WorkspaceMcp : IDisposable
             + "Checks each target immediately before acting. Stops on a changed/disabled/missing control or owner takeover. "
             + "Completed steps are not rolled back; use next and read fresh controls before continuing.",
             [("actions", "array", "ordered press, write (with text), or read actions, each with a control ID")], ["actions"], true),
-        new("click", "Clicks a point on the workspace screen. For anything that publishes no control.",
+        new("click", "Clicks a point on the workspace screen. Verify the visible result; delivered input does not prove the app accepted it. "
+            + "Prefer controls + press when a control publishes one - cheaper, and does not drift if the layout moves - "
+            + "and use click for anything that does not. x and y are native workspace pixels from controls or a whole-screen look. "
+            + "A window-only look is cropped: add that window's position. computer screenshots are resized; use computer actions for their points.",
             [("x", "number", "x on the workspace screen"), ("y", "number", "y on the workspace screen"), ("right", "boolean", "right button instead of left")], ["x", "y"], true),
         new("scroll", "Scrolls at a point. Positive is up, negative is down, one notch is 120.",
             [("x", "number", "x on the workspace screen"), ("y", "number", "y on the workspace screen"), ("amount", "number", "120 per notch, negative for down")], ["x", "y", "amount"], true),
-        new("type", "Types text wherever the keyboard focus is.",
+        new("type", "Types text wherever the keyboard focus is, and answers with the control it went into. "
+            + "The focus is wherever the desktop last left it, which is not always the box you are looking at, so name a window "
+            + "when you know which one you mean. Prefer write with a control number when the window publishes one, and page_type "
+            + "for anything inside a browser page - a page's boxes are not where the desktop keyboard focus is.",
             [("text", "string", "what to type"), ("window", "number", "a window number to type into, or omit for the focused one")], ["text"], true),
         new("key", "Presses one key: enter, tab, escape, backspace, delete, up, down, left, right, home, end, pageup, pagedown, f1 to f12.",
             [("key", "string", "the key name"), ("window", "number", "a window number, or omit for the focused one")], ["key"], true),
-        new("open", "Starts a program in the workspace by its plain name - notepad, explorer, chrome, or anything on the Start Menu "
-            + "such as Deskweave - or by full path. Comes back with the windows that appeared.",
-            [("program", "string", "the program to start"), ("arguments", "string", "its command line, if any")], ["program"], true),
+        new("open", "Starts a program, by plain name - notepad, explorer, chrome, or anything on the Start Menu such as Deskweave - "
+            + "or by full path. Where it opens follows who it is for. "
+            + "where=workspace, the default, is work you are doing yourself: the app you are building, a GUI test, anything you will "
+            + "click through; it opens on the workspace screen and comes back with the windows that appeared. "
+            + "where=owner is something the owner asked for and will use himself - open the calculator, open this PDF for me - and "
+            + "opens on his own desktop the ordinary Windows way, which is also the only way a Store/packaged app, a file "
+            + "association or a Start Menu entry can start at all. He gets one click for it and nothing opens until he takes it, so "
+            + "say what you asked for and read status for his answer rather than waiting. "
+            + "Getting this the wrong way round is a defect either way: never put his calculator in the workspace, and never put your "
+            + "own test app on his screen.",
+            [("program", "string", "the program to start"), ("arguments", "string", "its command line, if any"),
+                ("where", "string", "workspace (default) or owner"),
+                ("reason", "string", "one short line for the owner, when where=owner")], ["program"], true),
         new("run", "Starts a tracked command inside the workspace, in your own working folder, so any window it opens "
             + "appears on the workspace screen instead of the owner's. shell=cmd (default) runs it as a "
             + "batch script; shell=powershell runs it as a PowerShell script, which is the one to use for anything with quotes or "
@@ -166,8 +184,11 @@ public sealed class WorkspaceMcp : IDisposable
         + "Start anything that opens a window (a desktop app you built, dotnet run, an Electron or Python GUI, a browser, a GUI test) "
         + "with Deskweave's run, open or browse, never your own shell: a window started from your shell lands on the owner's screen "
         + "and takes their mouse and focus. Headless servers and command-line tests stay in your own shell. "
-        + "When the user explicitly asks to open a page or document for them in their own browser or desktop, use your normal approved "
-        + "desktop-opening tools instead; do not silently divert that request into Deskweave. This does not grant permission for any other desktop action. "
+        + "When the user explicitly asks to open something for themselves - a program they will use, a page or a document they want to read - "
+        + "use your normal approved desktop-opening tools so it opens directly on their desktop. "
+        + "If those tools are unavailable, open with where=owner offers a Deskweave approval button. "
+        + "Do not silently divert a user-requested desktop action into a workspace. "
+        + "This does not grant permission for any other desktop action. "
         + "To offer a result from workspace testing on the user's desktop, use request_desktop and wait for their approval. "
         + "Do not use Deskweave for anything else: writing or reading code, builds, unit tests, package installs, "
         + "version control, and ordinary file and shell work stay in your own tools where they are faster. ";
@@ -181,6 +202,66 @@ public sealed class WorkspaceMcp : IDisposable
 
     /// <summary>The tool list a connected agent sees, the same whichever workspace it lands in.</summary>
     internal static object[] ExternalToolSchemas => [.. ExternalTools.Select(Schema)];
+
+    /// <summary>Reject malformed calls before routing starts a desktop or a client takes control.
+    /// Keep the scalar string coercions supported by the tool readers; missing values are not zero.</summary>
+    internal static string? ValidateCall(JsonElement parameters, out string name, out JsonElement arguments)
+    {
+        name = string.Empty;
+        arguments = default;
+        if (parameters.ValueKind != JsonValueKind.Object
+            || !parameters.TryGetProperty("name", out JsonElement named) || named.ValueKind != JsonValueKind.String)
+            return "A tool call needs a name and an arguments object.";
+        string toolName = name = named.GetString() ?? string.Empty;
+        Definition? tool = ExternalTools.FirstOrDefault(t => t.Name == toolName);
+        if (tool is null) return "no such tool: " + name;
+        if (parameters.TryGetProperty("arguments", out arguments) && arguments.ValueKind != JsonValueKind.Object)
+            return "Tool arguments must be an object.";
+        foreach (string required in tool.Needs)
+            if (arguments.ValueKind != JsonValueKind.Object || !arguments.TryGetProperty(required, out _))
+                return "Missing tool argument: " + required;
+        if (arguments.ValueKind == JsonValueKind.Undefined) return null;
+        foreach (var take in tool.Takes)
+        {
+            if (!arguments.TryGetProperty(take.Name, out JsonElement value)) continue;
+            bool valid = take.Type switch
+            {
+                "string" => value.ValueKind == JsonValueKind.String,
+                "boolean" => value.ValueKind is JsonValueKind.True or JsonValueKind.False
+                    || value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out _),
+                "number" => (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out double number) && double.IsFinite(number))
+                    || (value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), out double parsed) && double.IsFinite(parsed)),
+                "array" => value.ValueKind == JsonValueKind.Array,
+                _ => false,
+            };
+            if (!valid) return "Invalid tool argument: " + take.Name;
+        }
+        if (name == "computer")
+        {
+            try { WorkspaceComputer.Parse(arguments); }
+            catch (ArgumentException ex) { return ex.Message; }
+        }
+        if (name == "batch")
+        {
+            JsonElement actions = arguments.GetProperty("actions");
+            if (actions.GetArrayLength() is < 1 or > WorkspaceBatch.MaxActions)
+                return $"actions must contain 1 to {WorkspaceBatch.MaxActions} steps.";
+            foreach (JsonElement step in actions.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object
+                    || !step.TryGetProperty("control", out JsonElement control) || control.ValueKind != JsonValueKind.Number
+                    || !control.TryGetInt32(out int id) || id <= 0
+                    || !step.TryGetProperty("action", out JsonElement action) || action.ValueKind != JsonValueKind.String
+                    || action.GetString() is not ("press" or "write" or "read"))
+                    return "Every batch step needs press, write or read and a positive integer control ID.";
+                bool hasText = step.TryGetProperty("text", out JsonElement text);
+                if (action.GetString() == "write" && !hasText
+                    || hasText && (text.ValueKind != JsonValueKind.String || text.GetString()!.Length > WorkspaceBatch.MaxText))
+                    return "A batch write needs text within the supported length.";
+            }
+        }
+        return null;
+    }
 
     async Task<object> Invoke(string name, JsonElement arguments, CancellationToken cancel)
     {
@@ -259,7 +340,7 @@ public sealed class WorkspaceMcp : IDisposable
                 var content = new List<object> { new { type = "text", text = JsonSerializer.Serialize(new
                 {
                     result.Receipt.Status, result.Receipt.Next, result.Receipt.Reason, result.Receipt.Completed,
-                    target = result.Target, coordinateSpace = result.Target == "browser" ? "page viewport CSS pixels" : "whole workspace image pixels",
+                    target = result.Target, coordinateSpace = result.Target == "browser" ? "page viewport image pixels" : "whole workspace image pixels",
                     width = result.Width, height = result.Height, screenshot = result.Frame is not null,
                     screen = result.Target == "browser" || _control.ScreenState.Note.Length == 0
                         ? null : _control.ScreenState.Note,
@@ -291,7 +372,7 @@ public sealed class WorkspaceMcp : IDisposable
                 if (window == 0) return Fail("no such window number. Call windows first.");
                 IReadOnlyList<WorkspaceElement> found = _control.Elements(window, Bool(arguments, "everything"));
                 if (found.Count == 0) return Say("that window publishes no controls. Use look and click, or page if it is a browser.");
-                var text = new StringBuilder();
+                var text = new StringBuilder(NativeCoordinates + " Centers follow.\n");
                 foreach (WorkspaceElement element in found.Take(ControlLimit))
                     text.Append(element.Id).Append("  ").Append(element.Type).Append("  \"").Append(element.Name)
                         .Append("\"  at (").Append(element.CentreX).Append(',').Append(element.CentreY).Append(')')
@@ -303,7 +384,7 @@ public sealed class WorkspaceMcp : IDisposable
 
             case "press":
                 return await Act(() => _control.Press(Int(arguments, "control")),
-                    "pressed", "that control would not be pressed", cancel).ConfigureAwait(false);
+                    "pressed", "that control's press was not confirmed. Read fresh controls or computer to inspect the result", cancel).ConfigureAwait(false);
             case "write":
                 return await Act(() => _control.Write(Int(arguments, "control"), Str(arguments, "text")),
                     "written", "that control would not take text", cancel).ConfigureAwait(false);
@@ -344,8 +425,14 @@ public sealed class WorkspaceMcp : IDisposable
                 return await Act(() => _control.ScrollAt(Int(arguments, "x"), Int(arguments, "y"), Int(arguments, "amount")),
                     "scrolled", "refused", cancel).ConfigureAwait(false);
             case "type":
-                return await Act(() => _control.TypeText(Str(arguments, "text"), Window(arguments, "window")),
-                    "typed", "refused", cancel).ConfigureAwait(false);
+            {
+                cancel.ThrowIfCancellationRequested();
+                // "typed" on its own was the whole answer here, and it was the same answer whether
+                // the text reached the box the agent was looking at or an address bar two windows
+                // away. The reply now names the control and says whether the text is in it.
+                TypedText typed = _control.Type(Str(arguments, "text"), Window(arguments, "window"));
+                return typed.Landed ? Say(typed.ToString()) : Fail(typed.ToString());
+            }
             case "key":
             {
                 int code = KeyCode(Str(arguments, "key"));
@@ -355,24 +442,38 @@ public sealed class WorkspaceMcp : IDisposable
             }
             case "open":
             {
-                int pid = _control.Open(Str(arguments, "program"),
-                    Str(arguments, "arguments") is { Length: > 0 } a ? a : null, quiet: false, out string exe);
+                string program = Str(arguments, "program");
+                string? args = Str(arguments, "arguments") is { Length: > 0 } a ? a : null;
+                string why = Str(arguments, "reason") is { Length: > 0 } r ? r : "the agent was asked to open this";
+                // Who it is for decides where it opens. The owner's own desktop is a route, not a
+                // refusal - it is the only place the Windows shell runs, so it is also the only
+                // place a Store app, a file association or a Start Menu entry can be activated.
+                if (Str(arguments, "where").Trim().ToLowerInvariant() is "owner" or "desktop" or "owner's desktop")
+                    return AskOwner(program, args, why, takeOver: false);
+                (program, args) = WorkspacePrograms.Resolve(program, args);
+                if (WorkspacePrograms.ShellOnly(program))
+                    return Fail(program + " requires Windows shell activation and cannot open inside this workspace."
+                        + " If the user asked to use it on their desktop, use your approved desktop-opening tools"
+                        + " or open with where=owner to request their click. Nothing has started.");
+                int pid = _control.Open(program, args, quiet: false, out string exe);
                 if (pid == 0) return Fail("that program did not start");
                 // Wait only while this process has not exposed a window, not for a fixed cosmetic delay.
                 Started started = await WindowReady(pid, cancel).ConfigureAwait(false);
+                if (started == Started.Exited && _control.RunningOutside(exe) is { } elsewhere)
+                    return Say($"started, pid {pid}. It handed the launch to the copy already running outside this workspace"
+                        + $" (pid {elsewhere.Id}"
+                        + (elsewhere is { SameFile: false, File.Length: > 0 } ? $", started from {elsewhere.File}" : "")
+                        + "), the way a program that allows one copy per Windows session does, and quit."
+                        + " " + AskOwnerText(program, args, why, takeOver: true)
+                        + "\n" + WindowList());
                 return Say($"started, pid {pid}." + started switch
                 {
                     Started.Showing => "",
-                    Started.Exited => _control.RunningOutside(exe) is { } elsewhere
-                        ? " It exited at once, and a copy of it is already running outside this workspace"
-                            + $" (pid {elsewhere.Id}"
-                            + (elsewhere is { SameFile: false, File.Length: > 0 } ? $", started from {elsewhere.File}" : "")
-                            + "). A program that allows one copy per Windows session hands a second launch to"
-                            + " the one already running and quits, whichever folder each was started from, so"
-                            + " this workspace cannot have its own while that one is up. This is not a fault in"
-                            + " the program. Say what you needed it for and let the owner decide whether to"
-                            + " close his."
-                        : " It has already exited; if it was meant to stay open, read what it printed with run.",
+                    // Both a packaged app's launcher and a program that really did fail look like
+                    // this from in here, so say what would tell them apart rather than guessing.
+                    Started.Exited => " It exited at once without a window. A launcher that hands its work to Windows"
+                        + " and quits does exactly that, which is what every Store app does - if this is something the"
+                        + " owner wants, call open again with where=owner. If it is yours to test, read what it printed with run.",
                     _ => " It has no window yet. A large application can take a while to draw in a workspace, and"
                         + " nothing here has failed - wait, then look again.",
                 } + "\n" + WindowList());
@@ -569,6 +670,34 @@ public sealed class WorkspaceMcp : IDisposable
         }, BatchJson));
     }
 
+    /// <summary>
+    /// The owner's one-click route for a program, as one sentence for the agent: his own desktop,
+    /// or moving a copy he already has open into this workspace. The request is data until he
+    /// clicks it, which is what keeps an agent from putting a window on his screen or closing an
+    /// application of his. It is a route and not a refusal, so it answers as an ordinary result.
+    /// </summary>
+    string AskOwnerText(string program, string? arguments, string reason, bool takeOver)
+    {
+        if (!_external.Policy.DesktopRequests)
+            return "The owner set this workspace to workspace-only, so nothing in here can reach his desktop."
+                + " Ask him in your answer instead.";
+        try
+        {
+            WorkspaceHandoff request = _external.RequestProgram(_client, program, arguments, reason, takeOver);
+            return (takeOver
+                ? "The owner now has one click in Deskweave to close his copy and start it in here instead"
+                : "The owner now has one click in Deskweave to open it on his own desktop")
+                + $" (request {request.Id}). Nothing has opened yet; check status for his answer.";
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return "The owner could not be asked: " + ex.Message;
+        }
+    }
+
+    object AskOwner(string program, string? arguments, string reason, bool takeOver) =>
+        Say(AskOwnerText(program, arguments, reason, takeOver));
+
     enum Started { Showing, Starting, Exited }
 
     /// <summary>
@@ -602,6 +731,9 @@ public sealed class WorkspaceMcp : IDisposable
     /// happens in acquire, before any action starts.</summary>
     Task<bool> Ready(CancellationToken cancel) => Task.FromResult(_external.MayUse(_client) && _control.CurrentLease != 0);
 
+    static string NativeCoordinates => $"Native workspace pixels ({AgentDesktop.ScreenWidth}x{AgentDesktop.ScreenHeight}) for click/window; "
+        + "computer actions use its resized screenshot coordinates.";
+
     /// <summary>
     /// The windows, numbered. A model handles "window 2" far better than a 6-digit handle, and the
     /// numbers are re-issued on every listing so a stale one cannot point at a window that has gone.
@@ -613,6 +745,7 @@ public sealed class WorkspaceMcp : IDisposable
             _windows.Clear();
             var text = new StringBuilder();
             text.Append("screen ").Append(AgentDesktop.ScreenWidth).Append('x').Append(AgentDesktop.ScreenHeight).Append('\n');
+            text.Append(NativeCoordinates).Append('\n');
             foreach (AgentWindow open in _control.Windows())
             {
                 _windows.Add(open.Handle);
@@ -699,9 +832,10 @@ public sealed class WorkspaceMcp : IDisposable
                 return Ok(id, new { tools = ExternalTools.Select(Schema).ToArray() });
             case "tools/call":
             {
-                JsonElement parameters = call.GetProperty("params");
-                JsonElement arguments = parameters.TryGetProperty("arguments", out JsonElement a) ? a : default;
-                return Ok(id, await Invoke(Str(parameters, "name"), arguments, cancel).ConfigureAwait(false));
+                JsonElement parameters = call.TryGetProperty("params", out JsonElement p) ? p : default;
+                if (ValidateCall(parameters, out string name, out JsonElement arguments) is { } invalid)
+                    return Error(id, -32602, invalid);
+                return Ok(id, await Invoke(name, arguments, cancel).ConfigureAwait(false));
             }
             case "ping":
                 return Ok(id, new { });

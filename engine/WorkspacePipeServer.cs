@@ -129,19 +129,31 @@ internal sealed class WorkspacePipeServer : IDisposable
             await WorkspacePipeProtocol.Write(pipe, "workspace-pipe/1", 256, handshake.Token).ConfigureAwait(false);
         }
 
+        var queued = new Queue<string>();
         Task<string?> next = WorkspacePipeProtocol.Read(pipe, WorkspacePipeProtocol.MaxRequestBytes, connection.Token);
-        while (await next.ConfigureAwait(false) is { } request)
+        while (true)
         {
-            // Read ahead while a tool is running so killing its bridge also cancels waits/batches.
-            next = WorkspacePipeProtocol.Read(pipe, WorkspacePipeProtocol.MaxRequestBytes, connection.Token);
+            string? request;
+            if (queued.Count > 0) request = queued.Dequeue();
+            else
+            {
+                request = await next.ConfigureAwait(false);
+                if (request is null) break;
+                next = WorkspacePipeProtocol.Read(pipe, WorkspacePipeProtocol.MaxRequestBytes, connection.Token);
+            }
             Task<string?> response = Task.Run(() => peer.Handle(request, connection.Token), connection.Token);
             try
             {
-                if (await Task.WhenAny(response, next).ConfigureAwait(false) == next
-                    && await next.ConfigureAwait(false) is null)
+                // Keep reading after a queued call too. Stopping at the first complete frame hid
+                // bridge EOF behind that frame and left the running tool holding its lease.
+                // Bound pipelining so a client cannot retain an unlimited request backlog.
+                while (!response.IsCompleted && await Task.WhenAny(response, next).ConfigureAwait(false) == next)
                 {
-                    connection.Cancel();
-                    return;
+                    string? pending = await next.ConfigureAwait(false);
+                    if (pending is null) { connection.Cancel(); return; }
+                    if (queued.Count >= 16) throw new InvalidDataException("Too many queued workspace requests.");
+                    queued.Enqueue(pending);
+                    next = WorkspacePipeProtocol.Read(pipe, WorkspacePipeProtocol.MaxRequestBytes, connection.Token);
                 }
                 await WorkspacePipeProtocol.Write(pipe, await response.ConfigureAwait(false),
                     WorkspacePipeProtocol.MaxResponseBytes, connection.Token).ConfigureAwait(false);

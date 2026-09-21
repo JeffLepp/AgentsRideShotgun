@@ -54,7 +54,8 @@ internal static class TrayChecks
         Program.Check(opens == 2 && balloons == 1, "Tray double-click, keyboard activation and notification clicks retain their actions");
         // Show the existing native menu on the test monitor, not at the owner's mouse position.
         var screen = Screen.AllScreens.FirstOrDefault(s => !s.Primary);
-        if (screen is not null)
+        bool interactive = Environment.GetEnvironmentVariable("DESKWEAVE_UI_ALLOW_FOREGROUND") == "1";
+        if (screen is not null && !TestScreen.OwnerFullscreen && interactive)
         {
             long anchor = (ushort)(screen.WorkingArea.Left + 30) | ((long)(ushort)(screen.WorkingArea.Top + 30) << 16);
             SendMessage(tray.Handle, TrayIcon.CallbackMessage, (IntPtr)anchor, 0x7b);
@@ -62,6 +63,10 @@ internal static class TrayChecks
             menu.Close();
             Program.Check(calls[^1].Operation == 3, "Closing the tray menu restores notification-area keyboard navigation");
         }
+        else
+            System.IO.File.WriteAllText(System.IO.Path.Combine(Program.Output, "tray-menu-skipped.txt"),
+                "Native tray popup activation and its close callback were not tested: this explicitly foreground-taking check requires "
+                + "DESKWEAVE_UI_ALLOW_FOREGROUND=1, a spare monitor, and no owner fullscreen app. Native icon registration checks still run.");
 
         tray.ShowBalloonTip(new string('x', 70), new string('y', 300));
         Program.Check(calls[^1] is { Operation: 1, Data.Title.Length: 63, Data.Info.Length: 255 }

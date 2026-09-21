@@ -63,8 +63,9 @@ internal static class WorkspacePeekCapture
         return new Frame(frame, patch, front.X, front.Y);
     }
 
-    /// <summary>Whether Windows reports the PC running on battery right now. False (never pause) if
-    /// it cannot be read - a laptop that is actually plugged in is the safer default to assume.</summary>
+    /// <summary>Whether Windows reports the PC running on battery right now, which slows the corner
+    /// view's pace rather than stopping it. False if it cannot be read, and false for the 255 a PC
+    /// with no battery reports - plugged in is the safer default to assume.</summary>
     internal static bool OnBattery()
     {
         try { return GetSystemPowerStatus(out SystemPowerStatus status) && status.ACLineStatus == 0; }

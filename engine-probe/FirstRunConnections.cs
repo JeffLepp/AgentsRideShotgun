@@ -82,6 +82,25 @@ internal static class FirstRunConnections
             Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is null && Entries(claudeFile) == 1,
                 "Connecting again after a refusal puts the one entry back");
 
+            // A command whose own environment is not Deskweave's: `claude` on PATH can be a wrapper
+            // that clears CLAUDE_CONFIG_DIR before calling the real one, so the add lands in a file
+            // the read never opens. Nothing crashes - the owner is told the connection he has just
+            // made was refused, and told again every ten minutes. The tool that did the write is
+            // asked whether the write happened, because it is the only thing that knows.
+            Set(WorkspaceConnections.AgentApp.ClaudeCode, false);
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", "elsewhere");
+            string shim = Path.Combine(claudeHome, "shim", ".claude.json");
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is null
+                && Entries(shim) == 1 && Entries(claudeFile) == 0
+                && WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode),
+                "An agent that writes where Deskweave cannot read is connected on its own command's word, not called refused");
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", null);
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, false) is null
+                && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode),
+                "Disconnecting forgets what the agent's command showed, so nothing goes on saying connected");
+            if (Directory.Exists(Path.GetDirectoryName(shim)!)) Directory.Delete(Path.GetDirectoryName(shim)!, recursive: true);
+            Set(WorkspaceConnections.AgentApp.ClaudeCode, true);
+
             // An entry under Deskweave's name that runs something else: an older install, a moved
             // folder, a probe build. The owner's own configuration had one pointing at a gate's
             // fixture, and Settings called it connected while every agent call failed.
@@ -150,7 +169,8 @@ internal static class FirstRunConnections
             // The scoped instruction that comes with connecting, in both directions.
             Check(WorkspaceMcp.RouterInstructions.Contains(WorkspaceMcp.Scope, StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("Use Deskweave automatically for agent-operated browser and GUI work", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("do not silently divert that request into Deskweave", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("use your normal approved desktop-opening tools", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("Do not silently divert a user-requested desktop action into a workspace", StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("Do not use Deskweave for anything else", StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("builds, unit tests", StringComparison.Ordinal),
                 "A connected agent is told to use Deskweave for windows by itself, and not for code, builds, tests or file work");
@@ -255,10 +275,19 @@ internal static class FirstRunConnections
     /// </summary>
     internal static int Cli(string[] args)
     {
-        bool claude = args.Contains("--scope");
+        // Claude Code takes --scope and is the one asked `mcp get`; Codex takes neither and is the
+        // one asked `mcp list --json`.
+        bool claude = args.Contains("--scope") || args.Length > 1 && args[1] == "get";
         if (Environment.GetEnvironmentVariable(claude ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME") is not { Length: > 0 } home) return 2;
+        // Standing in for a PATH shim that hands the real command a configuration folder Deskweave's
+        // own environment does not name, which is what `claude` resolving to a wrapper that clears
+        // CLAUDE_CONFIG_DIR does. The entry is written and the file Deskweave reads never shows it.
+        if (Environment.GetEnvironmentVariable("DESKWEAVE_STUB") == "elsewhere")
+            Directory.CreateDirectory(home = Path.Combine(home, "shim"));
         string path = Path.Combine(home, claude ? ".claude.json" : "config.toml");
-        if (args.Length < 3 || !args.Contains(WorkspaceConnections.AppName)) return 2;
+        if (args.Length < 3) return 2;
+        if (args[1] is "get" or "list") return Shown(path, claude);
+        if (!args.Contains(WorkspaceConnections.AppName)) return 2;
         if (args[1] == "remove")
         {
             if (!File.Exists(path)) return 0;
@@ -269,8 +298,8 @@ internal static class FirstRunConnections
         if (args[1] != "add") return 2;
         // Standing in for an agent command that will not take the entry, or says it did and wrote
         // nothing. The probe asks for it in the environment; without it every add is a real write.
-        if (Environment.GetEnvironmentVariable("DESKWEAVE_STUB") is { Length: > 0 } how)
-            return how == "refuse" ? 3 : 0;
+        string? how = Environment.GetEnvironmentVariable("DESKWEAVE_STUB");
+        if (how is "refuse" or "silent") return how == "refuse" ? 3 : 0;
         string[] command = [.. args.SkipWhile(a => a != "--").Skip(1)];
         if (command.Length == 0) return 2;
         if (claude)
@@ -295,6 +324,48 @@ internal static class FirstRunConnections
         return 0;
 
         static string Quoted(string value) => "\"" + value.Replace(@"\", @"\\") + "\"";
+    }
+
+    /// <summary>
+    /// The stub's read side, in the shapes the real commands print. `claude mcp get deskweave`
+    /// labels Command and Args on lines of their own and exits 1 for a name it does not have,
+    /// because Claude Code has no --json for mcp (2.1.278). `codex mcp list --json` prints the
+    /// array of servers <see cref="WorkspaceConnections.Codex"/> already reads.
+    /// </summary>
+    static int Shown(string path, bool claude)
+    {
+        if (claude)
+        {
+            if ((File.Exists(path) ? Read(path)["mcpServers"] as JsonObject : null)
+                ?[WorkspaceConnections.AppName] is not JsonObject entry) return 1;
+            Console.WriteLine(WorkspaceConnections.AppName + ":");
+            Console.WriteLine("  Scope: User config (available in all your projects)");
+            // The real command prints a tick or a cross here. What Deskweave reads is below it:
+            // whether the entry is there and what it would run, not whether it answered just now.
+            Console.WriteLine("  Status: Connected");
+            Console.WriteLine("  Type: stdio");
+            Console.WriteLine("  Command: " + entry["command"]?.GetValue<string>());
+            Console.WriteLine("  Args: " + string.Join(' ',
+                (entry["args"] as JsonArray ?? new JsonArray()).Select(a => a?.GetValue<string>() ?? "")));
+            return 0;
+        }
+        string table = File.Exists(path) ? string.Join('\n', Table(File.ReadAllLines(path), ours: true)) : "";
+        var servers = new JsonArray();
+        if (table.Length > 0)
+            servers.Add(new JsonObject
+            {
+                ["name"] = WorkspaceConnections.AppName,
+                ["enabled"] = true,
+                ["transport"] = new JsonObject
+                {
+                    ["type"] = "stdio",
+                    ["command"] = WorkspaceConnections.TomlStrings(table, "command").FirstOrDefault() ?? "",
+                    ["args"] = new JsonArray([.. WorkspaceConnections.TomlStrings(table, "args")
+                        .Select(a => (JsonNode)JsonValue.Create(a)!)]),
+                },
+            });
+        Console.WriteLine(servers.ToJsonString());
+        return 0;
     }
 
     static JsonObject Read(string path) => JsonNode.Parse(File.ReadAllText(path))!.AsObject();

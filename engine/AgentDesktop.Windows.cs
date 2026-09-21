@@ -1,4 +1,4 @@
-namespace HiveMind.AgentWorkspaces;
+﻿namespace HiveMind.AgentWorkspaces;
 
 /// <summary>What an agent may do to a window as a whole, the way a person does with its title bar.</summary>
 public enum WindowArrangement { Move, Maximize, Minimize, Restore, Front, Close }
@@ -65,7 +65,17 @@ public sealed partial class AgentDesktop
     });
 
     /// <summary>
-    /// Moves, sizes, maximizes, minimizes, restores, raises or closes one window. Measured 2026-09-06:
+    /// Puts a window at the back of the workspace's z-order, activating nothing. The warmed-up
+    /// browser sits here so it cannot cover the window an agent just opened. Behind, not minimized:
+    /// a minimized window is smaller than the 64px floor <see cref="WindowsOnPump"/> enumerates, so
+    /// parking one that way would hide it from every window lookup, including its own way back.
+    /// </summary>
+    internal bool Behind(nint window) => window != 0 && Run(() =>
+        OwnsWindow(window) && Native.SetWindowPos(window, Native.HwndBottom, 0, 0, 0, 0,
+            Native.SwpNoMove | Native.SwpNoSize | Native.SwpNoActivate | Native.SwpNoOwnerZOrder));
+
+    /// <summary>
+    /// Moves, sizes, maximizes, restores, raises or closes one window. Measured 2026-09-06:
     /// without this the agent wrote a PowerShell script around SetWindowPos, in Notepad, to do what
     /// one call does. A move is fitted to the screen; zero width or height keeps the current size.
     /// </summary>

@@ -18,7 +18,6 @@ public partial class App : Application
     TrayIcon? _tray;
     bool _ownsInstance;
     bool _quitting;
-    bool _hiddenNotice;
     bool _infoShowing;
     Action? _refreshTrayPause;
     Action<string, string, string, string>? _attention;
@@ -86,13 +85,17 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// The one screen before anything is written anywhere (MVP_SPEC, Surfaces 5). The hub follows
-    /// it however it ends: Start connects, closing connects nothing, and neither asks again.
+    /// Setup connects agents, then leaves Deskweave in the tray. Dismissing setup without
+    /// connecting opens the hub so Settings remains discoverable.
     /// </summary>
     static void ShowFirstRun(MainWindow hub)
     {
         var first = new FirstRunWindow();
-        first.Closed += (_, _) => { if (!hub.IsVisible) hub.Show(); };
+        first.Closed += (_, _) =>
+        {
+            if (AppSettingsStore.Current.ConnectAgents) return;
+            if (!hub.IsVisible) hub.Show();
+        };
         first.Show();
     }
 
@@ -117,7 +120,7 @@ public partial class App : Application
         {
             _infoShowing = false;
             _attentionFor = (workspace, request);
-            if (!_quitting) _tray?.ShowBalloonTip(title, text);
+            if (!_quitting && !WorkspacePresentation.Suppressed) _tray?.ShowBalloonTip(title, text);
         });
         ModuleEntry.AttentionNeeded += _attention;
         _tray.BalloonClicked += () =>
@@ -136,18 +139,16 @@ public partial class App : Application
     internal void Tell(string title, string text)
     {
         _infoShowing = true;   // clicking it opens nothing
-        if (!_quitting) _tray?.ShowBalloonTip(title, text);
+        if (!_quitting && !WorkspacePresentation.Suppressed) _tray?.ShowBalloonTip(title, text);
     }
 
     void WindowClosing(object? sender, CancelEventArgs e)
     {
+        // Closing the window hides it and says nothing. The tray icon is the answer to "where did
+        // it go", and a notification for something the owner did on purpose is one more thing to
+        // dismiss every time.
         if (_quitting) return;
         HideOnClose(MainWindow, e);
-        if (_hiddenNotice || _tray is null) return;
-        _hiddenNotice = true;
-        _infoShowing = true;
-        _tray.ShowBalloonTip("Deskweave is still running",
-            "Agents can keep working. Quit from this icon.");
     }
 
     void ShowWorkspace()

@@ -70,6 +70,8 @@ public static class WorkspaceStore
     const string FramePath = "last-frame.png";
 
     static readonly JsonSerializerOptions Format = new() { WriteIndented = true };
+    // UTF-8 with no byte order mark: the same bytes File.WriteAllText put here before.
+    static readonly System.Text.UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
     static readonly Lock Records = new();
 
     /// <summary>
@@ -146,9 +148,19 @@ public static class WorkspaceStore
             string folder = FolderOf(workspace.Id);
             if (!Directory.Exists(folder)) return;
             // Written beside the target and moved over it, so an interrupted save leaves the old record
-            // intact rather than half of a new one.
+            // intact rather than half of a new one. The rename is atomic, but the contents are not on
+            // the disk yet when it runs: Windows can record the rename while the bytes are still in the
+            // file cache, and a power loss then leaves a workspace.json that is named right and empty.
+            // Read recovers that workspace from its folder, but under its id and without the name, the
+            // mode, the power or the dates the owner chose. Flushing to the device first means the disk
+            // holds either the old record or the whole new one.
             string pending = Path.Combine(folder, RecordName + ".new");
-            File.WriteAllText(pending, JsonSerializer.Serialize(workspace, Format));
+            byte[] bytes = Utf8.GetBytes(JsonSerializer.Serialize(workspace, Format));
+            using (var stream = new FileStream(pending, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(pending, Path.Combine(folder, RecordName), overwrite: true);
         }
     }

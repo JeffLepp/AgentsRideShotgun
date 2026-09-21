@@ -27,8 +27,12 @@ internal static class WorkspacePrograms
         IEnumerable<string> startMenus)
     {
         string name = program.Trim().Trim('"');
-        if (name.Length == 0 || name.IndexOfAny(['\\', '/']) >= 0 || File.Exists(name) || OnPath(name))
-            return (program, arguments);
+        if (name.Length == 0) return (program, arguments);
+        if (name.IndexOfAny(['\\', '/']) >= 0) return (name, arguments);
+        if (File.Exists(name)) return (Path.GetFullPath(name), arguments);
+        // Pin the same file that classification inspected. CreateProcess's own search order
+        // differs from PATH and must not substitute a system activation stub after the check.
+        if (PathFile(name, ".exe") is { } executable) return (executable, arguments);
         if (AppPath(name) is { } registered) return (registered, arguments);
         if (Find(name, startMenus) is { } link)
             return (link.Target, link.Arguments.Length == 0 ? arguments
@@ -36,22 +40,102 @@ internal static class WorkspacePrograms
         return (program, arguments);
     }
 
-    /// <summary>CreateProcess searches PATH for an .exe itself; this only asks whether it will find one.</summary>
-    static bool OnPath(string name)
+    /// <summary>
+    /// True when only the Windows shell can start this: a Store app's execution alias - the
+    /// zero-byte APPEXECLINK reparse points under WindowsApps - anything inside the packaged app
+    /// folders, a known Windows activation stub, Explorer, or an explicit shell: target such as
+    /// shell:AppsFolder. The shell runs on the
+    /// owner's own desktop and nowhere else, so from a workspace CreateProcess either refuses
+    /// these outright or starts a stub that hands the request over and exits, which in here is
+    /// indistinguishable from a crash. Deciding it before the launch is what lets `open` say which
+    /// it is and offer the owner's desktop instead of reporting a program as broken.
+    /// </summary>
+    internal static bool ShellOnly(string program)
     {
-        string file = Path.HasExtension(name) ? name : name + ".exe";
-        foreach (string folder in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        string name = program.Trim().Trim('"');
+        if (name.Length == 0) return false;
+        if (name.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)) return true;
+        string? file = name.IndexOfAny(['\\', '/']) >= 0 || File.Exists(name)
+            ? name : PathFile(name, ".exe") ?? AppPath(name) ?? Find(name, StartMenus())?.Target;
+        if (file is null) return false;
+        if (file.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase)) return true;
+        if (SystemShellRelay(file, Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Environment.OSVersion.Version)) return true;
+        try
         {
-            try { if (File.Exists(Path.Combine(folder.Trim(), file))) return true; }
-            catch (ArgumentException) { }
+            var info = new FileInfo(file);
+            return info.Exists && (info.Length == 0 || info.Attributes.HasFlag(FileAttributes.ReparsePoint));
         }
-        string system = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        return File.Exists(Path.Combine(system, file))
-            || File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), file));
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
+    }
+
+    /// <summary>
+    /// These genuine system executables can activate a packaged app or an existing Explorer on
+    /// the interactive desktop. Checking their exact location and OS generation preserves classic
+    /// Windows 10 Notepad/Paint and unrelated applications with the same filenames. Kept pure so
+    /// both supported Windows generations can be checked without launching a relay on the owner.
+    /// </summary>
+    internal static bool SystemShellRelay(string file, string windowsDirectory, Version windowsVersion)
+    {
+        if (string.IsNullOrWhiteSpace(windowsDirectory)) return false;
+        try
+        {
+            string full = Path.GetFullPath(file);
+            if (full.StartsWith(@"\\?\", StringComparison.Ordinal)) full = full[4..];
+            string windows = Path.GetFullPath(windowsDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            bool At(string directory, string executable) =>
+                full.Equals(Path.Combine(directory, executable), StringComparison.OrdinalIgnoreCase);
+            if (At(windows, "explorer.exe")) return true;
+
+            bool windows10 = windowsVersion >= new Version(10, 0, 10240);
+            bool windows11 = windowsVersion >= new Version(10, 0, 22000);
+            if (windows11 && At(windows, "notepad.exe")) return true;
+            foreach (string folder in new[] { "System32", "SysWOW64", "Sysnative" })
+            {
+                string system = Path.Combine(windows, folder);
+                if (windows10 && At(system, "calc.exe")) return true;
+                if (windows11 && (At(system, "notepad.exe") || At(system, "mspaint.exe"))) return true;
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException) { return false; }
+    }
+
+    /// <summary>
+    /// The file a bare command name resolves to on PATH, as a full path: each folder PATH names in
+    /// turn, then System32 and the Windows directory, trying the given extensions in order within
+    /// each folder, the way Windows reads PATHEXT. A name that already has an extension is looked
+    /// for as it stands. Null when nothing there answers to that name.
+    ///
+    /// <see cref="Resolve"/> only needs to know whether CreateProcess will find something itself;
+    /// <see cref="WorkspaceConnections"/> has to hand the resolved path to Process.Start, so it
+    /// asks here rather than keeping a second copy of this walk.
+    /// </summary>
+    internal static string? PathFile(string name, params string[] extensions)
+    {
+        string[] files = Path.HasExtension(name) ? [name] : [.. extensions.Select(e => name + e)];
+        foreach (string folder in Folders())
+            foreach (string file in files)
+            {
+                // Never a bare name back: a PATH entry can be relative, and the caller starts a
+                // process with whatever this returns.
+                try { if (File.Exists(Path.Combine(folder, file))) return Path.GetFullPath(Path.Combine(folder, file)); }
+                catch (ArgumentException) { }
+            }
+        return null;
+
+        static IEnumerable<string> Folders()
+        {
+            foreach (string folder in (Environment.GetEnvironmentVariable("PATH") ?? "")
+                .Split(';', StringSplitOptions.RemoveEmptyEntries))
+                yield return folder.Trim();
+            yield return Environment.GetFolderPath(Environment.SpecialFolder.System);
+            yield return Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        }
     }
 
     /// <summary>HKCU then HKLM App Paths, the registry Win+R and ShellExecute consult for a bare name.</summary>
-    static string? AppPath(string name)
+    internal static string? AppPath(string name)
     {
         string key = @"Software\Microsoft\Windows\CurrentVersion\App Paths\"
             + (Path.HasExtension(name) ? name : name + ".exe");

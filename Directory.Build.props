@@ -3,9 +3,9 @@
     <Company>Jefferson Kline</Company>
     <Product>Deskweave</Product>
     <Copyright>Copyright © 2026 Jefferson Kline</Copyright>
-    <Version>0.2.2</Version>
-    <FileVersion>0.2.2.0</FileVersion>
-    <AssemblyVersion>0.2.2.0</AssemblyVersion>
+    <Version>0.2.4</Version>
+    <FileVersion>0.2.4.0</FileVersion>
+    <AssemblyVersion>0.2.4.0</AssemblyVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>

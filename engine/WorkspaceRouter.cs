@@ -330,28 +330,35 @@ internal sealed class WorkspaceRouter : IDisposable
     /// Chooses, creates if need be, and starts an agent's workspace. Runs on the UI thread, where
     /// runtimes live, and never throws: a failure here is the agent's to read, not the app's to die of.
     /// </summary>
-    static (WorkspaceRuntime? Runtime, string? Why) Place(string cwd, string client)
+    internal static (WorkspaceRuntime? Runtime, string? Why) Place(string cwd, string client)
     {
         try
         {
             IReadOnlyList<StoredWorkspace> all = WorkspaceStore.All();
             WorkspaceHome.Route route = WorkspaceHome.Decide(all, cwd, client,
                 id => WorkspaceRuntime.Of(id)?.Access?.HasDriver == true);
-            bool starting = route.Existing is not { } existing || WorkspaceRuntime.Of(existing) is null;
-            int running = WorkspaceRuntime.Running.Count;
-            if (starting && running >= MaxRunning && !WorkspaceRuntime.SleepQuietest()) return (null, Full);
             StoredWorkspace? workspace = route.Existing is { } id
-                ? all.FirstOrDefault(w => w.Id == id)
-                : WorkspaceStore.Update(WorkspaceStore.Create(route.Name).Id, created => created with { Agents = route.Rule });
+                ? all.FirstOrDefault(w => w.Id == id) : null;
+            if (route.Existing is not null && workspace is null) return (null, "That workspace was just deleted. Try again.");
+            WorkspaceAccessPolicy policy = workspace is null ? new() : WorkspaceAccessStore.Read(workspace.Id);
+            WorkspaceRuntime? current = workspace is null ? null : WorkspaceRuntime.Of(workspace.Id);
+            bool configured = workspace is not null
+                && File.Exists(Path.Combine(WorkspaceAccessStore.Folder(workspace.Id), "access.json"));
+            // A first-use Scratch record has no policy yet. Once access was explicitly configured,
+            // reconnecting must never turn it back on, even if the routing rule is still present.
+            if (configured && (!policy.Enabled || current?.Access is { Policy.Enabled: false }))
+                return (null, "Agent access is off for this workspace. Ask the owner to enable it.");
+            int running = WorkspaceRuntime.Running.Count;
+            if (current is null && running >= MaxRunning && !WorkspaceRuntime.SleepQuietest()) return (null, Full);
+            workspace ??= WorkspaceStore.Update(WorkspaceStore.Create(route.Name).Id, created => created with { Agents = route.Rule });
             if (workspace is null) return (null, "That workspace was just deleted. Try again.");
-            WorkspaceAccessPolicy policy = WorkspaceAccessStore.Read(workspace.Id);
             if (!policy.Enabled)
             {
                 policy = policy with { Enabled = true };
                 WorkspaceAccessStore.Write(workspace.Id, policy);
             }
             WorkspaceRuntime runtime = WorkspaceRuntime.Start(workspace);
-            if (runtime.Access is { Policy.Enabled: false } access) access.Configure(policy);
+            if (!configured && runtime.Access is { Policy.Enabled: false } access) access.Configure(policy);
             return (runtime, null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -418,7 +425,8 @@ internal sealed class WorkspaceRouter : IDisposable
             if (id is null) return null;                     // a notification: nothing to answer
             if (method != "tools/call") return Error(id, -32601, "no such method: " + method);
 
-            string tool = parameters.ValueKind == JsonValueKind.Object ? Text(parameters, "name") : string.Empty;
+            if (WorkspaceMcp.ValidateCall(parameters, out string tool, out _) is { } invalid)
+                return Error(id, -32602, invalid);
             WorkspacePipePeer? peer = Current();
             if (peer is null && tool == "status")
                 return Ok(id, Say("No workspace yet. Deskweave picks one the first time you use a workspace tool."));
@@ -457,7 +465,13 @@ internal sealed class WorkspaceRouter : IDisposable
             try { peer = access.Attach(_cwd); }
             catch (IOException ex) { return (null, ex.Message); }
             // The workspace hears this agent's own hello, so the owner sees its name on the tile.
-            if (_hello is not null) await peer.Handle(_hello, cancel).ConfigureAwait(false);
+            // A disconnect while attaching must also remove this not-yet-bound client.
+            try
+            {
+                if (_hello is not null) await peer.Handle(_hello, cancel).ConfigureAwait(false);
+                cancel.ThrowIfCancellationRequested();
+            }
+            catch { peer.Closed(); throw; }
             (_bound, _runtime, _access) = (peer, runtime, access);
             return (peer, null);
         }

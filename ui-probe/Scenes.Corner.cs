@@ -14,7 +14,7 @@ static class CornerScenes
     static async Task<FrameworkElement> Working(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
-        window.Configure(new Size(344, 215), hasBack: false, grown: false, canGrow: false);
+        window.Configure(new Size(344, 215), grown: false, canGrow: false);
         window.Describe("shop", "Claude Code", PeekTone.Working);
         window.ShowFrame(scene.Site("shop"));
         window.SetActive(true);
@@ -28,7 +28,7 @@ static class CornerScenes
     static async Task<FrameworkElement> Finished(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
-        window.Configure(new Size(344, 215), hasBack: false, grown: false, canGrow: false);
+        window.Configure(new Size(344, 215), grown: false, canGrow: false);
         window.Describe("shop", "Claude Code", PeekTone.Quiet);
         window.ShowFrame(scene.Site("shop"));
         window.SetActive(false);
@@ -44,12 +44,11 @@ static class CornerScenes
     static async Task<FrameworkElement> Two(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
-        window.Configure(new Size(344, 215), hasBack: true, grown: false, canGrow: false);
+        window.SetTabs([new PeekTab("shop", "shop", PeekTone.Working, true), new PeekTab("blog", "blog", PeekTone.Quiet, false)]);
+        window.Configure(new Size(344, 215), grown: false, canGrow: false);
         window.Describe("shop", "Claude Code", PeekTone.Working);
         window.ShowFrame(scene.Site("shop"));
         window.SetActive(true);
-        window.DescribeBack("blog", "Codex", PeekTone.Working);
-        window.ShowBackFrame(scene.Site("blog"));
         window.Place(new Rect(SceneContext.OffScreen, window.VisibleSize));
         window.Arrive();
         await scene.Settle();
@@ -60,7 +59,7 @@ static class CornerScenes
     static async Task<FrameworkElement> Drop(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
-        window.Configure(new Size(344, 215), hasBack: false, grown: false, canGrow: false);
+        window.Configure(new Size(344, 215), grown: false, canGrow: false);
         window.Describe("shop", "Claude Code", PeekTone.Working);
         window.ShowFrame(scene.Site("shop"));
         window.SetActive(false);
@@ -75,7 +74,7 @@ static class CornerScenes
     static async Task<FrameworkElement> NeedsYou(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
-        window.Configure(new Size(344, 215), hasBack: false, grown: false, canGrow: false);
+        window.Configure(new Size(344, 215), grown: false, canGrow: false);
         window.Describe("blog", "Codex wants you", PeekTone.Attention);
         window.ShowFrame(scene.Site("blog"));
         window.SetActive(false);
@@ -90,7 +89,7 @@ static class CornerScenes
     static async Task<FrameworkElement> YouUseIt(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
-        window.Configure(new Size(344, 215), hasBack: false, grown: false, canGrow: false);
+        window.Configure(new Size(344, 215), grown: false, canGrow: false);
         window.Describe("shop", "Claude Code", PeekTone.Working);
         window.ShowFrame(scene.Site("shop"));
         window.SetActive(true);
@@ -105,7 +104,7 @@ static class CornerScenes
     static async Task<FrameworkElement> Grown(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
-        window.Configure(new Size(760, 475), hasBack: false, grown: true, canGrow: false);
+        window.Configure(new Size(760, 475), grown: true, canGrow: false);
         window.Describe("shop", "Claude Code", PeekTone.Working);
         window.ShowFrame(scene.Site("shop"));
         window.SetActive(true);
@@ -121,7 +120,7 @@ static class CornerScenes
     static async Task<FrameworkElement> Paused(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
-        window.Configure(new Size(344, 215), hasBack: false, grown: false, canGrow: false);
+        window.Configure(new Size(344, 215), grown: false, canGrow: false);
         window.Describe("shop", "Claude Code", PeekTone.Quiet);
         window.ShowFrame(scene.Site("shop"));
         window.SetActive(false);
@@ -139,6 +138,7 @@ static class CornerScenes
     internal static async Task Gate()
     {
         WantedChecks();
+        await PresentationScenes.Gate();
         SizeChecks();
         DropChromeChecks();
         await IntegrationChecks();

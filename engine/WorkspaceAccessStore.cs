@@ -109,13 +109,26 @@ internal static class WorkspaceAccessStore
         try { File.Delete(path); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
+    // UTF-8 with no byte order mark: the same bytes File.WriteAllText put here before.
+    static readonly System.Text.UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     static void WriteJson(string path, object value)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(value));
+            // The rename is atomic, but the contents are not on the disk yet when it runs: Windows can
+            // record the rename while the bytes are still in the file cache, and a power loss then leaves
+            // a ticket that is named right and empty. A bridge reading one waits out its whole connect
+            // timeout for a pipe it never learns. Flushing to the device first means the disk holds
+            // either the old file or the whole new one.
+            byte[] bytes = Utf8.GetBytes(JsonSerializer.Serialize(value));
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(temporary, path, true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }

@@ -16,6 +16,7 @@ internal static class RoutingChecks
         Directory.CreateDirectory(Path.Combine(other, ".git"));
         WorkspaceRouter.Start();
         var before = WorkspaceRuntime.Running.Select(r => r.Id).ToHashSet();
+        TimeSpan sleepBefore = WorkspaceRuntime.SleepAfter;
         try
         {
             using var claude = new Session(Path.Combine(project, "src"));
@@ -99,14 +100,41 @@ internal static class RoutingChecks
             Program.Check(await trader.Workspace() == traderId && WorkspaceRuntime.Running.Count == cap,
                 "At the PC's limit a new project's call puts the quietest workspace to sleep instead of failing");
             await trader.Tool("release");
+            await CheckSleepDispatcher();
         }
         finally
         {
             WorkspaceExternalAccess.IdleHandoverMs = 30_000;
-            WorkspaceRuntime.SleepAfter = TimeSpan.FromMinutes(30);
+            WorkspaceRuntime.SleepAfter = sleepBefore;
             WorkspaceRouter.MaxRunning = (int)Math.Clamp(WorkspaceLimits.PhysicalMemory() / (3UL << 30), 1, 10);
             WorkspaceRouter.Stop();
             foreach (var runtime in WorkspaceRuntime.Running.Where(r => !before.Contains(r.Id)).ToArray()) runtime.Dispose();
+        }
+    }
+
+    static async Task CheckSleepDispatcher()
+    {
+        TimeSpan interval = WorkspaceRuntime.DozeInterval;
+        TimeSpan sleep = WorkspaceRuntime.SleepAfter;
+        StoredWorkspace workspace = WorkspaceStore.Create("Timer dispatcher check");
+        WorkspaceAccessStore.Write(workspace.Id, new WorkspaceAccessPolicy(false, false) { PrewarmBrowser = false });
+        WorkspaceRuntime.DozeInterval = TimeSpan.FromMilliseconds(40);
+        WorkspaceRuntime.SleepAfter = TimeSpan.FromMilliseconds(300);
+        WorkspaceRuntime runtime = WorkspaceRuntime.Start(workspace);
+        bool endedOnUi = false;
+        runtime.Ended += () => endedOnUi = System.Windows.Application.Current.Dispatcher.CheckAccess();
+        try
+        {
+            long until = Environment.TickCount64 + 5000;
+            while (WorkspaceRuntime.Of(workspace.Id) is not null && Environment.TickCount64 < until) await Task.Delay(40);
+            Program.Check(WorkspaceRuntime.Of(workspace.Id) is null && endedOnUi,
+                "The automatic idle timer stops a workspace and raises its UI lifecycle events on the application dispatcher");
+        }
+        finally
+        {
+            WorkspaceRuntime.Of(workspace.Id)?.Dispose();
+            WorkspaceRuntime.DozeInterval = interval;
+            WorkspaceRuntime.SleepAfter = sleep;
         }
     }
 

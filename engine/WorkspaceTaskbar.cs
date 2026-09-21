@@ -29,10 +29,16 @@ public sealed class WorkspaceTaskbar : Border
     readonly TextBox _search = new() { FontSize = 12.5, Padding = new Thickness(6, 4, 6, 4), BorderThickness = new Thickness(1) };
     readonly ListBox _apps = new() { MaxHeight = 280, BorderThickness = new Thickness(0), Margin = new Thickness(0, 6, 0, 0) };
     readonly TextBlock _loading = new() { FontSize = 12, Margin = new Thickness(6, 8, 6, 4), Text = "Finding apps..." };
+    readonly TextBlock _launchMessage = new()
+    {
+        FontSize = 12, Margin = new Thickness(6, 8, 6, 4),
+        TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed,
+    };
     readonly DispatcherTimer _tick;
     IReadOnlyList<WorkspacePrograms.Shortcut> _all = [];
     string _shown = string.Empty;
     bool _refreshing;
+    bool _launching;
 
     /// <param name="runtime">The workspace this strip belongs to, or null while it is stopped.</param>
     /// <param name="ownerActed">Called when the owner uses the strip, so the view takes the wheel.</param>
@@ -82,18 +88,21 @@ public sealed class WorkspaceTaskbar : Border
         _apps.PreviewMouseLeftButtonUp += (_, e) =>
         {
             if ((e.OriginalSource as DependencyObject)?.FindParent<ListBoxItem>() is { DataContext: WorkspacePrograms.Shortcut app })
-                Launch(app);
+                _ = Launch(app);
         };
         _apps.KeyDown += (_, e) =>
         {
-            if (e.Key == Key.Enter && _apps.SelectedItem is WorkspacePrograms.Shortcut app) { Launch(app); e.Handled = true; }
+            if (e.Key == Key.Enter && _apps.SelectedItem is WorkspacePrograms.Shortcut app) { _ = Launch(app); e.Handled = true; }
             else if (e.Key == Key.Escape) { _menu!.IsOpen = false; e.Handled = true; }
         };
         _apps.DisplayMemberPath = nameof(WorkspacePrograms.Shortcut.Name);
         _loading.SetResourceReference(TextBlock.ForegroundProperty, "MutedInkBrush");
+        _launchMessage.SetResourceReference(TextBlock.ForegroundProperty, "MutedInkBrush");
+        AutomationProperties.SetLiveSetting(_launchMessage, AutomationLiveSetting.Polite);
         var panel = new StackPanel();
         panel.Children.Add(_search);
         panel.Children.Add(_loading);
+        panel.Children.Add(_launchMessage);
         panel.Children.Add(_apps);
         var card = new Border
         {
@@ -236,16 +245,50 @@ public sealed class WorkspaceTaskbar : Border
     }
 
     /// <summary>Starts an app inside the workspace, never on the owner's own desktop.</summary>
-    internal Task<int> Launch(WorkspacePrograms.Shortcut app)
+    internal async Task<int> Launch(WorkspacePrograms.Shortcut app)
     {
-        _menu.IsOpen = false;
-        if (_runtime()?.Plane is not { } plane) return Task.FromResult(0);
+        if (_launching) return 0;
+        if (WorkspacePrograms.ShellOnly(app.Target))
+        {
+            LaunchMessage(app.Name + " opens through Windows on your desktop. Choose another app for this workspace.");
+            return 0;
+        }
+        if (_runtime()?.Plane is not { } plane)
+        {
+            LaunchMessage("This workspace has stopped. It starts again when an agent needs it.");
+            return 0;
+        }
         _ownerActed();
-        return Task.Run(() => plane.Open(app.Target, app.Arguments.Length > 0 ? app.Arguments : null, quiet: false, out _));
+        _launching = true;
+        _apps.IsEnabled = false;
+        LaunchMessage("Opening " + app.Name + "...");
+        try
+        {
+            int pid = await Task.Run(() => plane.Open(app.Target, app.Arguments.Length > 0 ? app.Arguments : null, quiet: false, out _));
+            if (pid > 0) _menu.IsOpen = false;
+            else LaunchMessage("Couldn’t open " + app.Name + " in this workspace. Try another app.");
+            return pid;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
+            or System.IO.IOException or UnauthorizedAccessException)
+        {
+            LaunchMessage("Couldn’t open " + app.Name + " in this workspace. Try again.");
+            return 0;
+        }
+        finally { _launching = false; _apps.IsEnabled = true; }
+    }
+
+    void LaunchMessage(string text)
+    {
+        _launchMessage.Text = text;
+        _launchMessage.Visibility = Visibility.Visible;
+        System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(_launchMessage)
+            ?.RaiseAutomationEvent(System.Windows.Automation.Peers.AutomationEvents.LiveRegionChanged);
     }
 
     async void OpenMenu()
     {
+        _launchMessage.Visibility = Visibility.Collapsed;
         _search.Text = string.Empty;
         _menu.IsOpen = true;
         if (_all.Count > 0) { Filter(); return; }
@@ -277,7 +320,7 @@ public sealed class WorkspaceTaskbar : Border
         switch (e.Key)
         {
             case Key.Enter when _apps.SelectedItem is WorkspacePrograms.Shortcut app:
-                Launch(app);
+                _ = Launch(app);
                 e.Handled = true;
                 break;
             case Key.Down when _apps.Items.Count > 0:

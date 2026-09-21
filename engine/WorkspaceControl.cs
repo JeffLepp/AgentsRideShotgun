@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Windows.Media.Imaging;
 
@@ -336,7 +336,8 @@ public sealed partial class WorkspaceControl : IDisposable
     // --- action ------------------------------------------------------------------------------
 
     /// <summary>
-    /// Presses a current element. A control without a native pattern may use its validated point;
+    /// Presses a current element. A standard Win32 button or a control without an action pattern
+    /// may use its validated point;
     /// a stale control or a provider failure is refused without replaying the action.
     /// </summary>
     public bool Press(int elementId) => Press(elementId, Ticket);
@@ -374,9 +375,12 @@ public sealed partial class WorkspaceControl : IDisposable
         if (result != WorkspaceTree.TreeAction.Unsupported || _tree.Validate(elementId) is not null
             || !_tree.Focus(elementId, () => Ticket == ticket))
         { Note("write", element.ToString(), "refused; read controls again"); return false; }
-        if (!_desktop.TypeText(text, _tree.WindowOf(elementId), ticket)) return Discarded("write", element.ToString());
-        Note("write", element.ToString(), "focused by the tree, typed by message");
-        return true;
+        TypedText typed = _desktop.Type(text, _tree.WindowOf(elementId), ticket);
+        if (typed == TypedText.Discarded) return Discarded("write", element.ToString());
+        // A failed type used to be filed as if the owner had taken control, which put the wrong
+        // reason in the evidence log and told the caller nothing about the control that refused it.
+        Note("write", element.ToString(), "focused by the tree, then " + typed);
+        return typed.Landed;
     }
 
     /// <summary>Executes one locally validated sequence without another model turn per action.</summary>
@@ -418,12 +422,21 @@ public sealed partial class WorkspaceControl : IDisposable
         return true;
     }
 
-    public bool TypeText(string text, nint window = 0)
+    public bool TypeText(string text, nint window = 0) => Type(text, window).Landed;
+
+    /// <summary>
+    /// Types, and reports where the text went rather than only that it was sent. With no window
+    /// named the keyboard is wherever the desktop last left it, which is not always where the agent
+    /// is looking, so the answer carries the control's name and the evidence log records it.
+    /// </summary>
+    public TypedText Type(string text, nint window = 0)
     {
-        if (!Allowed("type", text, out long ticket)) return false;
-        if (!_desktop.TypeText(text, window, ticket)) return Discarded("type", text);
-        Note("type", text, "by message");
-        return true;
+        if (!Allowed("type", text, out long ticket))
+            return new TypedText(false, "", "refused, " + (Driving == Driver.Owner ? "the owner is driving" : "no lease"));
+        TypedText typed = _desktop.Type(text, window, ticket);
+        if (typed == TypedText.Discarded) { Discarded("type", text); return typed; }
+        Note("type", text, typed.ToString());
+        return typed;
     }
 
     public bool Key(int virtualKey, nint window = 0)
@@ -555,6 +568,11 @@ public sealed partial class WorkspaceControl : IDisposable
         // "hivemind" or "chrome" is what a person types into Start; CreateProcess wants the file.
         (exe, arguments) = WorkspacePrograms.Resolve(exe, arguments);
         started = exe;
+        if (WorkspacePrograms.ShellOnly(exe))
+        {
+            _evidence.Note("open", Path.GetFileName(exe), "refused: Windows shell activation requires the owner's desktop");
+            return 0;
+        }
         int pid = _desktop.Launch(exe, arguments, lease: _requiredLease.Value ?? 0);
         if (!quiet)
             Note("open", Path.GetFileName(exe) + (arguments is null ? "" : " " + arguments),
@@ -572,6 +590,51 @@ public sealed partial class WorkspaceControl : IDisposable
     /// application. Measured 2026-09-07: asked to open HiveMind while the owner's was running, the
     /// agent spent its whole mission on that theory and reported the app as broken.
     /// </summary>
+    /// <summary>
+    /// The owner's one click when a copy of the program he is testing is already running on his own
+    /// desktop: his copy is asked to close, and the program then starts in this workspace, which is
+    /// the only way a one-copy-per-session application can be driven in here at all. Nothing closes
+    /// until he clicks - this runs from the approval, never from the agent's call. Null when the
+    /// workspace has it; one sentence when it does not.
+    /// </summary>
+    public string? TakeOver(string program, string? arguments)
+    {
+        (string exe, string? args) = WorkspacePrograms.Resolve(program, arguments);
+        if (RunningOutside(exe) is not null && !CloseOutside(exe))
+            return "The copy of " + Path.GetFileNameWithoutExtension(exe) + " on the owner's desktop would not close;"
+                + " it is probably asking about unsaved work. Close it there and ask again.";
+        int pid = Open(exe, args);
+        return pid == 0 ? "Windows would not start " + program + " in the workspace." : null;
+    }
+
+    /// <summary>Asks every copy outside this workspace to close and waits for it, the way clicking
+    /// its X does. Never kills: an application holding unsaved work is the owner's to decide about.</summary>
+    bool CloseOutside(string exe)
+    {
+        Process[] running;
+        try { running = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)); }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { return false; }
+        try
+        {
+            foreach (Process other in running)
+            {
+                if (_desktop.OwnsProcess(other.Id)) continue;
+                try { other.CloseMainWindow(); }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            }
+        }
+        finally { foreach (Process other in running) other.Dispose(); }
+        // This runs on the owner's click, so it is deliberately short: an application that has
+        // nothing to ask about is gone in a few hundred milliseconds, and one that is still up
+        // after three seconds is showing him a dialog, which is his to answer, not ours to wait on.
+        for (int waited = 0; waited < 3000; waited += 100)
+        {
+            if (RunningOutside(exe) is null) return true;
+            Thread.Sleep(100);
+        }
+        return false;
+    }
+
     public WorkspaceCopy? RunningOutside(string exe)
     {
         string name;
@@ -718,6 +781,12 @@ public sealed partial class WorkspaceControl : IDisposable
         try
         {
             if (_disposed || _browser is not null) return;
+            // Warm only a browser this workspace actually uses. Measured 2026-09-20: waking a
+            // workspace started Chrome every time, even for one that had never browsed, and that
+            // was the largest single part of the ~6s wake - paid for a browser nobody opens. The
+            // first browse still starts one lazily and leaves the mark, so the next wake warms it.
+            if (_desktop.Folder is not { } home
+                || !File.Exists(Path.Combine(home, WorkspaceBrowser.UsedMark))) return;
             WorkspaceBrowser? started = await WorkspaceBrowser
                 .Start(_desktop, "about:blank", true, cancel, 0).ConfigureAwait(false);
             if (started is null) { _evidence.Note("browser", "warm-up", "did not come up; browse will start it"); return; }

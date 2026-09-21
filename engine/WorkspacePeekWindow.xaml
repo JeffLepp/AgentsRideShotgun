@@ -44,43 +44,52 @@
             <Setter Property="Fill" Value="Transparent"/>
             <Setter Property="IsHitTestVisible" Value="True"/>
         </Style>
+        <!-- A workspace tab: the same glass pill the card wears, at tab size. The one on screen is
+             filled with the accent, which is what selection means everywhere else in this app. -->
+        <Style x:Key="TabPill" TargetType="Button">
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="Padding" Value="9,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Background" Value="{DynamicResource GlassBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource GlassEdgeBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource PillRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Surface" Property="Opacity" Value="0.85"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
-    <Grid x:Name="Root">
-        <!-- The back card of a two-up stack: a plain, non-interactive replica, smaller and higher. -->
-        <Border x:Name="BackCard" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top"
-                Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource GlassEdgeBrush}"
-                BorderThickness="1" CornerRadius="{DynamicResource CornerWindowRadius}" Opacity="0.92"
-                Cursor="Hand" MouseLeftButtonDown="BackCard_MouseLeftButtonDown"
-                automation:AutomationProperties.Name="Bring this workspace to the front">
-            <Border.Effect>
-                <DropShadowEffect Color="Black" Opacity="0.18" BlurRadius="24" ShadowDepth="10" Direction="270"/>
-            </Border.Effect>
-            <Grid x:Name="BackBody" ClipToBounds="True">
-                <Image x:Name="BackScreen" Stretch="UniformToFill"/>
-                <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
-                        Background="{DynamicResource GlassBrush}" BorderBrush="{DynamicResource GlassEdgeBrush}"
-                        BorderThickness="1" CornerRadius="{DynamicResource PillRadius}" Padding="9,4">
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse x:Name="BackDot" Width="7" Height="7" Margin="0,0,7,0" VerticalAlignment="Center"
-                                 Fill="{DynamicResource AccentBrush}"/>
-                        <TextBlock x:Name="BackName" FontSize="12" FontWeight="SemiBold" MaxWidth="120"
-                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                                   Foreground="{DynamicResource InkBrush}"/>
-                        <TextBlock x:Name="BackWho" FontSize="11.5" Margin="7,0,0,0" MaxWidth="120"
-                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                                   Foreground="{DynamicResource MutedInkBrush}"/>
-                    </StackPanel>
-                </Border>
-            </Grid>
-        </Border>
+    <!-- Hover is the whole thing the owner can point at - card and tabs - so reaching up for another
+         workspace does not let the corner fade out from under the pointer on its way there. -->
+    <Grid x:Name="Root" MouseEnter="Root_MouseEnter" MouseLeave="Root_MouseLeave">
+        <!-- The tab strip, shown only once a second workspace is running: one tab each, in the order
+             they started, above the card rather than on it so it never covers the picture. It takes
+             the band the two-up stack's back card used to rise into. Filled in from code, because how
+             many there are is how many workspaces are running. -->
+        <StackPanel x:Name="TabStrip" Orientation="Horizontal" Visibility="Collapsed"
+                    HorizontalAlignment="Left" VerticalAlignment="Top" Background="Transparent"
+                    KeyboardNavigation.DirectionalNavigation="Cycle"/>
 
         <!-- The card itself. Photographed without its shadow margin, so the shadow lives outside
              the card's own Width/Height rather than inside it. -->
         <Border x:Name="FrontCard" HorizontalAlignment="Left" VerticalAlignment="Top"
                 Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource GlassEdgeBrush}"
-                BorderThickness="1" CornerRadius="{DynamicResource CornerWindowRadius}"
-                MouseEnter="FrontCard_MouseEnter" MouseLeave="FrontCard_MouseLeave">
+                BorderThickness="1" CornerRadius="{DynamicResource CornerWindowRadius}">
             <Border.Effect>
                 <DropShadowEffect Color="Black" Opacity="{DynamicResource CornerShadowOpacity}" BlurRadius="60" ShadowDepth="24" Direction="270"/>
             </Border.Effect>

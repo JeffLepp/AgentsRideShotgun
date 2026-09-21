@@ -18,9 +18,10 @@ internal static class WorkspacePeekPolicy
     /// <param name="busy">A workspace waits on the owner: a question, or a workspace he holds.</param>
     /// <param name="quiet">How long since the last thing any workspace did.</param>
     internal static bool Wanted(CornerShow show, bool running, bool hub, bool dismissed, bool summoned,
-        bool pinned, bool held, bool busy, TimeSpan quiet, TimeSpan fade)
+        bool pinned, bool held, bool busy, TimeSpan quiet, TimeSpan fade, bool presentation = false, bool explicitlyRequested = false)
     {
         if (!running || hub || dismissed) return false;
+        if (presentation && !explicitlyRequested) return false;
         if (summoned || held) return true;
         return show switch
         {
@@ -106,20 +107,6 @@ internal static class WorkspacePeekPlacement
     /// <summary>Whether a card at this width counts as grown - the shrink button only means
     /// something once dragging or Settings has made it bigger than Small.</summary>
     internal static bool Grown(AppSettings settings) => Card(settings).Width > SmallWidth + 0.5;
-
-    /// <summary>How far the back card of a stack sits above the front one, before its own scale.</summary>
-    internal const double StackRise = 22;
-    internal const double StackScale = 0.93;
-
-    /// <summary>The back card of a two-up stack: the same rect, scaled 0.93 about its own center and
-    /// then risen 22 DIP - so it stays centered under the front card, only smaller and higher.</summary>
-    internal static Rect Back(Rect front)
-    {
-        double width = front.Width * StackScale, height = front.Height * StackScale;
-        double left = front.Left + (front.Width - width) / 2;
-        double top = front.Top + (front.Height - height) / 2 - StackRise;
-        return new Rect(left, top, width, height);
-    }
 
     /// <summary>
     /// Whether a place the owner dragged it to, read back from disk, still lands on a monitor

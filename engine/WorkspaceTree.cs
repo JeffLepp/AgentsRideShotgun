@@ -36,6 +36,16 @@ public sealed class WorkspaceTree : IDisposable
     // 1.3 seconds when measured, and the live view is 2 frames a second on that pump.
     readonly System.Collections.Concurrent.BlockingCollection<Action> _work = new(1);
     internal const int OperationMilliseconds = 3000;
+
+    /// <summary>Shrinks the read budget below <see cref="OperationMilliseconds"/> so the partial-read
+    /// path can be reached on purpose. Zero means unset. Only the engine probe ever sets this.</summary>
+    internal static int BudgetMillisecondsForTests;
+
+    /// <summary>An artificial pause before each node in <see cref="ReadOnPump"/>, so a small fixture
+    /// tree can still blow a short test budget deterministically instead of racing a real slow window.
+    /// Only the engine probe ever sets this.</summary>
+    internal static TimeSpan SlowNodeForTests = TimeSpan.Zero;
+
     long _operationDeadline;
     readonly Thread _thread;
     readonly Dictionary<int, Entry> _known = [];
@@ -95,7 +105,30 @@ public sealed class WorkspaceTree : IDisposable
     /// <param name="everything">
     /// Include the unnamed structural nodes an agent cannot act on. Off by default.
     /// </param>
-    public IReadOnlyList<WorkspaceElement> Read(nint window, bool everything = false) => Run(() =>
+    /// <param name="nameContains">
+    /// Keep only elements whose name contains this text, case-insensitive. The walk still visits
+    /// every node - a plain parent can still have a matching child - but the caller gets back only
+    /// what it asked for, which scopes a large window down to the one control it already knows the
+    /// name of.
+    /// </param>
+    public IReadOnlyList<WorkspaceElement> Read(nint window, bool everything = false, string? nameContains = null)
+        => Read(window, everything, nameContains, out _);
+
+    /// <summary>
+    /// Like <see cref="Read(nint, bool, string?)"/>, but also says whether the read stopped at its
+    /// time budget with more of the tree left unread. A busy window used to mean CheckDeadline threw
+    /// and the agent got nothing at all - see AGENT_WORKSPACES_TECHNICAL_REPORT.md and
+    /// Found in app testing. What was collected before the clock ran
+    /// out is worth more than an exception, every time.
+    /// </summary>
+    public IReadOnlyList<WorkspaceElement> Read(nint window, bool everything, string? nameContains, out bool partial)
+    {
+        (IReadOnlyList<WorkspaceElement> found, bool stopped) = Run(() => ReadOnPump(window, everything, nameContains));
+        partial = stopped;
+        return found;
+    }
+
+    (IReadOnlyList<WorkspaceElement>, bool) ReadOnPump(nint window, bool everything, string? nameContains)
     {
         var found = new List<WorkspaceElement>();
         int reading = ++_reading;
@@ -107,19 +140,25 @@ public sealed class WorkspaceTree : IDisposable
 
         var queue = new Queue<(AutomationElement Element, int Depth)>();
         try { queue.Enqueue((AutomationElement.FromHandle(window), 0)); }
-        catch (Exception ex) when (ex is ElementNotAvailableException or ArgumentException) { return found; }
+        catch (Exception ex) when (ex is ElementNotAvailableException or ArgumentException) { return (found, false); }
 
         TreeWalker walker = TreeWalker.ControlViewWalker;
+        bool partial = false;
         // 4000 is a ceiling against a runaway tree, not a measured limit: the busiest window seen so
         // far published 111 elements.
         while (queue.Count > 0 && found.Count < 4000)
         {
-            CheckDeadline();
+            if (DeadlineReached()) { partial = true; break; }
+            // Only the engine probe ever sets this, to reach this path on a small fixture tree
+            // deterministically rather than waiting on a real slow one and hoping the timing lines up.
+            if (SlowNodeForTests > TimeSpan.Zero) Thread.Sleep(SlowNodeForTests);
             (AutomationElement element, int depth) = queue.Dequeue();
             try
             {
                 WorkspaceElement? info = Describe(element, depth, reading, everything);
-                if (info is not null) found.Add(info);
+                if (info is not null
+                    && (nameContains is null || info.Name.Contains(nameContains, StringComparison.OrdinalIgnoreCase)))
+                    found.Add(info);
             }
             catch (Exception ex) when (ex is ElementNotAvailableException or COMException) { }
 
@@ -128,14 +167,14 @@ public sealed class WorkspaceTree : IDisposable
                 for (AutomationElement? child = walker.GetFirstChild(element, request); child is not null;
                      child = walker.GetNextSibling(child, request))
                 {
-                    CheckDeadline();
+                    if (DeadlineReached()) { partial = true; break; }
                     queue.Enqueue((child, depth + 1));
                 }
             }
             catch (Exception ex) when (ex is ElementNotAvailableException or COMException) { }
         }
-        return (IReadOnlyList<WorkspaceElement>)found;
-    });
+        return ((IReadOnlyList<WorkspaceElement>)found, partial);
+    }
 
     WorkspaceElement? Describe(AutomationElement element, int depth, int reading, bool everything)
     {
@@ -193,13 +232,21 @@ public sealed class WorkspaceTree : IDisposable
     public WorkspaceElement? Known(int id) => Run(() => _known.TryGetValue(id, out Entry? e) ? e.Info : null);
 
     /// <summary>
-    /// Presses an element the way it says it can be pressed. Returns false when the element
-    /// publishes no way to be acted on, or has gone: the caller clicks its point instead.
+    /// Presses an element through its supported provider. TryPress distinguishes an unsupported
+    /// route (eligible for a validated point press) from a refused or possibly dispatched action.
     /// </summary>
     public bool Press(int id) => TryPress(id, () => true) == TreeAction.Applied;
 
     internal TreeAction TryPress(int id, Func<bool> mayAct) => Run(() => Act(id, mayAct, element =>
     {
+        // The Win32 UIA proxy for a standard dialog Button can publish Invoke while its
+        // implementation fails on a non-input desktop (measured: Win32Exception, "Hot key is
+        // already registered"). Choose the existing validated point route BEFORE invoking.
+        // Never reinterpret a provider exception as permission to replay a possible action.
+        var now = element.Current;
+        if (now.ControlType == ControlType.Button && now.FrameworkId == "Win32"
+            && now.ClassName == "Button" && now.NativeWindowHandle != 0)
+            return false;
         if (element.TryGetCurrentPattern(InvokePattern.Pattern, out object? invoke))
         { CheckAction(mayAct); ((InvokePattern)invoke).Invoke(); return true; }
         if (element.TryGetCurrentPattern(TogglePattern.Pattern, out object? toggle))
@@ -298,9 +345,16 @@ public sealed class WorkspaceTree : IDisposable
         }
     }
 
+    bool DeadlineReached() => Environment.TickCount64 >= _operationDeadline;
+
+    /// <summary>
+    /// Used by a single action - press, write, focus - where there is no partial result to fall back
+    /// to, so a blown budget is still a real failure. Read has its own, cooperative check: see
+    /// <see cref="ReadOnPump"/>.
+    /// </summary>
     void CheckDeadline()
     {
-        if (Environment.TickCount64 >= _operationDeadline)
+        if (DeadlineReached())
             throw new TimeoutException("UI Automation exceeded its 3-second budget. Use computer/look to inspect; an in-flight provider action may still finish. Do not replay automatically.");
     }
 
@@ -335,7 +389,16 @@ public sealed class WorkspaceTree : IDisposable
         if (Thread.CurrentThread == _thread) return job();
         ObjectDisposedException.ThrowIf(_disposed, this);
         var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        long deadline = Environment.TickCount64 + OperationMilliseconds;
+        int budgetMs = BudgetMillisecondsForTests > 0 ? BudgetMillisecondsForTests : OperationMilliseconds;
+        // The walk stops at its own deadline and hands back what it collected, but it can only do
+        // that if it is given less time than the caller waits: with one budget for both, the walk
+        // returned its partial list at the same instant this thread gave up on it, and the caller
+        // lost that race and threw the list away. Measured 2026-09-21: a read of a busy window
+        // failed with the exception below while the elements it had were sitting in a list nobody
+        // read. The remaining wait is what it always was - protection against a provider call that
+        // has wedged the COM thread, where there is nothing to hand back.
+        long handback = Math.Min(250, budgetMs / 4);
+        long deadline = Environment.TickCount64 + budgetMs - handback;
         try
         {
             if (!_work.TryAdd(() =>
@@ -345,7 +408,7 @@ public sealed class WorkspaceTree : IDisposable
             })) throw new TimeoutException("UI Automation is busy. Use computer/look; no additional UIA work was queued.");
         }
         catch (InvalidOperationException) { throw new ObjectDisposedException(nameof(WorkspaceTree)); }
-        try { return done.Task.WaitAsync(TimeSpan.FromMilliseconds(OperationMilliseconds)).GetAwaiter().GetResult(); }
+        try { return done.Task.WaitAsync(TimeSpan.FromMilliseconds(budgetMs)).GetAwaiter().GetResult(); }
         catch (TimeoutException)
         {
             // Never replace a stuck COM thread with an unlimited stream of new threads. Queued

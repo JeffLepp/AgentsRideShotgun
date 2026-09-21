@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32;
 
 namespace HiveMind.AgentWorkspaces;
 
@@ -39,10 +40,17 @@ internal static class WorkspaceConnections
 
     internal static string DisplayName(AgentApp app) => app == AgentApp.ClaudeCode ? "Claude Code" : "Codex";
 
-    /// <summary>Where an agent app's own command lives, or null when it is not on this PC. A field so
-    /// the probes can point it at a stub and never reach the owner's real installation.</summary>
-    internal static Func<AgentApp, string?> Locate =
-        app => app == AgentApp.ClaudeCode ? FindClaude() : FindCodex();
+    /// <summary>Where an agent app's own command lives, or null when it is not on this PC. A seam so
+    /// the probes can point it at a stub and never reach the owner's real installation. Everything
+    /// that asks where an agent is asks through here, and putting a stub in place forgets what
+    /// discovery already found, so a real installation can never be answered from memory afterwards.</summary>
+    internal static Func<AgentApp, string?> Locate
+    {
+        get => _locate;
+        set { _locate = value; Forget(); }
+    }
+
+    static Func<AgentApp, string?> _locate = Discover;
 
     internal static object AppConfiguration => new
     {
@@ -57,11 +65,38 @@ internal static class WorkspaceConnections
     /// <summary>Whether the app's own configuration has a working Deskweave entry in it. A field for
     /// the same reason <see cref="Locate"/> is one: first launch, Settings and <see cref="KeepUp"/> all
     /// read through it, so a probe answers for every one of them at once. The default reads the file,
-    /// never writes it.</summary>
-    internal static Func<AgentApp, bool> IsConnected = app => ReadEntry(app) == Entry.Current;
+    /// never writes it, and falls back on what the app's own command <see cref="Shows"/> a connect,
+    /// for the PC where the file it reads is not the file the agent writes.</summary>
+    internal static Func<AgentApp, bool> IsConnected = app => ReadEntry(app) == Entry.Current || Vouched(app);
 
     /// <summary>Whether the app's configuration has anything under Deskweave's name, working or not.</summary>
     internal static bool HasEntry(AgentApp app) => ReadEntry(app) != Entry.None;
+
+    /// <summary>
+    /// The agents whose own command showed Deskweave's entry in place after a connect. Only
+    /// <see cref="Change"/> writes it, and a disconnect takes it back, so nothing here ever claims
+    /// a connection that was not just made or is no longer wanted.
+    ///
+    /// It is what keeps the cheap readers cheap. <see cref="Shows"/> costs a process, which is
+    /// fine once after a write and out of the question on every Settings render, so its answer is
+    /// kept for the rest of the run: without it, a PC where the file read looks in the wrong place
+    /// would show "Found on this PC" in Settings forever and have <see cref="KeepUp"/> connecting
+    /// an already-connected agent every ten minutes until the app closes.
+    /// </summary>
+    static bool Vouched(AgentApp app)
+    {
+        lock (Vouches) return _vouched.Contains(app);
+    }
+
+    static void Vouch(AgentApp app, bool shown)
+    {
+        lock (Vouches)
+            if (shown) _vouched.Add(app);
+            else _vouched.Remove(app);
+    }
+
+    static readonly Lock Vouches = new();
+    static readonly HashSet<AgentApp> _vouched = [];
 
     /// <summary>
     /// What an agent app's configuration holds under Deskweave's name. Stale is an entry that runs
@@ -188,17 +223,109 @@ internal static class WorkspaceConnections
         // A stale one left in place would make the add below refuse the name.
         bool had = HasEntry(app);
         if (had) await Run(cli, ["mcp", "remove", .. scope, AppName], bound.Token, null).ConfigureAwait(false);
+        // Whatever the remove did, what this run was told about the entry has stopped being true.
+        Vouch(app, false);
         if (!connect) return HasEntry(app) ? $"{name} kept its Deskweave entry. Remove it in {name}'s MCP settings." : null;
-        var added = await Run(cli, ["mcp", "add", .. scope, AppName, "--", Bridge, "--workspace", WorkspaceAccessStore.RouterTicket],
+        await Run(cli, ["mcp", "add", .. scope, AppName, "--", Bridge, "--workspace", WorkspaceAccessStore.RouterTicket],
             bound.Token, null).ConfigureAwait(false);
-        // What the configuration says now, not what the command claimed: one that exits 0 without
-        // writing the entry has connected nothing.
-        if (added.Code == 0 && IsConnected(app)) return null;
-        return had && !IsConnected(app)
+        // What the configuration holds now, not what the command claimed: one that exits 0 without
+        // writing the entry has connected nothing. The file first, because it costs nothing; the
+        // app's own command after, because it is the one that knows where it wrote. Its exit code
+        // is not the question either - an add that refuses a name it already holds has still left
+        // the owner connected, and telling him it failed would be the same lie in reverse.
+        if (IsConnected(app)) return null;
+        if (await Shows(app, cli, bound.Token).ConfigureAwait(false)) { Vouch(app, true); return null; }
+        return had
             // The old entry came out for the replacement and the new one did not go in. Saying
             // nothing changed would be a lie, and it would hide a connection that is gone.
             ? $"{name} did not accept the connection, and its earlier Deskweave entry came out with it. Connect it again in Settings."
             : $"{name} did not accept the connection. Nothing else was changed.";
+    }
+
+    /// <summary>
+    /// Whether the app's own command shows Deskweave's entry in place, running this install's
+    /// bridge against its one router ticket - <see cref="Runs"/>'s question, asked of the tool that
+    /// did the write instead of a file.
+    ///
+    /// The two can disagree, because the command's environment is not Deskweave's. `claude` on PATH
+    /// may be a shim that clears CLAUDE_CONFIG_DIR before calling the real one, and then the add
+    /// lands in ~/.claude.json while <see cref="ReadEntry"/> opens the folder that variable names.
+    /// Nothing crashes: the owner is told a connection he just made was refused, and the keep-up
+    /// loop makes it again every ten minutes forever. The command cannot disagree with itself.
+    ///
+    /// False is "did not show it", never "it is not there". A command that fails, times out or
+    /// prints something this does not understand leaves <see cref="ReadEntry"/>'s answer standing,
+    /// so a provider that changes its output turns the fix off rather than breaking connecting.
+    /// </summary>
+    static async Task<bool> Shows(AgentApp app, string cli, CancellationToken cancel)
+    {
+        // Its own budget inside Change's 30 s: `claude mcp get` health-checks the server it names,
+        // and a bridge that cannot reach Deskweave waits. A check that hangs must not spend the
+        // time the write was given, or cost the owner twice the wait before he is told no.
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        bound.CancelAfter(TimeSpan.FromSeconds(8));
+        try
+        {
+            var shown = await Run(cli, app == AgentApp.Codex ? ["mcp", "list", "--json"] : ["mcp", "get", AppName],
+                bound.Token, null).ConfigureAwait(false);
+            if (shown.Code != 0) return false;   // Claude Code exits 1 for a name it does not have
+            return app == AgentApp.Codex ? ShownByCodex(shown.Output) : ShownByClaude(shown.Output);
+        }
+        // A command that is not there any more, or one the app is still writing its answer to.
+        // Cancellation the caller asked for is the app closing, and belongs to the caller.
+        catch (Exception ex) when (ex is IOException or JsonException or System.ComponentModel.Win32Exception
+            || ex is OperationCanceledException && !cancel.IsCancellationRequested) { return false; }
+    }
+
+    /// <summary>
+    /// Deskweave's entry in what `codex mcp list --json` prints, which is the array
+    /// <see cref="Codex"/> already reads for a single workspace's own entry.
+    /// </summary>
+    static bool ShownByCodex(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Array) return false;
+        foreach (JsonElement server in document.RootElement.EnumerateArray())
+        {
+            if (server.ValueKind != JsonValueKind.Object || !server.TryGetProperty("name", out JsonElement name)
+                || name.ValueKind != JsonValueKind.String || name.GetString() != AppName) continue;
+            if (!server.TryGetProperty("transport", out JsonElement transport)
+                || transport.ValueKind != JsonValueKind.Object) return false;
+            string? command = transport.TryGetProperty("command", out JsonElement c) && c.ValueKind == JsonValueKind.String
+                ? c.GetString() : null;
+            List<string> args = transport.TryGetProperty("args", out JsonElement a) && a.ValueKind == JsonValueKind.Array
+                ? [.. a.EnumerateArray().Select(arg => arg.ValueKind == JsonValueKind.String ? arg.GetString() ?? "" : "")] : [];
+            return Runs(command, args);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Deskweave's entry in what `claude mcp get deskweave` prints. Claude Code has no --json for
+    /// mcp (2.1.278), and `mcp list` puts the name, the command and the args on one line with no
+    /// separator between them, which is not something to take a path out of. `get` labels Command
+    /// and Args on lines of their own, and health-checks the one server it was asked about rather
+    /// than every server the owner has.
+    ///
+    /// Its args come back joined by spaces. Deskweave writes exactly two, the second a path that
+    /// can hold spaces itself, so only the first space between them is a separator - and any other
+    /// entry that splits wrong is one <see cref="Runs"/> was going to refuse anyway. Whether the
+    /// health check passed is not read: the question is what the agent would run, and Deskweave's
+    /// own router may still be starting.
+    /// </summary>
+    static bool ShownByClaude(string text)
+    {
+        string? command = null, arguments = null;
+        foreach (string line in text.Split('\n'))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith("Command:", StringComparison.Ordinal)) command ??= trimmed["Command:".Length..].Trim();
+            else if (trimmed.StartsWith("Args:", StringComparison.Ordinal)) arguments ??= trimmed["Args:".Length..].Trim();
+        }
+        if (command is null || arguments is null) return false;
+        int between = arguments.IndexOf(' ');
+        string[] args = between < 0 ? [arguments] : [arguments[..between], arguments[(between + 1)..]];
+        return Runs(command, args);
     }
 
     /// <summary>
@@ -282,7 +409,9 @@ internal static class WorkspaceConnections
 
     internal static async Task<string> Codex(string id, bool connect, CancellationToken cancel = default, string? profileRoot = null)
     {
-        string? cli = FindCodex();
+        // Through the seam, like every other caller: what is on this PC is one question with one
+        // answer, and a probe that stands in for it must stand in for this too.
+        string? cli = Locate(AgentApp.Codex);
         if (cli is null) return "Codex is not installed in a supported local location. You can still copy the MCP connection for another agent.";
         if (!File.Exists(Bridge)) return "The packaged workspace bridge is missing. Reinstall Deskweave.";
         using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
@@ -351,33 +480,185 @@ internal static class WorkspaceConnections
         }
     }
 
+    /// <summary>
+    /// Where an agent's command is, looked for once. <see cref="IsInstalled"/> is read while a
+    /// window is being built - first launch's card, and twice over on every Settings render - and
+    /// the answer walks PATH, the registry and a list of folders, so it is paid for one time. A
+    /// command that was found does not move while Deskweave is running.
+    ///
+    /// Finding nothing is remembered only briefly, for the reason <see cref="WorkspaceBrowser"/>
+    /// forgets a missing browser: Deskweave starts with Windows and sits in the tray while the
+    /// owner installs an agent, and the keep-up loop is waiting for exactly that agent.
+    /// </summary>
+    static string? Discover(AgentApp app)
+    {
+        lock (Known)
+            if (_known.TryGetValue(app, out (string? Path, long Until) was)
+                && (was.Path is not null || Environment.TickCount64 < was.Until))
+                return was.Path;
+        string? found = app == AgentApp.ClaudeCode ? FindClaude() : FindCodex();
+        lock (Known) _known[app] = (found, Environment.TickCount64 + 30_000);
+        return found;
+    }
+
+    static readonly Lock Known = new();
+    static readonly Dictionary<AgentApp, (string? Path, long Until)> _known = [];
+
+    /// <summary>Forgets where the agents' commands were, so the next look reads this PC again.</summary>
+    static void Forget()
+    {
+        lock (Known) _known.Clear();
+    }
+
+    /// <summary>
+    /// Claude Code's own command. Until 2026-09-19 this was four hardcoded paths and no PATH lookup
+    /// at all, so a Node under nvm-windows, fnm or Volta, anyone who had run `npm config set
+    /// prefix`, a machine-wide install, and the winget, scoop and chocolatey shims were every one of
+    /// them told "No supported agent found on this PC" - with no override anywhere in Settings, so
+    /// the product did nothing for them. The four paths are still asked, last, so no PC this already
+    /// found is worse off.
+    /// </summary>
     static string? FindClaude()
     {
         string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        foreach (string guess in new[]
-        {
+        return Command("claude") ?? Existing(
             Path.Combine(home, ".local", "bin", "claude.exe"), Path.Combine(home, ".local", "bin", "claude"),
-            Path.Combine(roaming, "npm", "claude.cmd"), Path.Combine(roaming, "npm", "claude"),
-        })
-            if (File.Exists(guess)) return guess;
-        return null;
+            Path.Combine(roaming, "npm", "claude.cmd"), Path.Combine(roaming, "npm", "claude"));
     }
 
     static string? FindCodex()
     {
-        string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        string direct = Path.Combine(profile, ".local", "bin", "codex.exe");
-        if (File.Exists(direct)) return direct;
-        foreach (string root in new[] { Path.Combine(roaming, "npm", "node_modules", "@openai"),
-            Path.Combine(profile, ".vscode", "extensions") })
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Command("codex") ?? Existing(Path.Combine(home, ".local", "bin", "codex.exe")) ?? Packaged();
+    }
+
+    static string? Existing(params string[] paths) => paths.FirstOrDefault(File.Exists);
+
+    /// <summary>The extensions CreateProcess can start, in the order PATHEXT names them.</summary>
+    static readonly string[] Runnable = [".exe", ".bat", ".cmd"];
+
+    /// <summary>
+    /// What Process.Start can run for a bare agent command name, resolved the way Windows itself
+    /// resolves one: PATH, then the App Paths key Win+R reads, then the global command folders a
+    /// PATH inherited at login may not name. The first two are <see cref="WorkspacePrograms"/>'s,
+    /// the same lookups an agent's `open` uses, rather than a second copy of them here.
+    ///
+    /// Its third lookup, the Start Menu, is deliberately not asked: no agent CLI installs a
+    /// shortcut, and reading every shell link measured 7.4 s, which is not something to spend while
+    /// first launch draws its card.
+    ///
+    /// Only what CreateProcess can start is accepted - an .exe, or the .cmd shim npm writes, whose
+    /// arguments Process.Start quotes for cmd when they are given through ArgumentList, as
+    /// <see cref="Run"/> gives them. The .ps1 and the extensionless shell script npm leaves beside
+    /// that shim are not things CreateProcess can run, so neither is ever returned.
+    /// </summary>
+    static string? Command(string name) =>
+        WorkspacePrograms.PathFile(name, Runnable)
+        ?? WorkspacePrograms.AppPath(name)
+        ?? Folders().SelectMany(f => Runnable.Select(e => Path.Combine(f, name + e))).FirstOrDefault(File.Exists);
+
+    /// <summary>
+    /// The global command folders to look in once PATH and App Paths have not answered: npm's
+    /// global prefix, and the shim folders winget, scoop, chocolatey, Volta, pnpm, Yarn and Bun
+    /// keep, beside where the agents' own installers put a command.
+    ///
+    /// PATH as it is now is read here too. Deskweave starts with Windows and stays in the tray, so
+    /// an agent installed during the session put its folder on a PATH this process will never be
+    /// handed; the registry is where that installer actually wrote it.
+    /// </summary>
+    static IEnumerable<string> Folders()
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        List<string> folders =
+        [
+            Path.Combine(home, ".local", "bin"),
+            .. NpmPrefixes(),
+            Path.Combine(local, "Microsoft", "WinGet", "Links"),
+            Path.Combine(home, "scoop", "shims"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "chocolatey", "bin"),
+            Path.Combine(local, "Volta", "bin"),
+            Environment.GetEnvironmentVariable("PNPM_HOME") is { Length: > 0 } pnpm ? pnpm : Path.Combine(local, "pnpm"),
+            Path.Combine(local, "Yarn", "bin"),
+            Path.Combine(home, ".bun", "bin"),
+            .. LivePath(),
+        ];
+        // A relative entry would put a bare name in front of Process.Start, and the same folder
+        // twice would look for the same file twice.
+        return folders.Where(f => f.Length > 0 && Path.IsPathRooted(f)).Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Where npm puts a global command: its per-user default, a machine-wide Node's own folder, and
+    /// the prefix the owner set for himself, which covers `npm config set prefix` and what
+    /// nvm-windows, fnm and Volta leave behind. Read from the environment and ~/.npmrc, never by
+    /// running npm, because this is answered while a window is being built.
+    /// </summary>
+    static List<string> NpmPrefixes()
+    {
+        List<string> prefixes =
+        [
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs"),
+        ];
+        if (Environment.GetEnvironmentVariable("NPM_CONFIG_PREFIX") is { Length: > 0 } set) prefixes.Add(set);
+        try
         {
+            string npmrc = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".npmrc");
+            if (File.Exists(npmrc))
+                foreach (string line in File.ReadLines(npmrc))
+                    if (line.IndexOf('=') is > 0 and var at
+                        && line[..at].Trim().Equals("prefix", StringComparison.OrdinalIgnoreCase))
+                        prefixes.Add(Environment.ExpandEnvironmentVariables(line[(at + 1)..].Trim().Trim('"')));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+        return prefixes;
+    }
+
+    /// <summary>PATH as this PC has it now, the user's then the machine's, from the two registry
+    /// values an installer writes rather than the copy this process was started with.</summary>
+    static List<string> LivePath()
+    {
+        List<string> folders = [];
+        foreach ((RegistryKey root, string key) in new[]
+        {
+            (Registry.CurrentUser, "Environment"),
+            (Registry.LocalMachine, @"System\CurrentControlSet\Control\Session Manager\Environment"),
+        })
+            try
+            {
+                using RegistryKey? entry = root.OpenSubKey(key);
+                if (entry?.GetValue("Path") is string path)
+                    folders.AddRange(path.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(f => Environment.ExpandEnvironmentVariables(f.Trim().Trim('"'))));
+            }
+            catch (Exception ex) when (ex is System.Security.SecurityException or IOException
+                or UnauthorizedAccessException or ArgumentException) { }
+        return folders;
+    }
+
+    /// <summary>
+    /// The executable inside Codex's own npm package, for an install whose shim is not anywhere the
+    /// lookups above reach. Bounded to that one package folder, and reached only on a miss.
+    ///
+    /// What used to sit beside it was the same sweep over ~/.vscode/extensions with
+    /// SearchOption.AllDirectories - tens of thousands of files and gigabytes on a working
+    /// developer's PC, walked on the UI thread while first launch drew its card, for a copy bundled
+    /// inside an editor extension that is not the owner's installed CLI anyway. It is gone.
+    /// </summary>
+    static string? Packaged()
+    {
+        foreach (string prefix in NpmPrefixes())
+        {
+            string root = Path.Combine(prefix, "node_modules", "@openai");
             if (!Directory.Exists(root)) continue;
-            string? found = Directory.EnumerateFiles(root, "codex.exe", SearchOption.AllDirectories)
-                .Where(p => p.Contains("codex", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
-            if (found is not null) return found;
+            try
+            {
+                if (Directory.EnumerateFiles(root, "codex.exe", SearchOption.AllDirectories)
+                    .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault() is { } found) return found;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
         return null;
     }

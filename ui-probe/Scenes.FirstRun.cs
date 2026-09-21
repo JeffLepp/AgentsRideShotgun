@@ -164,7 +164,8 @@ static class FirstRunScenes
                     "An agent that is not on this PC has no row on first launch");
 
             Program.Check(WorkspaceMcp.Scope.Contains("Use Deskweave automatically for agent-operated browser and GUI work", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("do not silently divert that request into Deskweave", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("use your normal approved desktop-opening tools", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("Do not silently divert a user-requested desktop action into a workspace", StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("Do not use Deskweave for anything else", StringComparison.Ordinal)
                 && WorkspaceMcp.RouterInstructions.Contains(WorkspaceMcp.Scope, StringComparison.Ordinal),
                 "Connecting scopes agent GUI testing to Deskweave, preserves explicit owner desktop requests, and excludes code and builds");

@@ -14,6 +14,7 @@ namespace Deskweave;
 
 public partial class MainWindow : Window, IDisposable
 {
+    internal static bool AllowActivationForTests = true;
     readonly HubViewModel _hub = new();
     readonly ObservableCollection<HubEntry> _stackWorking = [];
     readonly ObservableCollection<HubEntry> _stackAsleep = [];
@@ -35,6 +36,7 @@ public partial class MainWindow : Window, IDisposable
 
     public MainWindow()
     {
+        if (!AllowActivationForTests) ShowActivated = false;
         AppearanceManager.Apply(AppSettingsStore.Current.Theme);
         InitializeComponent();
         StackWorkingList.ItemsSource = _stackWorking;
@@ -69,6 +71,8 @@ public partial class MainWindow : Window, IDisposable
             _filter.Length == 0 ? source : source.Where(entry => entry.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase));
         Sync(_stackWorking, Filtered(_hub.Working).ToList());
         Sync(_stackAsleep, Filtered(_hub.Asleep).ToList());
+        FilterEmptyText.Visibility = _filter.Length > 0 && _stackWorking.Count + _stackAsleep.Count == 0
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 
     static void Sync(ObservableCollection<HubEntry> target, List<HubEntry> wanted)
@@ -104,21 +108,25 @@ public partial class MainWindow : Window, IDisposable
 
     internal void ShowStack()
     {
+        RememberPlacement();
         _mode = "stack";
         SettingsSlot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Collapsed;
         StackRoot.Visibility = Visibility.Visible;
-        if (!(_stackPlacement ?? ShellPlacement.DefaultStack()).Restore(this, 320, 480)) { MinWidth = 320; MinHeight = 480; }
+        FilterButton.Visibility = Visibility.Visible;
+        if (!(_stackPlacement ?? (ShellPlacement.DefaultStack() with { Height = 560 })).Restore(this, 320, 480)) { MinWidth = 320; MinHeight = 480; }
         QueuePreferenceSave();
         UpdateVisibleWork();
     }
 
     internal void ShowWide(string? select)
     {
+        RememberPlacement();
         _mode = "wide";
         StackRoot.Visibility = Visibility.Collapsed;
         SettingsSlot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Visible;
+        FilterButton.Visibility = Visibility.Collapsed;
         if (!(_widePlacement ?? ShellPlacement.DefaultWide()).Restore(this, 960, 600)) { MinWidth = 960; MinHeight = 600; }
         string? id = select ?? _selectedId ?? _hub.Working.Concat(_hub.Asleep).Select(entry => entry.Id).FirstOrDefault();
         if (id is not null) SelectWorkspace(id);
@@ -146,6 +154,7 @@ public partial class MainWindow : Window, IDisposable
 
     internal void ShowSettings()
     {
+        RememberPlacement();
         if (_mode != "settings") _priorMode = _mode;
         bool first = SettingsSlot.Content is not SettingsView;
         if (first)
@@ -158,6 +167,7 @@ public partial class MainWindow : Window, IDisposable
         StackRoot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Collapsed;
         SettingsSlot.Visibility = Visibility.Visible;
+        FilterButton.Visibility = Visibility.Collapsed;
         if (!(_widePlacement ?? ShellPlacement.DefaultWide()).Restore(this, 960, 600)) { MinWidth = 960; MinHeight = 600; }
         var view = (SettingsView)SettingsSlot.Content;
         if (first) view.Show("general");
@@ -178,10 +188,26 @@ public partial class MainWindow : Window, IDisposable
     void AsleepRow_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) ShowWide(id); }
     void SidebarItem_Checked(object sender, RoutedEventArgs e) { if (sender is RadioButton { DataContext: HubEntry entry }) SelectWorkspace(entry.Id); }
 
+    /// <summary>Sleeps one workspace right from its card or sidebar row, in one click (fix list item
+    /// 2.2), the same as the workspace page's own Sleep control. Nested inside the card/row's own
+    /// Button or RadioButton, which already marks a completed click handled before it can bubble
+    /// into WorkingCard_Click or SidebarItem_Checked; e.Handled here is belt and braces.</summary>
+    void SleepCard_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string id }) WorkspaceRuntime.Of(id)?.Dispose();
+        e.Handled = true;
+    }
+
     void BeginFilter()
     {
         FilterHost.Visibility = Visibility.Visible;
         FilterBox.Focus();
+    }
+
+    void Filter_Click(object sender, RoutedEventArgs e)
+    {
+        if (FilterHost.Visibility == Visibility.Visible) ClearFilter();
+        else BeginFilter();
     }
 
     void ClearFilter()
@@ -221,7 +247,11 @@ public partial class MainWindow : Window, IDisposable
 
     async void CardPreviews_Tick(object? sender, EventArgs e)
     {
-        if (_capturing || _disposed || !_cardPreviews.IsEnabled || !HubPreview.Allowed) return;
+        if (_disposed || !_cardPreviews.IsEnabled) return;
+        // The pace is re-read here rather than kept from where the loop started, so unplugging
+        // slows the tiles down and plugging back in speeds them up without a restart.
+        _cardPreviews.Interval = HubPreview.Interval();
+        if (_capturing) return;
         // Only the list actually on screen for the current mode has cards worth capturing; Settings
         // (or the window not showing) already stopped the timer in UpdateVisibleWork.
         if (CaptureSurface().List is null) return;
@@ -311,7 +341,7 @@ public partial class MainWindow : Window, IDisposable
             if (_disposed) return;
             Show();
             if (WindowState == WindowState.Minimized) WindowState = _wasMaximized ? WindowState.Maximized : WindowState.Normal;
-            Activate();
+            if (AllowActivationForTests) Activate();
             if (ModuleEntry.Selected is { } id) ShowWide(id);
             UpdateVisibleWork();
         });
@@ -324,7 +354,7 @@ public partial class MainWindow : Window, IDisposable
         if (_mode != "stack") ShowStack();
         Show();
         if (WindowState == WindowState.Minimized) WindowState = _wasMaximized ? WindowState.Maximized : WindowState.Normal;
-        Activate();
+        if (AllowActivationForTests) Activate();
         UpdateVisibleWork();
     }
 
@@ -337,14 +367,17 @@ public partial class MainWindow : Window, IDisposable
         _savePreferences.Start();
     }
 
+    void RememberPlacement()
+    {
+        if (_restoringPreferences || !IsLoaded || WindowState != WindowState.Normal) return;
+        if (_mode == "stack") _stackPlacement = ShellPlacement.Capture(this);
+        else _widePlacement = ShellPlacement.Capture(this);
+    }
+
     void SavePreferences()
     {
         if (_restoringPreferences || !IsLoaded) return;
-        if (WindowState == WindowState.Normal)
-        {
-            if (_mode == "wide" || (_mode == "settings" && _priorMode == "wide")) _widePlacement = ShellPlacement.Capture(this);
-            else if (_mode == "stack" || (_mode == "settings" && _priorMode == "stack")) _stackPlacement = ShellPlacement.Capture(this);
-        }
+        RememberPlacement();
         if (WindowState != WindowState.Minimized) _wasMaximized = WindowState == WindowState.Maximized;
         _ = new ShellPreferences
         {

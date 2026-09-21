@@ -80,6 +80,9 @@ public static class ModuleEntry
     /// </summary>
     public static void Initialize()
     {
+        // Before anything can start a program: a previous run that was killed mid-launch may have
+        // left the owner's applications drawing in software.
+        WorkspaceRenderMode.Recover();
         WorkspaceRuntime.SweepEvidence();
         // The corner window: it shows nothing until an agent works.
         WorkspacePeekHost.Start();
@@ -96,6 +99,7 @@ public static class ModuleEntry
         WorkspaceRouter.Stop();
         WorkspacePeekHost.Stop();
         WorkspaceRuntime.Rest();
+        WorkspaceRenderMode.Rest();
     }
 
     /// <summary>Optional uninstall/storage-inventory contract. This root contains only workspaces
@@ -111,6 +115,8 @@ public static class ModuleEntry
         WorkspaceRouter.Stop();
         WorkspacePeekHost.Stop();
         WorkspaceRuntime.Rest();
+        WorkspaceRenderMode.Rest();
+        WorkspaceRenderMode.Recover();
         Task.Run(WorkspaceConnections.RemoveOwnedConnections).GetAwaiter().GetResult();
     }
 

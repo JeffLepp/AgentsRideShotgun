@@ -42,6 +42,15 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     bool _renaming;
     bool _disposed;
     bool _capturingScreen;
+    /// <summary>A live frame has been on screen for this workspace, so the stored one is past.</summary>
+    bool _liveShown;
+    /// <summary>Whichever runtime "You have control" is currently listening to, so the toast still
+    /// clears if this workspace slept and woke again under a new WorkspaceRuntime while the page
+    /// was open. Re-synced every RefreshLive tick rather than fixed once in SetWorkspace.</summary>
+    WorkspaceRuntime? _driverRuntime;
+    /// <summary>The owner has not scrolled the activity lists away from the newest row, so a reload
+    /// should keep following it. Starts true: opening the page lands on the newest row.</summary>
+    bool _followTail = true;
 
     public WorkspaceFullView()
     {
@@ -49,6 +58,11 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         HerePanel.ItemsSource = _pills;
         DidList.ItemsSource = _did;
         FilesList.ItemsSource = _files;
+        // Named after WorkspaceScreenInput's own constants (fix list item 2.7) rather than a copy of
+        // the numbers, so a future change to LeaveDelay or StayDelay reaches this wording for free.
+        ControlToastText.Text = "You have control. The agent waits, and resumes "
+            + (int)WorkspaceScreenInput.LeaveDelay.TotalSeconds + "s after you leave, or "
+            + (int)WorkspaceScreenInput.StayDelay.TotalSeconds + "s after you stop.";
         // Hidden means the wide window isn't showing this page (stack mode, or another workspace
         // selected): the timer keeps existing but does no work until it is visible again.
         IsVisibleChanged += (_, _) =>
@@ -75,6 +89,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         Reload();
         // Clicking the screen takes over right there (brief A.3), the same as the corner window.
         _input = new WorkspaceScreenInput(ScreenImage, () => WorkspaceRuntime.Of(_id));
+        _input.OwnerActed += OwnerActed;
         // Full desktop: the agent's screen gets its taskbar here too, under the Last seen pill.
         _taskbar = new WorkspaceTaskbar(() => _id is { } shown ? WorkspaceRuntime.Of(shown) : null, () => _input?.Touch(), 40)
         {
@@ -89,6 +104,12 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     /// <summary>The strip, for the gate.</summary>
     internal WorkspaceTaskbar? Taskbar => _taskbar;
 
+    /// <summary>The live picture, for the gate that clicks it the way the owner does.</summary>
+    internal Image ScreenPicture => ScreenImage;
+
+    /// <summary>The owner's hand on that picture, for the gate.</summary>
+    internal WorkspaceScreenInput? ScreenInput => _input;
+
     void Reload()
     {
         if (_id is not { } id || WorkspaceStore.Find(id) is not { } workspace) return;
@@ -97,8 +118,9 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         RenameBox.Text = workspace.Name;
         const string folderPrefix = "folder:";
         PathText.Text = WorkspaceHome.IsFolder(workspace.Agents) ? workspace.Agents[folderPrefix.Length..] : WorkspaceStore.FolderOf(id);
-        BitmapSource? last = ReadLastFrame(id);
-        if (last is not null) ScreenImage.Source = last;
+        ScreenImage.Source = null;
+        _liveShown = false;
+        ShowStoredFrame(id);
         RefreshLive();
         LoadDid(id);
         LoadFiles(id);
@@ -116,7 +138,41 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         if (driver.Length > 0) _pills.Add(new PillInfo(WorkspaceHome.DisplayName(driver), true));
         else if (workspace is not null && !WorkspaceHome.IsFolder(workspace.Agents) && WorkspaceHome.Label(workspace.Agents) is { Length: > 0 } kept)
             _pills.Add(new PillInfo(kept, false));
+        // Fix list item 2.2 and 2.6: the Sleep control and the one honest memory line both only mean
+        // something while this workspace actually has a computer running.
+        SleepButton.Visibility = runtime is not null ? Visibility.Visible : Visibility.Collapsed;
+        MemoryText.Visibility = runtime is not null && HeaderError.Visibility != Visibility.Visible
+            ? Visibility.Visible : Visibility.Collapsed;
+        if (runtime is not null) MemoryText.Text = "Memory " + WorkspaceRuntime.MemoryLoad + "% in use";
+        UpdateDriverSubscription(runtime);
+        UpdateControlToast(runtime);
+        SizeScreen();
     }
+
+    /// <summary>Keeps "You have control" listening to whichever WorkspaceRuntime instance actually
+    /// backs this workspace right now (fix list item 2.7). Re-checked on every RefreshLive tick
+    /// instead of once in SetWorkspace, so a workspace that slept and woke under a new runtime while
+    /// this page was open does not leave the toast listening to a runtime that is gone.</summary>
+    void UpdateDriverSubscription(WorkspaceRuntime? runtime)
+    {
+        if (ReferenceEquals(_driverRuntime, runtime)) return;
+        if (_driverRuntime is not null) _driverRuntime.DriverChanged -= OnDriverChanged;
+        _driverRuntime = runtime;
+        if (_driverRuntime is not null) _driverRuntime.DriverChanged += OnDriverChanged;
+    }
+
+    // DriverChanged can arrive from an agent's own thread (WorkspaceControl.AgentTakes), not only
+    // from this page's own UI-thread input handling, so this hop is not optional.
+    void OnDriverChanged(Driver who) => Dispatcher.BeginInvoke(() => UpdateControlToast(WorkspaceRuntime.Of(_id ?? "")));
+
+    // The owner pressing the picture (WorkspaceScreenInput.OwnerActed) already runs on this page's
+    // own UI thread, so this one updates the toast directly rather than hopping through the dispatcher.
+    void OwnerActed() => UpdateControlToast(WorkspaceRuntime.Of(_id ?? ""));
+
+    /// <summary>"You have control" (fix list item 2.7): visible for exactly as long as
+    /// WorkspaceControl.Driving says the owner is the one driving.</summary>
+    void UpdateControlToast(WorkspaceRuntime? runtime) =>
+        ControlToast.Visibility = runtime?.Plane?.Driving == Driver.Owner ? Visibility.Visible : Visibility.Collapsed;
 
     // --- "What it did", from the workspace's own evidence log --------------------------------
 
@@ -126,6 +182,9 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     void LoadDid(string id)
     {
         _did.Clear();
+        // Set before the early-return paths below too, so a missing or unreadable log reads as
+        // "nothing yet" rather than a blank column.
+        DidEmptyText.Visibility = Visibility.Visible;
         string log = Path.Combine(WorkspaceStore.FolderOf(id), "evidence", "actions.log");
         if (!File.Exists(log)) return;
         string[] lines;
@@ -156,6 +215,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         }
         rows.Reverse();
         foreach (DidRow row in rows) _did.Add(row);
+        if (_did.Count > 0) DidEmptyText.Visibility = Visibility.Collapsed;
     }
 
     static (string Prefix, string Code) Describe(string action, string detail) => action switch
@@ -175,11 +235,12 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     // --- "Files", newest first from the workspace folder --------------------------------------
 
     static readonly HashSet<string> MachineNames = new(StringComparer.OrdinalIgnoreCase)
-        { "workspace.json", "last-frame.png" };
+        { "workspace.json", "last-frame.png", "last-frame.png.part" };
 
     void LoadFiles(string id)
     {
         _files.Clear();
+        FilesEmptyText.Visibility = Visibility.Visible;
         string folder = WorkspaceStore.FolderOf(id);
         if (!Directory.Exists(folder)) return;
         IEnumerable<FileInfo> found;
@@ -188,6 +249,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         catch (UnauthorizedAccessException) { return; }
         foreach (FileInfo file in found.OrderByDescending(f => f.LastWriteTimeUtc).Take(30))
             _files.Add(new FileRow(file.Name, file.LastWriteTime.ToString("HH:mm")));
+        if (_files.Count > 0) FilesEmptyText.Visibility = Visibility.Collapsed;
     }
 
     // --- the live screen -----------------------------------------------------------------------
@@ -206,13 +268,18 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     async void ScreenTick(object? sender, EventArgs e)
     {
         if (_disposed || _id is not { } id || !IsVisible) return;
+        // Like the stack's loop, the pace is re-read every tick rather than kept from the start, so
+        // a power change reaches this screen without a restart.
+        if (_screenTimer is { } beat) beat.Interval = HubPreview.Interval();
         RefreshLive();
         // One capture in flight at a time: a slow Task.Run from an earlier tick must finish (or be
         // dropped below) before another starts, rather than racing it.
-        if (_capturingScreen || !HubPreview.Allowed) return;
+        if (_capturingScreen) return;
         WorkspaceControl? plane = WorkspaceRuntime.Of(id)?.Plane;
-        // Asleep: the picture is the last one it had, and says so rather than looking live.
+        // Asleep: the picture is the last one it had, dimmed, and says so rather than looking live
+        // or broken (fix list item 2.2).
         LastSeenPill.Visibility = plane is null && ScreenImage.Source is not null ? Visibility.Visible : Visibility.Collapsed;
+        ScreenImage.Opacity = plane is null ? 0.55 : 1.0;
         if (_taskbar is not null)
             _taskbar.Visibility = plane is not null && AppSettingsStore.Current.AgentScreen == AgentScreenLook.Full
                 ? Visibility.Visible : Visibility.Collapsed;
@@ -233,14 +300,30 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             // Drop a result that lands after the view hid or moved on to another workspace.
             if (_disposed || id != _id || !IsVisible || frame is null) return;
             ScreenImage.Source = frame;
+            _liveShown = true;
         }
         finally { _capturingScreen = false; }
     }
 
-    static BitmapSource? ReadLastFrame(string id)
+    /// <summary>
+    /// The last picture this workspace's screen had, while a live one is on its way or will never
+    /// come. Read off the UI thread: decoding a whole screen's PNG on it is what made opening a
+    /// recent workspace sit there for a moment before anything appeared.
+    /// </summary>
+    async void ShowStoredFrame(string id)
     {
-        string path = WorkspaceStore.LastFrameOf(id);
-        return File.Exists(path) ? LoadImage(path) : null;
+        BitmapSource? last = await HubLastLook.FullAsync(id);
+        // A live frame that landed while this was decoding is the newer truth and keeps the screen.
+        if (_disposed || id != _id || last is null || _liveShown) return;
+        ScreenImage.Source = last;
+        if (WorkspaceRuntime.Of(id)?.Plane is null)
+        {
+            ScreenImage.Opacity = 0.55;
+            LastSeenPill.Visibility = Visibility.Visible;
+            if (WorkspaceStore.Find(id) is { } stored)
+                LastSeenText.Text = "Last seen " + stored.LastUsed.ToLocalTime().ToString("MMM d, h:mm tt");
+        }
+        SizeScreen();
     }
 
     static BitmapSource? LoadImage(string path)
@@ -259,8 +342,51 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     }
 
     void Root_SizeChanged(object sender, SizeChangedEventArgs e)
+        => SizeScreen();
+
+    void SizeScreen()
     {
-        if (ScreenBorder.ActualWidth > 0) ScreenBorder.Height = Math.Round(ScreenBorder.ActualWidth * 9 / 16);
+        if (ScreenBorder.Parent is not FrameworkElement parent || parent.ActualWidth <= 0) return;
+        bool live = _fixture || (_id is { } id && WorkspaceRuntime.Of(id)?.Plane is not null);
+        // History is a record to scan. Keep its last picture small so activity and files stay
+        // visible; a running workspace keeps the full interactive screen.
+        double width = live ? parent.ActualWidth : Math.Min(320, parent.ActualWidth);
+        ScreenBorder.HorizontalAlignment = HorizontalAlignment.Left;
+        ScreenBorder.Width = width;
+        ScreenBorder.Height = Math.Round(width * AgentDesktop.ScreenHeight / AgentDesktop.ScreenWidth);
+        ScreenBorder.Visibility = live || ScreenImage.Source is not null ? Visibility.Visible : Visibility.Collapsed;
+        ScreenImage.Cursor = live ? Cursors.Hand : Cursors.Arrow;
+        System.Windows.Automation.AutomationProperties.SetName(ScreenImage, live ? "Live workspace screen" : "Last workspace screen");
+    }
+
+    /// <summary>Tracks whether the owner is looking at the newest row so a reload can follow it
+    /// there without overriding a scroll he did himself. An extent change with no offset change is
+    /// new content landing, not the owner's hand; only his own scroll updates the flag.</summary>
+    void ActivityScroll_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.ExtentHeightChange != 0 && e.VerticalChange == 0)
+        {
+            if (_followTail) ActivityScroll.ScrollToEnd();
+            return;
+        }
+        _followTail = ActivityScroll.VerticalOffset >= ActivityScroll.ScrollableHeight - 1;
+    }
+
+    void CopyPath_Click(object sender, RoutedEventArgs e)
+    {
+        if (PathText.Text.Length > 0) SettingsActions.CopyText(PathText.Text);
+    }
+
+    /// <summary>Sleeps this workspace right now, in one click (fix list item 2.2). The same
+    /// WorkspaceRuntime.Of(id)?.Dispose() the delete path already uses: work is not lost, the
+    /// folder and last picture stay, and the next agent call wakes it. Refreshed immediately rather
+    /// than left to the next timer tick, since the owner just asked for this and expects to see it.</summary>
+    void Sleep_Click(object sender, RoutedEventArgs e)
+    {
+        if (_id is not { } id) return;
+        WorkspaceRuntime.Of(id)?.Dispose();
+        RefreshLive();
+        ScreenTick(null, EventArgs.Empty);
     }
 
     // --- folder, rename, more ------------------------------------------------------------------
@@ -370,14 +496,18 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         ScreenImage.Source = screen;
         _did.Clear();
         foreach (var (time, prefix, code, thumb) in did) _did.Add(new DidRow(time, prefix, code, thumb));
+        DidEmptyText.Visibility = _did.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         _files.Clear();
         foreach (var (fname, when) in files) _files.Add(new FileRow(fname, when));
+        FilesEmptyText.Visibility = _files.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     void StopLive()
     {
         if (_screenTimer is not null) { _screenTimer.Stop(); _screenTimer.Tick -= ScreenTick; _screenTimer = null; }
-        if (_input is not null) { _input.Dispose(); _input = null; }
+        if (_driverRuntime is not null) { _driverRuntime.DriverChanged -= OnDriverChanged; _driverRuntime = null; }
+        ControlToast.Visibility = Visibility.Collapsed;
+        if (_input is not null) { _input.OwnerActed -= OwnerActed; _input.Dispose(); _input = null; }
         if (_taskbar is not null) { ScreenLayers.Children.Remove(_taskbar); _taskbar = null; }
     }
 

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
@@ -23,10 +23,21 @@ namespace Deskweave.UiProbe;
 static class TestScreen
 {
     internal static Rect Work { get; private set; } = SystemParameters.WorkArea;
+    internal static bool OwnerFullscreen { get; private set; }
 
     internal static void Use()
     {
-        if (System.Windows.Forms.Screen.AllScreens.FirstOrDefault(s => !s.Primary) is not { } other) return;
+        OwnerFullscreen = WorkspacePresentation.Suppressed;
+        string occupied = System.Windows.Forms.Screen.FromHandle(WorkspacePresentation.ForegroundWindow).DeviceName;
+        IReadOnlyList<Rect> fullscreen = WorkspacePresentation.FullscreenMonitors;
+        if (System.Windows.Forms.Screen.AllScreens.FirstOrDefault(s => !s.Primary
+            && !fullscreen.Any(bounds => bounds.Left < s.Bounds.Right && bounds.Right > s.Bounds.Left
+                && bounds.Top < s.Bounds.Bottom && bounds.Bottom > s.Bounds.Top)
+            && (!OwnerFullscreen || fullscreen.Count > 0 || s.DeviceName != occupied)) is not { } other)
+        {
+            if (OwnerFullscreen) throw new InvalidOperationException("No secondary monitor is available for UI checks while a fullscreen app is visible. Close fullscreen before running the visible UI gate.");
+            return;
+        }
         System.Drawing.Rectangle px = other.WorkingArea;
         double guess = WorkspacePeekPlacement.PrimaryScale();
         Work = WorkspacePeekPlacement.MonitorFor(new Rect(px.Left / guess, px.Top / guess, px.Width / guess, px.Height / guess)).WorkArea;
@@ -45,11 +56,33 @@ static class Program
     static readonly ThemeChoice[] Themes = [ThemeChoice.Light, ThemeChoice.Dark];
 
     [STAThread]
-    static void Main(string[] args)
+    static int Main(string[] args)
+    {
+        try { return RunMain(args); }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(error);
+            // Startup failures precede the dispatcher handler. Keep them out of Windows Error
+            // Reporting's modal dialog while preserving a failing process exit and diagnostics.
+            if (_output.Length > 0)
+            {
+                try { Report(error); }
+                catch (Exception reportError) { Console.Error.WriteLine(reportError); }
+            }
+            return 2;
+        }
+    }
+
+    static int RunMain(string[] args)
     {
         // A folder: the UI gate. --mvp <folder> [scene name prefix]: the reference-screen harness (Mvp.cs).
         bool mvp = args.Length is 2 or 3 && args[0] == "--mvp";
-        _output = Path.GetFullPath(mvp ? args[1] : args.Single());
+        if (!mvp && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
+        {
+            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix]");
+            return 2;
+        }
+        _output = Path.GetFullPath(mvp ? args[1] : args[0]);
         Directory.CreateDirectory(_output);
         // The scenes stand in for every agent seam; if one is ever missed, what it writes lands here and
         // not in the owner's own configuration, which is what the gate-1 run did.
@@ -64,6 +97,10 @@ static class Program
         using var preferences = ShellPreferences.UseFileForTests(Path.Combine(_output, "shell.json"));
         using var settings = AppSettingsStore.UseFileForTests(Path.Combine(_output, "settings.json"));
         TestScreen.Use();
+        // Fixtures use the selected spare monitor. Their synthetic fullscreen states must not
+        // depend on the owner's game, and their explicit navigation must not activate over it.
+        WorkspacePresentation.SuppressedForTests = () => false;
+        MainWindow.AllowActivationForTests = false;
         using var watchdog = new System.Threading.Timer(_ =>
         {
             Report(new TimeoutException("UI probe exceeded its three-minute limit."));
@@ -98,7 +135,7 @@ static class Program
                 application.Shutdown(failure is null ? 0 : 1);
             }
         });
-        application.Run();
+        return application.Run();
     }
 
     static async Task Run()
@@ -151,10 +188,16 @@ static class Program
         Check(WorkspaceStore.Find(created.Id)!.Power == WorkspacePower.Fast
             && WorkspaceStore.Find(created.Id)!.Mode == WorkspaceMode.Free,
             "An automatically created workspace starts Fast and Free");
+        // One picture before it stops, so there is a last look for Recent to keep.
+        WorkspaceRuntime.Of(created.Id)!.Plane!.Frame();
         WorkspaceRuntime.Of(created.Id)?.Dispose();
         await Settle();
         Check(WorkspaceRuntime.Of(created.Id) is null && _window.Hub.Asleep.Any(e => e.Id == created.Id),
             "Stopping a workspace's computer moves it from Working to Recent");
+        HubEntry recent = _window.Hub.Asleep.First(e => e.Id == created.Id);
+        for (int i = 0; i < 20 && recent.Preview is null; i++) await Settle();
+        Check(recent.Preview is not null,
+            "A workspace under Recent shows the last look its screen had, not an empty card");
         WorkspaceRuntime.Start(WorkspaceStore.Find(created.Id)!);
         await Settle();
         Check(WorkspaceRuntime.Of(created.Id) is not null && _window.Hub.Working.Any(e => e.Id == created.Id),
@@ -167,8 +210,10 @@ static class Program
             "Clicking a working card widens the window onto that workspace");
         Check(_window.Hub.Working.Any(e => e.Id == created.Id && e.Selected), "The sidebar marks the open workspace selected");
         Capture("03-wide.png");
+        await ScreenClickChecks(created.Id);
         _window.ShowStack();
         await Settle();
+        await ScrollAndEmptyChecks();
 
         string scratchId = _window.Hub.Asleep.First(e => e.Name == "Scratch").Id;
         InvokePrivate(_window, "AsleepRow_Click", new Button { Tag = scratchId }, new RoutedEventArgs());
@@ -269,8 +314,8 @@ static class Program
         // useful while repairing one checker; ordinary validation leaves it unset and runs all.
         string ownerAgents = OwnerAgentEntries();
         string? slice = Environment.GetEnvironmentVariable("DESKWEAVE_UI_GATE_SLICE")?.Trim().ToLowerInvariant();
-        if (slice is not null and not ("hub" or "corner" or "settings" or "firstrun"))
-            throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner, settings or firstrun.");
+        if (slice is not null and not ("hub" or "corner" or "settings" or "firstrun" or "scaling"))
+            throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner, settings, firstrun or scaling.");
         if (slice is null or "hub") await HubScenes.Gate();
         if (slice is null or "corner")
         {
@@ -280,9 +325,11 @@ static class Program
             await Settle();
             Check(!ModuleEntry.HubShowing, "The integrated gate leaves the hub before exercising the corner window");
             await CornerScenes.Gate();
+            await CornerManyScenes.Gate();
         }
         if (slice is null or "settings") await SettingsScenes.Gate();
         if (slice is null or "firstrun") await FirstRunScenes.Gate();
+        if (slice is null or "scaling") await ScalingScenes.Gate();
         Check(OwnerAgentEntries() == ownerAgents,
             "The gate left Deskweave's entry in the owner's own Claude Code and Codex configuration alone");
     }
@@ -396,7 +443,9 @@ static class Program
 
         // End to end: a real bridge process, the real router, a real desktop.
         StoredWorkspace shared = WorkspaceHome.EnsureScratch();
-        WorkspaceAccessStore.Write(shared.Id, new WorkspaceAccessPolicy { PrewarmBrowser = false });
+        // This fixture permits an outside agent while suppressing browser prewarm. An explicit
+        // disabled policy represents owner revocation, which the router must continue to respect.
+        WorkspaceAccessStore.Write(shared.Id, new WorkspaceAccessPolicy(true, false) { PrewarmBrowser = false });
         WorkspaceRouter.Start();
         Check(File.Exists(WorkspaceAccessStore.RouterTicket) && File.Exists(WorkspaceConnections.Bridge),
             "Deskweave publishes one connection for every outside agent, reached through its packaged bridge");
@@ -434,7 +483,8 @@ static class Program
         JsonElement acquired = await Call("tools/call", new { name = "acquire", arguments = new { } });
         WorkspaceRuntime? sharedRuntime = WorkspaceRuntime.Of(shared.Id);
         Check(!acquired.TryGetProperty("isError", out _) && sharedRuntime?.Access?.Controller == "probe-agent",
-            "An agent's first workspace tool lands it in the shared workspace, started for it, under its own name");
+            "An agent's first workspace tool lands it in the shared workspace, started for it, under its own name"
+                + (sharedRuntime?.Access?.Controller == "probe-agent" ? "" : ": " + acquired.GetRawText()));
         _window.ShowStack();
         await Settle();
         Check(_window.Hub.Working.Any(e => e.Id == shared.Id && e.AgentText == "Probe-agent"),
@@ -467,6 +517,157 @@ static class Program
 
     static void RaiseKey(UIElement target, Key key) => target.RaiseEvent(new KeyEventArgs(
         Keyboard.PrimaryDevice, PresentationSource.FromVisual(target), 0, key) { RoutedEvent = UIElement.PreviewKeyDownEvent });
+
+
+    /// <summary>
+    /// The owner's hand on the live screen (brief A.3). A picture of a whole desktop drawn a few
+    /// hundred pixels wide is easy to get subtly wrong - an overlay over the picture, a stretch the
+    /// mapping does not match - and every one of those ends as "my clicks do nothing", so this
+    /// drives a real click through the real page and asks the workspace where it landed. What it
+    /// found goes to screen-click.txt beside the scene shots.
+    /// </summary>
+    static async Task ScreenClickChecks(string id)
+    {
+        var lines = new List<string>();
+        WorkspaceFullView view = _window.OpenWorkspaceView!;
+        System.Windows.Controls.Image picture = view.ScreenPicture;
+        AgentDesktop computer = WorkspaceRuntime.Of(id)!.Computer!;
+        for (int i = 0; i < 20 && (picture.Source is null || computer.Windows().Count == 0); i++) await Settle();
+        var source = (BitmapSource?)picture.Source;
+        lines.Add($"screen metrics : {AgentDesktop.ScreenWidth}x{AgentDesktop.ScreenHeight}");
+        lines.Add($"frame          : {(source is null ? "none" : $"{source.PixelWidth}x{source.PixelHeight}")}");
+        lines.Add($"picture        : {picture.ActualWidth:F2}x{picture.ActualHeight:F2} {picture.Stretch}");
+        Check(source is not null && source.PixelWidth == AgentDesktop.ScreenWidth,
+            "The workspace page draws the whole workspace screen at its own size");
+
+        // Every part of the picture takes a click: the taskbar strip is the only thing over it, and
+        // only along the bottom.
+        foreach (double fraction in new[] { 0.04, 0.5, 0.88 })
+        {
+            Point inWindow = picture.TransformToAncestor(_window)
+                .Transform(new Point(picture.ActualWidth / 2, picture.ActualHeight * fraction));
+            DependencyObject? landed = null;
+            VisualTreeHelper.HitTest(_window, null, r => { landed = r.VisualHit; return HitTestResultBehavior.Stop; },
+                new PointHitTestParameters(inWindow));
+            lines.Add($"hit at {fraction:P0} down : {(landed is null ? "NOTHING" : landed.GetType().Name)}");
+            Check(ReferenceEquals(landed, picture),
+                $"A click {fraction:P0} of the way down the workspace screen reaches the picture itself");
+        }
+
+        // And the click the owner makes there arrives on the window that is under that point.
+        IReadOnlyList<AgentWindow> windows = computer.Windows();
+        Check(windows.Count > 0, "The workspace under test has a window to click");
+        AgentWindow front = windows[0];
+        double scale = picture.ActualWidth / AgentDesktop.ScreenWidth;
+        var aim = new Point((front.X + front.Width / 2.0) * scale, (front.Y + front.Height / 2.0) * scale);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        bool taken = view.ScreenInput!.Press(aim, false);
+        clock.Stop();
+        lines.Add($"press {aim.X:F0},{aim.Y:F0}   : taken={taken} uiThreadMs={clock.ElapsedMilliseconds}");
+        Check(taken, "A press on the picture is taken by the workspace page");
+        Check(clock.ElapsedMilliseconds < 100,
+            "The window never waits on the workspace's own pump to send a click");
+        for (int i = 0; i < 20 && computer.LastClickedForTests != front.Handle; i++) await Settle();
+        lines.Add($"landed on      : {computer.LastClickedForTests} (front {front.Handle})");
+        Check(computer.LastClickedForTests == front.Handle,
+            "A click on the picture lands on the window that is under that point on the workspace screen");
+
+        // And the whole gesture, which is what makes the picture the machine rather than a remote
+        // control with one button: a window dragged by its title bar moves. Windows own move loop
+        // cannot do this from here - it waits on a cursor that is not on this desktop - so the
+        // engine moves the window itself, and this is the check that says it still does.
+        AgentWindow before = computer.Windows()[0];
+        var grab = new Point((before.X + before.Width / 2.0) * scale, (before.Y + 15) * scale);
+        const int byX = 120, byY = 80;
+        // Where that drag can actually end. A workspace keeps every window on its one screen
+        // (WorkspaceScreen.Fit), so a window already near the bottom moves as far as the screen
+        // allows and no further. Expecting the raw delta made this check depend on where the
+        // workspace happened to put its first window: it passed at 156,156 and failed at 182,182,
+        // with the drag itself working perfectly both times.
+        int wantX = Math.Clamp(before.X + byX, 0, Math.Max(0, AgentDesktop.ScreenWidth - before.Width));
+        int wantY = Math.Clamp(before.Y + byY, 0, Math.Max(0, AgentDesktop.ScreenHeight - before.Height));
+        var dropped = new Point(grab.X + byX * scale, grab.Y + byY * scale);
+        Check(view.ScreenInput!.Down(grab, false), "A press on a window title bar in the picture is taken");
+        view.ScreenInput!.Moved(new Point(grab.X + byX * scale / 2, grab.Y + byY * scale / 2));
+        view.ScreenInput!.Moved(dropped);
+        view.ScreenInput!.Up(dropped);
+        AgentWindow moved = before;
+        for (int i = 0; i < 20; i++)
+        {
+            await Settle();
+            moved = computer.Windows().FirstOrDefault(w => w.Handle == before.Handle) ?? before;
+            // Wait for where the drag was aimed, not for any movement at all. Owner input crosses
+            // to the workspace off-thread in one ordered chain, so the window really does pass
+            // through the halfway Moved on its way; breaking on "it has moved" caught it there and
+            // failed a drag that was still arriving. A drag that never lands still runs out of
+            // attempts and still fails the claim below.
+            if (Math.Abs(moved.X - wantX) <= 2 && Math.Abs(moved.Y - wantY) <= 2) break;
+        }
+        lines.Add($"grab           : {grab.X:F0},{grab.Y:F0} on \"{before.Title}\" ({before.ClassName}) "
+            + $"at {before.X},{before.Y} {before.Width}x{before.Height}, scale {scale:F2}");
+        lines.Add($"dragged        : {before.X},{before.Y} -> {moved.X},{moved.Y} "
+            + $"(asked +{byX},+{byY}, the screen allows {wantX},{wantY})");
+        // Written before the claim, not after it: a Check that fails throws, so the run that most
+        // needs these numbers was the one run that never wrote them down.
+        File.WriteAllLines(Path.Combine(_output, "screen-click.txt"), lines);
+        Check(Math.Abs(moved.X - wantX) <= 2 && Math.Abs(moved.Y - wantY) <= 2,
+            "Dragging a window by its title bar in the picture moves that window on the workspace screen");
+    }
+
+    /// <summary>
+    /// The workspace page used to clip "What it did" and "Files" under the picture with no way to
+    /// reach anything below the fold, and an empty workspace showed the two headings over blank
+    /// space. This writes a real 40-line evidence log, opens the real page at the 960x600 minimum
+    /// (the wide window's own floor) and checks the newest step is already on screen, then does the
+    /// same for a workspace with nothing in it yet.
+    /// </summary>
+    static async Task ScrollAndEmptyChecks()
+    {
+        StoredWorkspace busy = WorkspaceStore.Create("Scroll check");
+        string evidence = Path.Combine(WorkspaceStore.FolderOf(busy.Id), "evidence");
+        Directory.CreateDirectory(evidence);
+        DateTime start = DateTime.UtcNow.AddMinutes(-40);
+        var lines = new List<string>();
+        for (int i = 0; i < 40; i++)
+            lines.Add($"{start.AddMinutes(i):O}\tsave\tstep-{i:D2}.txt\tok");
+        File.WriteAllLines(Path.Combine(evidence, "actions.log"), lines);
+
+        _window.ShowWide(busy.Id);
+        _window.Width = 960;
+        _window.Height = 600;
+        await Settle();
+        WorkspaceFullView busyView = _window.OpenWorkspaceView!;
+        Check(busyView.DidList.Items.Count == 40 && ((DidRow)busyView.DidList.Items[39]!).Prefix == "Saved step-39.txt",
+            "A workspace with 40 logged steps keeps every one, newest last");
+        Check(FindAncestor<ScrollViewer>(busyView.DidList) == busyView.ActivityScroll
+            && FindAncestor<ScrollViewer>(busyView.FilesList) == busyView.ActivityScroll,
+            "A ScrollViewer covers both the What it did and Files lists");
+        Check(busyView.ActivityScroll.ScrollableHeight > 0
+            && busyView.ActivityScroll.VerticalOffset >= busyView.ActivityScroll.ScrollableHeight - 1,
+            "At the 960x600 minimum the page opens already scrolled to the newest step, not clipping past it");
+
+        StoredWorkspace empty = WorkspaceStore.Create("Empty check");
+        _window.ShowWide(empty.Id);
+        await Settle();
+        WorkspaceFullView emptyView = _window.OpenWorkspaceView!;
+        Check(emptyView.DidList.Items.Count == 0 && emptyView.FilesList.Items.Count == 0
+            && emptyView.DidEmptyText.Visibility == Visibility.Visible && emptyView.FilesEmptyText.Visibility == Visibility.Visible,
+            "An empty workspace shows \"Nothing yet\" and \"No files yet\" instead of blank columns");
+
+        // Both are throwaway: left behind, they would sit under Recent for the rest of the run and
+        // throw off every later check that counts the stack's asleep workspaces.
+        _window.ShowStack();
+        WorkspaceStore.Delete(busy.Id);
+        WorkspaceStore.Delete(empty.Id);
+        await Settle();
+    }
+
+    static T? FindAncestor<T>(DependencyObject start) where T : DependencyObject
+    {
+        for (DependencyObject? node = VisualTreeHelper.GetParent(start); node is not null; node = VisualTreeHelper.GetParent(node))
+            if (node is T found) return found;
+        return null;
+    }
 
     static T Find<T>(string name) where T : class =>
         _window.FindName(name) as T ?? throw new InvalidOperationException("Missing control " + name);

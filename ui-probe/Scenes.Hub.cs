@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using HiveMind.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
@@ -23,7 +24,7 @@ static class HubScenes
         new HubEntry("scratch") { Name = "Scratch", Age = "Mon", SidebarAge = "Monday", Preview = scene.Site("term") },
     ];
 
-    [Scene("hub", "03-hub", 1076, 24, 340, 804)]
+    [Scene("hub", "")]
     static async Task<FrameworkElement> Hub(SceneContext scene)
     {
         var window = scene.Own(new MainWindow());
@@ -34,7 +35,24 @@ static class HubScenes
         window.Hub.LoadFixture(Working(scene), Recent(scene));
         window.ShowStack();
         window.Width = 340;
-        window.Height = 804;
+        window.Height = 560;
+        await scene.Settle();
+        return window;
+    }
+
+    [Scene("hub-long-names", "")]
+    static async Task<FrameworkElement> LongNames(SceneContext scene)
+    {
+        var window = (MainWindow)await Hub(scene);
+        window.Hub.LoadFixture(
+        [
+            new HubEntry("long-project") { Name = "a-rather-long-workspace-name", Working = true,
+                AgentText = "Claude Code · Sleeps in 4m", Preview = scene.Site("shop") },
+            new HubEntry("needs-you") { Name = "another-long-project-name", Working = true, NeedsYou = true,
+                AgentText = "Codex wants you", Preview = scene.Site("blog") },
+        ], Recent(scene));
+        window.Width = 320;
+        window.Height = 480;
         await scene.Settle();
         return window;
     }
@@ -78,13 +96,24 @@ static class HubScenes
         // It also leaves ShellPreferences on whatever mode its own persistence check saved last,
         // so start this scene from the same blank slate a fresh install would see.
         new ShellPreferences().Save();
-        var window = new MainWindow { ShowActivated = false, Left = SceneContext.OffScreen.X, Top = SceneContext.OffScreen.Y };
+        var window = new MainWindow { ShowActivated = false, Left = TestScreen.Work.Left + 20, Top = TestScreen.Work.Top + 20 };
         try
         {
             window.Show();
             await Task.Delay(300);
             Program.Check(window.DisplayMode == "stack", "The hub opens on the stack");
             Program.Check(window.MinWidth == 320 && window.MinHeight == 480, "The stack has its own minimum size");
+            window.Width = 350;
+            window.Height = 510;
+            window.UpdateLayout();
+            window.ShowSettings();
+            await Task.Delay(800); // Include the debounced preference save while Settings is open.
+            Program.Check(Math.Abs(ShellPreferences.Read().Stack!.Width - 350) < 2,
+                "Saving Settings preserves the narrow strip's width");
+            window.ShowStack();
+            await Task.Delay(100);
+            Program.Check(Math.Abs(window.ActualWidth - 350) < 2 && Math.Abs(window.ActualHeight - 510) < 2,
+                "Returning from Settings restores the strip's size even after an immediate resize");
             Program.Check(window.FindName("NewButton") is null,
                 "The title bar has no new-workspace button");
             Program.Check(!VisibleWords(window).Contains("asleep", StringComparison.OrdinalIgnoreCase),
@@ -199,7 +228,7 @@ static class HubScenes
         finally { window.Close(); }
 
         // --- fix list item 4: preview loop rules, on a fresh window with fixture working cards -----
-        var previewWindow = new MainWindow { ShowActivated = false, Left = SceneContext.OffScreen.X, Top = SceneContext.OffScreen.Y };
+        var previewWindow = new MainWindow { ShowActivated = false, Left = TestScreen.Work.Left + 20, Top = TestScreen.Work.Top + 20 };
         try
         {
             previewWindow.Show();
@@ -215,6 +244,18 @@ static class HubScenes
             Program.Check(previewWindow.PreviewLoopRunning, "The preview loop runs while the stack shows");
             Program.Check(previewWindow.ShouldCaptureForTest("pv-0"),
                 "A working card inside the visible stack viewport is captured");
+            previewWindow.FilterButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            previewWindow.FilterBox.Text = "pv-23";
+            previewWindow.UpdateLayout();
+            Program.Check(previewWindow.StackWorkingList.Items.Count == 1 && previewWindow.ShouldCaptureForTest("pv-23"),
+                "The visible Find action filters workspaces and keeps the matching preview active");
+            previewWindow.FilterBox.Text = "no-such-workspace";
+            Program.Check(previewWindow.FilterEmptyText.Visibility == Visibility.Visible,
+                "A filter with no matches explains the empty result");
+            previewWindow.FilterButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            previewWindow.UpdateLayout();
+            Program.Check(previewWindow.StackWorkingList.Items.Count == 24 && previewWindow.FilterEmptyText.Visibility == Visibility.Collapsed,
+                "Closing Find restores every workspace and clears the empty-result message");
 
             ScrollViewer stackScroll = previewWindow.StackScroll;
             previewWindow.UpdateLayout();
@@ -234,12 +275,106 @@ static class HubScenes
             await Task.Delay(300);
             Program.Check(previewWindow.PreviewLoopRunning, "...and returning from Settings to the stack starts it again");
 
-            Program.Check(previewWindow.PreviewLoopInterval == TimeSpan.FromSeconds(1),
-                "The stack picks its fixed Balanced preview interval");
+            // Not a fixed second any more: the loop slows to 2.5x on battery rather than stopping,
+            // so a probe run on an unplugged laptop reads 2.5s and is just as right.
+            Program.Check(previewWindow.PreviewLoopInterval == HubPreview.Interval(),
+                "The stack picks the preview interval the power state calls for");
+            Program.Check(HubPreview.Interval() == TimeSpan.FromSeconds(
+                    WorkspacePeekCapture.OnBattery() ? 2.5 : 1),
+                "...one second plugged in, two and a half on battery");
         }
         finally { previewWindow.Dispose(); previewWindow.Close(); }
 
+        await SleepAndControlGate();
         TrayChecks();
+    }
+
+    /// <summary>
+    /// Fix list item 2 (a running workspace cannot be seen, stopped, or understood): a running
+    /// workspace nobody is using reads as idle rather than the same dot as one mid-task; the Sleep
+    /// control stops it in one click and the hub moves it to Recent; a sleeping workspace shows its
+    /// last picture dimmed, built on the existing Last seen pill, and takes no further captures; and
+    /// pressing the live picture makes "you have control" legible, clearing again once the lease
+    /// lets go.
+    /// </summary>
+    static async Task SleepAndControlGate()
+    {
+        var window = new MainWindow { ShowActivated = false, Left = TestScreen.Work.Left + 20, Top = TestScreen.Work.Top + 20 };
+        try
+        {
+            window.Show();
+            await Task.Delay(300);
+
+            // --- idle reads as idle, the Sleep control, and the one honest memory line --------------
+            StoredWorkspace idling = WorkspaceStore.Create("idling");
+            using WorkspaceRuntime idlingRuntime = WorkspaceRuntime.Start(idling);
+            await Task.Delay(300);
+            // The stack card and the wide sidebar row (WorkingCardTemplate, SidebarWorkingTemplate in
+            // MainWindow.xaml) both bind Idle and OpenLabel from this same HubEntry through the same
+            // StatusDot style, so checking the model here is checking both surfaces at once.
+            HubEntry idleEntry = window.Hub.Find(idling.Id)!;
+            Program.Check(idleEntry.Idle && idlingRuntime.IsIdle,
+                "A running workspace nobody is using reads as idle, in the hub entry the stack and the sidebar both draw from");
+            Program.Check(idleEntry.OpenLabel.Contains("idle", StringComparison.OrdinalIgnoreCase),
+                "...and its accessible name says so too");
+            Program.Check(idleEntry.AgentText.Contains("Sleeps in"),
+                "...with a real countdown from WorkspaceRuntime.SleepsIn, not an invented one");
+
+            window.ShowWide(idling.Id);
+            await Task.Delay(300);
+            WorkspaceFullView idleView = window.OpenWorkspaceView!;
+            Program.Check(idleView.SleepButton.Visibility == Visibility.Visible,
+                "The workspace page offers a Sleep control while its computer is running");
+            Program.Check(idleView.MemoryText.Visibility == Visibility.Visible && idleView.MemoryText.Text.StartsWith("Memory ")
+                && idleView.MemoryText.Text.EndsWith("% in use")
+                && uint.TryParse(idleView.MemoryText.Text["Memory ".Length..^"% in use".Length], out uint shownLoad) && shownLoad <= 100,
+                "The page shows one honest line for what running costs, from WorkspaceRuntime.MemoryLoad");
+            // Checked here, with the Sleep control and the memory line both actually on screen: once
+            // it sleeps they collapse, and VisibleWords skips whatever is not visible.
+            Program.Check(!VisibleWords(window).Contains("asleep", StringComparison.OrdinalIgnoreCase),
+                "Sleep control's wording never uses the reserved word asleep");
+
+            BitmapSource? beforeSleep = (BitmapSource?)idleView.ScreenPicture.Source;
+            idleView.SleepButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(300);
+            Program.Check(WorkspaceRuntime.Of(idling.Id) is null, "The Sleep control stops the workspace in one click");
+            Program.Check(window.Hub.Asleep.Any(e => e.Id == idling.Id) && !window.Hub.Working.Any(e => e.Id == idling.Id),
+                "...and the hub moves it from Working to Recent");
+            Program.Check(idleView.SleepButton.Visibility == Visibility.Collapsed,
+                "...and the now-sleeping page hides its own Sleep control");
+
+            // --- a sleeping workspace looks asleep instead of broken ---------------------------------
+            Program.Check(idleView.ScreenPicture.Opacity < 1.0 && idleView.LastSeenPill.Visibility == Visibility.Visible,
+                "A sleeping workspace shows its last picture dimmed, built on the existing Last seen pill");
+            await Task.Delay(1300);
+            Program.Check(ReferenceEquals(idleView.ScreenPicture.Source, beforeSleep),
+                "...and takes no further captures: the picture is still the exact frame it went to sleep with");
+
+            // --- taking over is legible ---------------------------------------------------------------
+            StoredWorkspace driven = WorkspaceStore.Create("driven");
+            using WorkspaceRuntime drivenRuntime = WorkspaceRuntime.Start(driven);
+            window.ShowWide(driven.Id);
+            await Task.Delay(300);
+            WorkspaceFullView drivenView = window.OpenWorkspaceView!;
+            Program.Check(drivenView.ControlToast.Visibility == Visibility.Collapsed,
+                "Nothing claims the owner has control before he has taken it");
+            drivenView.ScreenInput!.SimulateClickForTests();
+            Program.Check(drivenView.ControlToast.Visibility == Visibility.Visible && drivenRuntime.Plane!.Driving == Driver.Owner,
+                "Pressing the live picture shows he has control the moment he takes it");
+            Program.Check(
+                drivenView.ControlToastText.Text.Contains(((int)WorkspaceScreenInput.LeaveDelay.TotalSeconds).ToString())
+                && drivenView.ControlToastText.Text.Contains(((int)WorkspaceScreenInput.StayDelay.TotalSeconds).ToString()),
+                "...naming the real LeaveDelay and StayDelay the engine actually waits, not a hardcoded copy");
+            drivenRuntime.Plane!.Release();
+            await Task.Delay(300);
+            Program.Check(drivenView.ControlToast.Visibility == Visibility.Collapsed,
+                "...and it clears again once the lease lets go and the agent resumes");
+
+            window.Dispose();
+            WorkspaceStore.Delete(idling.Id);
+            WorkspaceStore.Delete(driven.Id);
+        }
+        finally { window.Close(); }
     }
 
     static string VisibleWords(DependencyObject root)

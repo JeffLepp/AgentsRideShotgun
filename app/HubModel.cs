@@ -13,14 +13,22 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
 {
     public string Id { get; } = id;
     string _name = "";
-    public string Name { get => _name; set { Set(ref _name, value); Changed(nameof(OpenLabel)); } }
+    public string Name { get => _name; set { Set(ref _name, value); Changed(nameof(OpenLabel)); Changed(nameof(SleepLabel)); } }
     bool _working;
     public bool Working { get => _working; set { Set(ref _working, value); Changed(nameof(OpenLabel)); } }
     bool _needsYou;
     public bool NeedsYou { get => _needsYou; set { Set(ref _needsYou, value); Changed(nameof(OpenLabel)); } }
+    /// <summary>Working, but nobody is driving it right now (WorkspaceRuntime.IsIdle): the stack's
+    /// one blue dot used to mean both "mid-task" and "sitting idle burning resources" at once.</summary>
+    bool _idle;
+    public bool Idle { get => _idle; set { Set(ref _idle, value); Changed(nameof(OpenLabel)); } }
     /// <summary>Screen-reader name for the card or row: the dot is the only visible status.</summary>
-    public string OpenLabel => "Open workspace " + Name + (NeedsYou ? ", needs you" : Working ? ", working" : ", recent");
-    /// <summary>"Claude Code", "Codex wants you", or empty when nobody is here right now.</summary>
+    public string OpenLabel => "Open workspace " + Name + (NeedsYou ? ", needs you" : Idle ? ", idle" : Working ? ", working" : ", recent");
+    /// <summary>Tooltip and screen-reader name for the card/row's own Sleep control (fix list item
+    /// 2.2): says exactly what happens up front, since a one-click action has no confirmation dialog
+    /// to say it in.</summary>
+    public string SleepLabel => "Sleep " + Name + ". Open apps close; saved files and the last picture stay. The next agent action wakes it.";
+    /// <summary>"Claude Code", "Codex wants you", "Sleeps in 4m", or empty when there is nothing to say.</summary>
     string _agentText = "";
     public string AgentText { get => _agentText; set => Set(ref _agentText, value); }
     /// <summary>Asleep only, the stack's wording: "2h", "yesterday", "Mon".</summary>
@@ -68,6 +76,16 @@ internal static class HubFormat
         if (since < TimeSpan.FromDays(7)) return lastUsed.ToString("dddd");
         return lastUsed.ToString("MMM d");
     }
+
+    /// <summary>What an idle running workspace says about when it sleeps, from
+    /// <see cref="HiveMind.AgentWorkspaces.WorkspaceRuntime.SleepsIn"/>. Minute granularity: a
+    /// countdown to the second would just be motion nobody asked for on a card meant to sit still.</summary>
+    internal static string SleepsInLabel(TimeSpan? left) => left switch
+    {
+        null => "",
+        { TotalSeconds: <= 60 } => "Sleeps soon",
+        { } remaining => $"Sleeps in {(int)Math.Ceiling(remaining.TotalMinutes)}m",
+    };
 }
 
 /// <summary>
@@ -94,12 +112,15 @@ internal sealed class HubViewModel : IDisposable
 
     void ScheduleRefresh() => Application.Current?.Dispatcher.BeginInvoke(Refresh);
 
-    /// <summary>Starts the once-a-minute relative-age refresh ("2h" creeping to "3h", and so on).
-    /// Call only while the hub is actually visible; idempotent.</summary>
+    /// <summary>Starts the relative-state refresh: "2h" creeping to "3h" on a recent card, and now
+    /// also a running one crossing from working into idle, and its "Sleeps in" countdown, neither of
+    /// which raises an event of its own - they are just true once enough wall-clock time has passed.
+    /// Ten seconds rather than the old one minute so idle reads as idle soon after it actually is,
+    /// not up to a minute later; still cheap; call only while the hub is visible, idempotent.</summary>
     public void StartAging()
     {
         if (_agingTimer is not null || _disposed) return;
-        _agingTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMinutes(1) };
+        _agingTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(10) };
         _agingTimer.Tick += (_, _) => Refresh();
         _agingTimer.Start();
     }
@@ -145,13 +166,22 @@ internal sealed class HubViewModel : IDisposable
             entry.Working = isWorking;
             bool needsYou = runtime?.Access?.Handoffs.All.Any(h => h.State == "pending") == true;
             entry.NeedsYou = needsYou;
+            // Idle only means something while running, and only when nothing else already claims
+            // the row's one line of trailing text (a pending question outranks a sleep countdown).
+            bool idle = isWorking && runtime!.IsIdle;
+            entry.Idle = idle && !needsYou;
             string driver = runtime?.Access?.LastController ?? string.Empty;
             string kept = WorkspaceHome.Label(workspace.Agents);
             string who = driver.Length > 0 ? WorkspaceHome.DisplayName(driver)
                 : kept.Equals(workspace.Name, StringComparison.OrdinalIgnoreCase) ? string.Empty : kept;
-            entry.AgentText = needsYou ? (who.Length > 0 ? who + " wants you" : "Needs you") : who;
+            string sleepsIn = entry.Idle ? HubFormat.SleepsInLabel(runtime!.SleepsIn) : "";
+            entry.AgentText = needsYou ? (who.Length > 0 ? who + " wants you" : "Needs you")
+                : sleepsIn.Length > 0 ? (who.Length > 0 ? who + " · " + sleepsIn : sleepsIn) : who;
             entry.Age = isWorking ? "" : HubFormat.StackAge(workspace.LastUsed, now);
             entry.SidebarAge = isWorking ? "" : HubFormat.SidebarAge(workspace.LastUsed, now);
+            // A workspace with no computer running shows the last look it had rather than an empty
+            // rectangle, and a running one shows it until its own live frame arrives.
+            HubLastLook.Fill(entry, isWorking);
             (isWorking ? working : asleep).Add(entry);
         }
         Sync(Working, working);
@@ -190,15 +220,17 @@ internal sealed class HubViewModel : IDisposable
 }
 
 /// <summary>Shared preview-loop rules (brief A.6, A.10): the app picks the rate itself, no Smoothness
-/// or Pause-previews-on-battery setting to read. Balanced pace; on battery, idle capture stops and
-/// the last frame stays.</summary>
+/// or Pause-previews-on-battery setting to read. Balanced pace, and a slower one on battery rather
+/// than none - most Windows machines are laptops, and a tile frozen on its last frame reads as the
+/// feature being broken.</summary>
 internal static class HubPreview
 {
-    internal static TimeSpan Interval() => TimeSpan.FromSeconds(1);
-
-    /// <summary>False on battery power: idle capture stops and the last frame stays either way.</summary>
-    internal static bool Allowed => !OnBattery();
-
-    static bool OnBattery() =>
-        System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Offline;
+    /// <summary>How often the stack's tiles and the workspace-full screen redraw. Battery stretches
+    /// the second out to two and a half, the same 2.5x the corner view takes when it is idle, and
+    /// never stops. Callers read this every tick instead of keeping the value their timer started
+    /// with, so plugging in speeds the picture back up and unplugging slows it down with no restart.
+    /// The battery question goes to the engine, the one the corner asks, so the two surfaces cannot
+    /// drift apart on what unplugged means.</summary>
+    internal static TimeSpan Interval() =>
+        TimeSpan.FromSeconds(WorkspacePeekCapture.OnBattery() ? 2.5 : 1);
 }

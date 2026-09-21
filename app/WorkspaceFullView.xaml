@@ -6,6 +6,10 @@
     <!-- A workspace in full (reference 04, .main): header, live screen, "What it did" and "Files". -->
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <!-- A crescent, stroked like the rest of the icon family rather than pulled from
+             HiveMind.AgentWorkspaces's own sprite (out of scope for this fix): fix list item 2.2's
+             "small sleep mark" and the Sleep control's own icon. -->
+        <Geometry x:Key="Icon.Sleep">M11.27,11.27 A6,6 0 1 1 4.74,4.74 A4.67,4.67 0 0 0 11.27,11.27 Z</Geometry>
         <Style x:Key="HerePill" TargetType="Border">
             <Setter Property="CornerRadius" Value="99"/>
             <Setter Property="Padding" Value="9,3"/>
@@ -103,6 +107,8 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="NameText" Grid.Column="0" FontSize="21" FontWeight="SemiBold" VerticalAlignment="Center"
                        TextTrimming="CharacterEllipsis" MaxWidth="320"/>
@@ -110,7 +116,13 @@
                       Visibility="Collapsed" VerticalAlignment="Center" KeyDown="RenameBox_KeyDown" LostFocus="RenameBox_LostFocus"/>
             <TextBlock x:Name="PathText" Grid.Column="1" FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
                        Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" Margin="14,2,0,0"
-                       TextTrimming="CharacterEllipsis" MaxWidth="260"/>
+                       TextTrimming="CharacterEllipsis" MaxWidth="260" ToolTip="{Binding Text, ElementName=PathText}">
+                <TextBlock.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Copy path" Click="CopyPath_Click"/>
+                    </ContextMenu>
+                </TextBlock.ContextMenu>
+            </TextBlock>
             <ItemsControl x:Name="HerePanel" Grid.Column="2" Margin="14,0,0,0" VerticalAlignment="Center" ItemTemplate="{StaticResource PillTemplate}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
@@ -120,13 +132,28 @@
             <TextBlock x:Name="HeaderError" Grid.Column="3" FontSize="12" Foreground="{DynamicResource DangerInkBrush}"
                        VerticalAlignment="Center" HorizontalAlignment="Right" Margin="10,0,10,0"
                        TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
-            <!-- No Take over / Hand back (brief A.3): clicking the screen is taking over, same as the
-                 corner window. -->
-            <Button x:Name="FolderButton" Grid.Column="4" Style="{StaticResource IconButton}" Click="Folder_Click" Margin="0,0,10,0"
+            <!-- One honest line for what running costs (fix list item 2.6): WorkspaceRuntime.MemoryLoad
+                 as-is, no chart and no metric this page invents itself. Only while this workspace's
+                 own computer is running, same as the Sleep control beside it. -->
+            <TextBlock x:Name="MemoryText" Grid.Column="4" FontSize="12" Foreground="{DynamicResource FaintInkBrush}"
+                       VerticalAlignment="Center" HorizontalAlignment="Right" Margin="10,0,10,0"
+                       TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
+            <!-- Sleeps the workspace right now, in one click (fix list item 2.2). Wording carries the
+                 whole explanation since a one-click action has no confirmation dialog to say it in;
+                 never the word "asleep" itself (MVP_SPEC.md reserves it for the stack, and the gate
+                 checks this page too). No Take over / Hand back (brief A.3 stands): clicking the
+                 screen is still taking over, same as the corner window; this is a different control. -->
+            <Button x:Name="SleepButton" Grid.Column="5" Style="{StaticResource IconButton}" Click="Sleep_Click" Margin="0,0,4,0"
+                    Visibility="Collapsed"
+                    ToolTip="Sleep now. Open apps close; saved files and the last picture stay. The next agent call starts the workspace again."
+                    AutomationProperties.Name="Sleep now. Open apps close; saved files and the last picture stay. The next agent call starts the workspace again.">
+                <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Sleep}"/>
+            </Button>
+            <Button x:Name="FolderButton" Grid.Column="6" Style="{StaticResource IconButton}" Click="Folder_Click" Margin="0,0,10,0"
                     ToolTip="Open folder" AutomationProperties.Name="Open workspace folder">
                 <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Folder}"/>
             </Button>
-            <Button x:Name="MoreButton" Grid.Column="5" Style="{StaticResource IconButton}" Click="More_Click"
+            <Button x:Name="MoreButton" Grid.Column="7" Style="{StaticResource IconButton}" Click="More_Click"
                     Margin="2,0,0,0" ToolTip="More" AutomationProperties.Name="More workspace actions">
                 <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.More}" StrokeThickness="2.4"/>
             </Button>
@@ -135,27 +162,61 @@
                 BorderBrush="{DynamicResource HairlineBrush}" Background="{DynamicResource CardBrush}"
                 ClipToBounds="True" VerticalAlignment="Top">
             <Grid x:Name="ScreenLayers">
-                <Image x:Name="ScreenImage" Stretch="UniformToFill"/>
+                <!-- The hand says the picture is the workspace itself and not a screenshot of it,
+                     the same as the corner window's. -->
+                <Image x:Name="ScreenImage" Stretch="UniformToFill" Cursor="Hand"
+                       AutomationProperties.Name="Live workspace screen"/>
+                <!-- Fix list item 2.2: build on the existing "Last seen" pill rather than add a second,
+                     competing indicator. ScreenImage's own Opacity (set in code) dims the picture
+                     underneath; this small mark plus the pill's own text is the "small sleep icon,
+                     you still see the background" the owner asked for. -->
                 <Border x:Name="LastSeenPill" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top"
                         Margin="12" Padding="10,5" CornerRadius="8" Background="{DynamicResource GlassBrush}">
-                    <TextBlock x:Name="LastSeenText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Path Style="{StaticResource Icon12}" Data="{StaticResource Icon.Sleep}" Margin="0,0,6,0"
+                              TextElement.Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="LastSeenText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}"/>
+                    </StackPanel>
+                </Border>
+                <!-- Fix list item 2.7: taking over is legible. The owner pressing the live picture
+                     takes the wheel and the agent waits, and until this nothing on the page said so.
+                     Shown the moment WorkspaceScreenInput's OwnerActed fires and cleared the moment
+                     WorkspaceControl.Driving lets go, for any reason (its own timeout, Pause every
+                     agent, or the owner leaving some other way). -->
+                <Border x:Name="ControlToast" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                        Margin="0,0,0,14" Padding="12,7" CornerRadius="8" Background="{DynamicResource GlassBrush}">
+                    <TextBlock x:Name="ControlToastText" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource InkBrush}" TextAlignment="Center"/>
                 </Border>
             </Grid>
         </Border>
-        <Grid Grid.Row="4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.25*"/>
-                <ColumnDefinition Width="28"/>
-                <ColumnDefinition Width="1*"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-                <TextBlock Text="What it did" Style="{StaticResource SectionLabel}" Margin="0,0,0,4"/>
-                <ItemsControl x:Name="DidList" ItemTemplate="{StaticResource DidTemplate}"/>
-            </StackPanel>
-            <StackPanel Grid.Column="2">
-                <TextBlock Text="Files" Style="{StaticResource SectionLabel}" Margin="0,0,0,4"/>
-                <ItemsControl x:Name="FilesList" ItemTemplate="{StaticResource FileTemplate}"/>
-            </StackPanel>
-        </Grid>
+        <!-- Only this scrolls: the live screen above keeps its own fixed place so the owner's
+             pointer never loses it mid-drive. ScrollChanged tracks whether the owner is at the
+             bottom so a reload can follow the newest row without fighting a scroll he did himself. -->
+        <ScrollViewer x:Name="ActivityScroll" Grid.Row="4" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" ScrollChanged="ActivityScroll_ScrollChanged">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.25*"/>
+                    <ColumnDefinition Width="28"/>
+                    <ColumnDefinition Width="1*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="What it did" Style="{StaticResource SectionLabel}" Margin="0,0,0,4"/>
+                    <ItemsControl x:Name="DidList" ItemTemplate="{StaticResource DidTemplate}"/>
+                    <TextBlock x:Name="DidEmptyText" Text="Nothing yet" FontSize="12.5"
+                               Foreground="{DynamicResource FaintInkBrush}" Visibility="Collapsed" Margin="0,6,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Files" Style="{StaticResource SectionLabel}" Margin="0,0,0,4"/>
+                    <ItemsControl x:Name="FilesList" ItemTemplate="{StaticResource FileTemplate}"/>
+                    <TextBlock x:Name="FilesEmptyText" Text="No files yet" FontSize="12.5"
+                               Foreground="{DynamicResource FaintInkBrush}" Visibility="Collapsed" Margin="0,6,0,0"/>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
     </Grid>
 </UserControl>

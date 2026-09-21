@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
@@ -19,14 +20,14 @@ namespace Deskweave;
 /// </summary>
 public sealed class FirstRunWindow : Window
 {
-    internal const string Headline = "Your agents test in their own screen now";
-    internal const string Explanation = "When Claude Code or Codex needs to click through your app, it happens in a corner window. Your mouse stays yours. Agent sessions already open need a restart.";
+    internal const string Headline = "Give your agents their own screen";
+    internal const string Explanation = "Connect Claude Code or Codex to test apps in a corner window while you use your desktop. Deskweave stays in the background. Restart agent sessions already open to pick it up.";
     internal const string LocalLine = "Deskweave runs only on this PC";
     internal const string NoAgentLine = "No Claude Code or Codex yet. Install one and Deskweave connects it.";
     internal const string StartLabel = "Start";
     internal const string TryAgainLabel = "Try again";
     internal const string ConnectedTitle = "Your agents are connected";
-    internal const string RestartLine = "Agent sessions that were already open pick it up when you start them again.";
+    internal const string RestartLine = "Restart agent sessions already open. Deskweave stays in the tray; open it there for history and settings.";
 
     /// <summary>The agent apps this screen offers, in reference order, with their tile.</summary>
     static readonly (WorkspaceConnections.AgentApp App, string Letter, Color Tile)[] Candidates =
@@ -103,6 +104,10 @@ public sealed class FirstRunWindow : Window
         // Answered either way: by Start, or by closing it. There is no second prompt (MVP_SPEC,
         // Surfaces 5). Only Start writes to an agent's configuration.
         Closing += (_, _) => AppSettingsStore.Update(s => s with { FirstRunDone = true });
+        // Escape is the close button. The window has no title bar of its own to press Alt+F4 on and
+        // no other way out from the keyboard, which left first launch the one surface a keyboard
+        // could open and not leave.
+        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { e.Handled = true; Close(); } };
     }
 
     void Repaint()

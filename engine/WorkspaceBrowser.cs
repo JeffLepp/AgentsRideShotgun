@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -95,6 +96,21 @@ public sealed partial class WorkspaceBrowser : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Why the last cold start for a workspace desktop did not come up - which stage lost the
+    /// race, not just that it did. Keyed by <see cref="AgentDesktop.Name"/> so several workspaces
+    /// starting Chrome at once never stomp on each other's diagnostic, and cleared the moment a
+    /// start on that desktop succeeds. Before this, "DID NOT COME UP" looked the same whether
+    /// Chrome was not installed, its process would not launch, its DevTools port never opened, or
+    /// a page just never attached in time - four different problems with the same silence.
+    /// </summary>
+    internal static string? StartFailureReason(string desktopName) =>
+        _startFailures.TryGetValue(desktopName, out string? reason) ? reason : null;
+
+    static readonly ConcurrentDictionary<string, string> _startFailures = new();
+
+    static void Record(string desktopName, string reason) => _startFailures[desktopName] = reason;
+
     readonly AgentDesktop _desktop;
     readonly AnonymousPipeServerStream? _toChrome;
     readonly AnonymousPipeServerStream? _fromChrome;
@@ -138,6 +154,25 @@ public sealed partial class WorkspaceBrowser : IDisposable
     /// <summary>Attaching DevTools is separate from confirming the requested first page loaded.</summary>
     internal bool InitialNavigationConfirmed { get; private set; }
 
+    /// <summary>The file in the workspace folder that says a browser was really used here.</summary>
+    internal const string UsedMark = "browser-used";
+
+    /// <summary>
+    /// Leaves the mark <see cref="WorkspaceControl.Prewarm"/> reads. Best effort: a workspace that
+    /// cannot write it simply pays the cold start on its next browse, which is what it did before.
+    /// </summary>
+    void Used()
+    {
+        try
+        {
+            if (_desktop.Folder is not { } folder) return;
+            string mark = Path.Combine(folder, UsedMark);
+            if (!File.Exists(mark)) File.WriteAllBytes(mark, []);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     internal static bool Blank(string url)
     {
         string where = url.Trim();
@@ -157,12 +192,23 @@ public sealed partial class WorkspaceBrowser : IDisposable
 
     /// <summary>
     /// Starts the workspace's browser and attaches to its first page. Returns null when Chrome is
-    /// not installed or never came up; the caller then works in pixels, which still works.
+    /// not installed or never came up after a retry; the caller then works in pixels, which still
+    /// works. <see cref="StartFailureReason"/> says exactly which stage lost the race.
     /// </summary>
     public static async Task<WorkspaceBrowser?> Start(AgentDesktop desktop, string url,
         bool allowPort = true, CancellationToken cancel = default, long lease = 0)
     {
-        if (!File.Exists(ChromePath) || desktop.Folder is null) return null;
+        _startFailures.TryRemove(desktop.Name, out _);
+        if (!File.Exists(ChromePath))
+        {
+            Record(desktop.Name, "no supported Chromium browser is installed");
+            return null;
+        }
+        if (desktop.Folder is null)
+        {
+            Record(desktop.Name, "the workspace has no folder yet to hold a browser profile");
+            return null;
+        }
         string profile = Path.Combine(desktop.Folder, "chrome-profile");
         // The browser now starts with ordinary user permissions, so its own renderer sandbox
         // stays enabled, as it does on the owner's desktop. Keep a separate browser profile.
@@ -186,7 +232,21 @@ public sealed partial class WorkspaceBrowser : IDisposable
         }
         if (!allowPort) return null;
         cancel.ThrowIfCancellationRequested();
-        WorkspaceBrowser? port = await TryPort(desktop, common, profile, url, cancel, lease).ConfigureAwait(false);
+        WorkspaceBrowser? port = await TryPort(desktop, common, profile, url, cancel, lease, attempt: 1)
+            .ConfigureAwait(false);
+        if (port is null && !cancel.IsCancellationRequested)
+        {
+            // Measured 2026-09-21: under three workspaces cold-starting Chrome at once - the
+            // product's own design point - TryPort lost this race outright, twice in a row during
+            // a full gate run, while the same measurement in isolation never failed in three runs.
+            // Nothing here is actually broken; the budget below is simply sized for a machine that
+            // is not also running two other Chrome launches. TryPort's own cleanup (in its finally
+            // block below) already stopped the half-started process and waited out its profile
+            // lock before returning null, so this is a clean second attempt, not a second process
+            // racing the first one. One retry here replaces what every caller under load was
+            // already doing by hand (SleepGate.Navigate, the owner just calling `browse` again).
+            port = await TryPort(desktop, common, profile, url, cancel, lease, attempt: 2).ConfigureAwait(false);
+        }
         return port is null ? null : await NavigateStarted(port, url, cancel).ConfigureAwait(false);
     }
 
@@ -196,7 +256,12 @@ public sealed partial class WorkspaceBrowser : IDisposable
         try
         {
             browser.InitialNavigationConfirmed = await browser.Go(url, cancel).ConfigureAwait(false);
+            // A warm-up start is for later, not for now. Leaving it in front put Chrome over the
+            // window the agent had just opened, so the next look photographed an empty browser and
+            // the agent had to notice and raise its own window again. Sized, then parked at the
+            // back; the first real navigation in Go raises it.
             browser._desktop.Fill(browser.Window);
+            if (Blank(url)) browser._desktop.Behind(browser.Window);
             return browser;
         }
         catch
@@ -250,17 +315,32 @@ public sealed partial class WorkspaceBrowser : IDisposable
         Thread.Sleep(1500);
     }
 
+    /// <summary>Whether a launched process is still there, the same way <see cref="Alive"/> checks
+    /// the attached browser's - a process that already exited did not lose a timing race, it
+    /// crashed, and the two want different fixes.</summary>
+    static bool ProcessAlive(int pid)
+    {
+        try { using Process chrome = Process.GetProcessById(pid); return !chrome.HasExited; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return false; }
+    }
+
     static async Task<WorkspaceBrowser?> TryPort(AgentDesktop desktop, string common, string profile,
-        string url, CancellationToken cancel, long lease)
+        string url, CancellationToken cancel, long lease, int attempt)
     {
         string stamp = Path.Combine(profile, "DevToolsActivePort");
         try { if (File.Exists(stamp)) File.Delete(stamp); } catch (IOException) { }
 
         // Port 0 means the operating system picks one that is free. Nothing here guesses a number,
-        // which is exactly the collision the owner asked to avoid.
+        // which is exactly the collision the owner asked to avoid - and rules port allocation out
+        // as a cause of the load failure this method retries against: every process gets its own
+        // OS-assigned port regardless of how many other Chrome processes are starting alongside it.
         cancel.ThrowIfCancellationRequested();
         int pid = desktop.LaunchBrowser(ChromePath, common + "--remote-debugging-port=0 " + Quote(url), lease: lease);
-        if (pid == 0) return null;
+        if (pid == 0)
+        {
+            Record(desktop.Name, $"attempt {attempt}: the browser process itself would not launch");
+            return null;
+        }
 
         bool attached = false;
         WorkspaceBrowser? browser = null;
@@ -279,7 +359,15 @@ public sealed partial class WorkspaceBrowser : IDisposable
                 }
                 catch (IOException) { }
             }
-            if (!int.TryParse(first, out int port)) return null;
+            if (!int.TryParse(first, out int port))
+            {
+                // Distinguishes a crash from a machine that is simply still busy 20s in - a fixed
+                // retry count reads identically for both unless something asks the process itself.
+                Record(desktop.Name, ProcessAlive(pid)
+                    ? $"attempt {attempt}: the browser was still starting after 20s but never wrote DevToolsActivePort"
+                    : $"attempt {attempt}: the browser process exited before it opened a DevTools port");
+                return null;
+            }
 
             socket = new ClientWebSocket();
             try
@@ -289,10 +377,17 @@ public sealed partial class WorkspaceBrowser : IDisposable
             catch (Exception ex) when (ex is WebSocketException or OperationCanceledException)
             {
                 socket.Dispose();
+                Record(desktop.Name, $"attempt {attempt}: DevToolsActivePort named port {port} but the WebSocket handshake failed: {ex.Message}");
                 return null;
             }
             browser = new WorkspaceBrowser(desktop, $"loopback port {port}", pid, socket: socket);
-            if (await browser.Attach(cancel).ConfigureAwait(false)) { attached = true; return browser; }
+            if (await browser.Attach(cancel).ConfigureAwait(false))
+            {
+                attached = true;
+                _startFailures.TryRemove(desktop.Name, out _);
+                return browser;
+            }
+            Record(desktop.Name, $"attempt {attempt}: connected to DevTools on port {port} but no page attached within the budget");
             return null;
         }
         finally
@@ -338,7 +433,16 @@ public sealed partial class WorkspaceBrowser : IDisposable
     {
         await Follow(cancel).ConfigureAwait(false);
         // A failed or cancelled navigation can still put partial page content on screen.
-        if (!Blank(url)) HasContent = true;
+        if (!Blank(url))
+        {
+            HasContent = true;
+            // A page someone asked for belongs on the screen the corner shows, whether this browser
+            // was parked by the warm-up or is already up. Also the record that this workspace really
+            // browses, which is what decides whether waking it warms a browser at all.
+            Used();
+            _desktop.Fill(Window);
+            _desktop.Arrange(Window, WindowArrangement.Front);
+        }
         JsonNode? sent = await Call("Page.navigate", new JsonObject { ["url"] = url }, cancel, _session)
             .ConfigureAwait(false);
         if (sent is null || sent["errorText"]?.GetValue<string>() is { Length: > 0 }
@@ -426,20 +530,6 @@ public sealed partial class WorkspaceBrowser : IDisposable
             !double.TryParse(pair[1], System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out double y)) return (double.NaN, double.NaN);
         return (x, y);
-    }
-
-    internal static JsonObject KeyMessage(string what, char letter)
-    {
-        var message = new JsonObject
-        {
-            ["type"] = what,
-            ["key"] = letter.ToString(),
-            ["windowsVirtualKeyCode"] = (int)char.ToUpperInvariant(letter)
-        };
-        // The character rides on the press, which is what makes it a keystroke and not two events
-        // around nothing. ponytail: no modifier keys of their own - add them if a page needs shift.
-        if (what == "keyDown") message["text"] = letter.ToString();
-        return message;
     }
 
     /// <summary>Runs an expression in the page and returns its value as text.</summary>

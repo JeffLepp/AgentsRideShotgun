@@ -96,11 +96,18 @@ internal static class WorkspaceMarks
                 if (x + width < 0 || y + height < 0 || x > frame.PixelWidth || y > frame.PixelHeight) continue;
                 canvas.DrawRectangle(null, line, new Rect(x, y, width, height));
 
+                // Inside the box, so a badge never covers the control next to it. The number shrinks
+                // with the outline rather than keeping a fixed size: once marks are drawn on the
+                // capped picture instead of the whole screen, a scrollbar arrow's box is a dozen
+                // pixels across, and a 12pt badge on it spilled over the arrows either side - three
+                // in a row wore each other's numbers. Seven is the smallest that still reads.
+                double point = Math.Clamp(Math.Min(width - 2, height - 2) * 0.8, 7, 12);
                 var text = new FormattedText(element.Id.ToString(CultureInfo.InvariantCulture),
                     CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                    new Typeface("Segoe UI"), 12, ink, 1.0);
-                // Inside the box, so a badge never covers the control next to it.
-                var badge = new Rect(x + 1, y + 1, text.Width + 6, text.Height + 2);
+                    new Typeface("Segoe UI"), point, ink, 1.0);
+                var badge = new Rect(x + 1, y + 1,
+                    Math.Min(text.Width + 6, Math.Max(1, width - 2)),
+                    Math.Min(text.Height + 2, Math.Max(1, height - 2)));
                 canvas.DrawRectangle(label, null, badge);
                 canvas.DrawText(text, new Point(badge.X + 3, badge.Y + 1));
             }

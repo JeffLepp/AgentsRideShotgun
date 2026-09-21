@@ -8,20 +8,24 @@ the whole folder to another checkout without linking back to HiveMind's source t
 
 ## Open the app
 
-The private **0.2.0** package is available: double-click **Start Deskweave.cmd**, or open
-**out/Deskweave.exe** directly. It includes the .NET desktop runtime and MCP bridge.
+The private **0.2.4** installer is at **artifacts/installer/0.2.4/Deskweave-Setup.exe**.
+For this checkout, double-click **Start Deskweave.cmd** or open **out/Deskweave.exe** directly.
+The Windows x64 package includes the .NET desktop runtime and MCP bridge.
 `tools/build-installer.ps1` builds **Deskweave-Setup.exe**: a per-user install (no admin) with a
 Start menu shortcut and an Apps & features uninstall that also takes Deskweave out of the agents'
-configs. It is unsigned for now, so Windows SmartScreen warns on first open.
-Exact package hashes, test results and remaining MVP gates are in [VALIDATION.md](VALIDATION.md).
+configs. It is unsigned; Windows reputation and application-control policies can warn or block it.
+Exact hashes and tests are in [VALIDATION.md](VALIDATION.md); [LAUNCH.md](LAUNCH.md) lists release limits.
 
 First launch detects **Claude Code** and **Codex**. **Start** consents to connecting the enabled
 agents; closing it connects nothing. Settings > Agents can connect later. Agent sessions that were
-already open need a restart to see Deskweave. No Deskweave sign-in is required.
+already open may need to restart or reconnect to see Deskweave. Setup finishes in the tray.
+No Deskweave sign-in is required.
 
 Once connected, an agent that needs a screen while Deskweave is closed starts it in the background
 (tray only). An agent that goes 30 seconds without a workspace action lets go of it, so the corner
-fades; a workspace nobody uses for 30 minutes sleeps and wakes on the next agent call. When the PC
+fades; a workspace nobody uses for 15 minutes sleeps and starts again on the next agent call.
+Sleep closes its open apps while retaining saved files and its last picture. Running command jobs
+prevent idle cleanup until they finish. When the PC
 is at its limit, the quietest workspace sleeps to make room, or the call waits its turn.
 
 A connected agent's first workspace tool call creates or reuses its project's workspace.
@@ -40,16 +44,20 @@ Deskweave for screen work and stayed out of it otherwise, 4/4 each; see VALIDATI
 - **Corner window:** appears for activity, fades when quiet, and stays while hovered or pinned.
   Move it by its name pill and resize from its edges. Click the screen to use it while the
   agent waits. The preview stays on the same workspace while your pointer is over it.
-- **Hub:** shows working and recent workspaces. Open one for its screen, history and files.
+  Automatic views and notifications stay hidden while a fullscreen game or video is visible on
+  either monitor, even if you use a normal app on another screen. An explicit tray request can
+  show a temporary glance. Minimized or covered fullscreen apps permit normal behavior again.
+- **Hub:** a compact vertical strip with small running previews and text Recent rows. Open one
+  for its screen, history and files; a past session shows an optional small last picture.
 - **Settings:** agent connections, light/dark theme, corner visibility, startup and available
   privacy controls.
 - **Tray:** show the corner, pause/resume every agent, open Settings, or quit. Closing the hub
   hides it; quitting ends running desktops while retaining saved files.
 
 The default pause shortcut is **Ctrl+Alt+P** (Settings shows the actual shortcut if Windows
-already uses it). Sleep/wake, waiting at capacity, complete history/accounts behavior, and
-final accessibility and scaling acceptance remain on the MVP plan. This is a private build,
-not a signed public installer. The separate [portable test kit](portable/README.md) is outside
+already uses it). This is a private build; Windows 11 guest acceptance, the supported-edition
+statement and public signing/distribution remain release gates. The separate
+[portable test kit](portable/README.md) is outside
 this Windows product's delivery.
 
 ## Browser work
@@ -95,5 +103,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\compare-upstream.ps1
 
 [PRODUCT.md](PRODUCT.md) defines scope and limits. [DESIGN.md](DESIGN.md) records the
 brand, interface system, and competitor research. [VALIDATION.md](VALIDATION.md) records
-what was actually exercised on the standalone build. Version **0.2.0** is a private preview;
+what was actually exercised on the standalone build. Version **0.2.4** is a private candidate;
 the working name is not a trademark or domain-clearance claim.
