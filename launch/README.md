@@ -20,23 +20,13 @@
 
 <br>
 
-<p align="center">
-  <img src="assets/shots/corner-dark.png" alt="The corner window: your agent testing a shop page on its own desktop" width="520">
-</p>
-
 <p align="center"><i>"Co-work, without the co-mouse."</i></p>
 
 <br>
 
-Your coding agent can write the app. Then it has to **use** it: open it, click through it, type
-into it, read what's on screen. On Windows, that happens on your desktop, with your mouse, while
-you're trying to work.
-
-**Deskweave gives the agent a desktop of its own.** A real second Windows desktop, running quietly
-beside yours. The agent opens apps, browses and clicks over there. You watch from a small corner
-window, and take over whenever you like.
-
-No VM. No Docker. No second copy of Windows. One download, and Claude Code and Codex connect in a click.
+**Deskweave gives your agent a desktop of its own.** A real second Windows desktop, running quietly
+beside yours, where it opens apps, clicks and tests while you keep working. No VM. No Docker. No
+second copy of Windows. One download, and Claude Code and Codex connect in a click.
 
 ## What you get
 
@@ -125,4 +115,4 @@ dotnet build app/Deskweave.csproj -c Release
 
 ## License
 
-[MIT](LICENSE). Made by [Jeff Kline](https://github.com/JeffLepp).
+[MIT](LICENSE). Made by [Jefferson Kline](https://github.com/JeffLepp).
