@@ -68,6 +68,9 @@ internal static class WorkspacePopOut
         }
 
         string name = plan.Title;
+        // A running virtual machine is locked to the window that holds it; a second one only errors.
+        if (OneCopy.Contains(Path.GetFileName(plan.Program!)))
+            return $"{name} can only run in one place. Close it in here first, then start it on your desktop";
         Process started;
         try
         {
@@ -91,6 +94,10 @@ internal static class WorkspacePopOut
                 if (at is { } point) Place(shown, point);
                 SetForegroundWindow(shown);
             }
+            // A message box instead of the app: usually "already running". The copy in here stays,
+            // or the owner would be left with an error and nothing else. The gate's stand-in has no real window.
+            if (shown != 0 && WindowOfForTests is null && !LooksLikeApp(shown))
+                return $"{name} showed a message on your desktop instead of opening, so it stays here too";
         }
 
         // One copy: the agent's goes, the way its own close button would close it, so an app that
@@ -107,6 +114,17 @@ internal static class WorkspacePopOut
         runtime.Plane?.TellAgents($"The owner moved \"{name}\" to their own desktop and closed it here. "
             + "Do not start it again in the workspace unless they ask.");
         return $"{name} is on your desktop now · it started fresh";
+    }
+
+    static readonly HashSet<string> OneCopy = new(StringComparer.OrdinalIgnoreCase) { "VirtualBoxVM.exe" };
+
+    /// <summary>A resizable or maximizable window is an app; a fixed one without either is a
+    /// message. ponytail: style heuristic; a fixed-size main window keeps both copies, which loses nothing.</summary>
+    static bool LooksLikeApp(nint window)
+    {
+        const nint maximizeBox = 0x00010000;
+        nint style = Native.GetWindowLongPtrW(window, Native.GwlStyle);
+        return (style & ((nint)Native.WsThickFrame | maximizeBox)) != 0;
     }
 
     static bool HasExited(Process process)

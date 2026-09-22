@@ -592,6 +592,7 @@ public partial class WorkspacePeekWindow : Window
     // --- Open on my desktop -------------------------------------------------------------------
 
     nint _popOutWindow;
+    Rect _popOutArea;
     long _popOutAsked;
 
     /// <summary>
@@ -603,10 +604,13 @@ public partial class WorkspacePeekWindow : Window
     {
         if (_input is null || e.LeftButton == MouseButtonState.Pressed || DropOverlay.Visibility == Visibility.Visible
             || Sheet.Visibility == Visibility.Visible) { HidePopOut(); return; }
+        Point at = e.GetPosition(LiveScreen);
+        // Still on the window the button is for: it stays put, whatever the pointer does inside it.
+        if (_popOutWindow != 0 && _popOutArea.Contains(at)) return;
         long now = Environment.TickCount64;
         if (now - _popOutAsked < 150) return;
         _popOutAsked = now;
-        (nint Window, Rect Area)? found = await _input.PoppableAt(e.GetPosition(LiveScreen));
+        (nint Window, Rect Area)? found = await _input.PoppableAt(at);
         if (found is not { } hit || !Root.IsMouseOver || Mouse.LeftButton == MouseButtonState.Pressed) { HidePopOut(); return; }
         PlacePopOut(hit.Window, hit.Area);
     }
@@ -615,6 +619,7 @@ public partial class WorkspacePeekWindow : Window
     void PlacePopOut(nint window, Rect area)
     {
         _popOutWindow = window;
+        _popOutArea = area;
         PopOutButton.Visibility = Visibility.Visible;
         PopOutButton.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         Size size = PopOutButton.DesiredSize;

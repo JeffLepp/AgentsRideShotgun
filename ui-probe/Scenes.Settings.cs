@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
@@ -162,6 +163,16 @@ static class SettingsScenes
         window.Show();
         try
         {
+            string cancelledData = Path.Combine(Program.Output, "cancelled-uninstall-data");
+            Directory.CreateDirectory(cancelledData);
+            string marker = Path.Combine(cancelledData, "keep.txt");
+            File.WriteAllText(marker, "keep");
+            QuitQuestion.ConfirmForTests = () => false;
+            try { delete([cancelledData]); }
+            finally { QuitQuestion.ConfirmForTests = null; }
+            Program.Check(File.Exists(marker) && !startupSynced && window.IsVisible,
+                "Canceling the quit question leaves data, startup registration and Settings untouched");
+
             Program.Check(view.AvailableCategories.SequenceEqual(["general", "agents", "history"]),
                 "Only active Settings categories appear before Accounts is wired");
             SettingsFeatures.Accounts = true;

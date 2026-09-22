@@ -172,6 +172,11 @@ public partial class App : Application
     public void RequestQuit()
     {
         if (!QuitQuestion.Ask(MainWindow)) return;
+        ShutdownAfterConfirmedQuit();
+    }
+
+    internal void ShutdownAfterConfirmedQuit()
+    {
         _quitting = true;
         Shutdown();
     }

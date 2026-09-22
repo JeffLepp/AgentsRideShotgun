@@ -163,7 +163,10 @@ static class Program
 
     static async Task Run()
     {
-        await TrayChecks.Run();
+        string? slice = Environment.GetEnvironmentVariable("DESKWEAVE_UI_GATE_SLICE")?.Trim().ToLowerInvariant();
+        if (slice is not null and not ("hub" or "corner" or "settings" or "firstrun" or "scaling"))
+            throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner, settings, firstrun or scaling.");
+        if (slice != "settings") await TrayChecks.Run();
         _window = new MainWindow { ShowActivated = false, Left = TestScreen.Work.Left + 20, Top = TestScreen.Work.Top + 20 };
         _window.Show();
         await Settle();
@@ -342,9 +345,6 @@ static class Program
         // Each Wave 1 slice adds its behavior checks in its own Scenes.*.cs file. A named slice is
         // useful while repairing one checker; ordinary validation leaves it unset and runs all.
         string ownerAgents = OwnerAgentEntries();
-        string? slice = Environment.GetEnvironmentVariable("DESKWEAVE_UI_GATE_SLICE")?.Trim().ToLowerInvariant();
-        if (slice is not null and not ("hub" or "corner" or "settings" or "firstrun" or "scaling"))
-            throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner, settings, firstrun or scaling.");
         if (slice is null or "hub") await HubScenes.Gate();
         if (slice is null or "hub") await InlineScenes.Gate();
         if (slice is null or "hub") await CardScenes.Gate();

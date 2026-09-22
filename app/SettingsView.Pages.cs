@@ -388,6 +388,9 @@ public partial class SettingsView
         var deleteRow = Row(RowText("Delete all Deskweave data", "Stops every workspace, deletes Deskweave's data, and quits. Your projects stay."),
             Confirm("Delete", () => "Delete all Deskweave data? This can't be undone.",
                 () => SettingsActions.DeleteAllData(SettingsActions.DataFolders), danger: true));
+        var uninstallRow = Row(RowText("Uninstall Deskweave", "Deletes all Deskweave data, disconnects your agents, and removes the app. Your projects stay."),
+            Confirm("Uninstall", () => "Uninstall Deskweave and delete all its data? This can't be undone.",
+                () => SettingsActions.Uninstall(), danger: true));
 
         return new StackPanel
         {
@@ -396,7 +399,7 @@ public partial class SettingsView
                 screenshots,
                 storage,
                 projects,
-                Section(null, Group(deleteRow)),
+                Section(null, SettingsActions.Uninstaller is null ? Group(deleteRow) : Group(deleteRow, uninstallRow)),
             },
         };
     }

@@ -307,12 +307,14 @@ public sealed class WorkspaceScreenInput : IDisposable
         return Task.CompletedTask;
     }
 
-    readonly Dictionary<nint, (bool Can, long At)> _canPopOut = [];
+    readonly Dictionary<nint, (nint App, long At)> _canPopOut = [];
 
     /// <summary>
     /// The window under a point of the picture that can be taken out, and where it sits on the
-    /// picture - for a view to put its Open on my desktop button on. Asks the workspace off the
-    /// view's thread; a window's answer is remembered for a few seconds, hovering being constant.
+    /// picture - for a view to put its Open on my desktop button on. A popup or dialog answers for
+    /// its app's own window, so the button stays on the app rather than chasing its tooltips.
+    /// Asks the workspace off the view's thread; a window's answer is remembered for a few seconds,
+    /// hovering being constant.
     /// </summary>
     internal async Task<(nint Window, Rect Area)?> PoppableAt(Point point)
     {
@@ -328,11 +330,12 @@ public sealed class WorkspaceScreenInput : IDisposable
         long now = Environment.TickCount64;
         if (!_canPopOut.TryGetValue(under.Handle, out var known) || now - known.At > 4000)
         {
-            known = (WorkspacePopOut.For(runtime, under.Handle) is not null, now);
+            known = (WorkspacePopOut.For(runtime, under.Handle)?.Window ?? 0, now);
             _canPopOut[under.Handle] = known;
         }
-        if (!known.Can) return null;
-        return (under.Handle, new Rect(toPicture(under.X, under.Y), toPicture(under.X + under.Width, under.Y + under.Height)));
+        if (known.App == 0) return null;
+        AgentWindow app = windows.FirstOrDefault(w => w.Handle == known.App) ?? under;
+        return (app.Handle, new Rect(toPicture(app.X, app.Y), toPicture(app.X + app.Width, app.Y + app.Height)));
     }
 
     // --- taking a window by its frame ---------------------------------------------------------

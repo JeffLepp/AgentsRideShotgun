@@ -144,7 +144,17 @@ internal static class SettingsActions
     /// folders); a scene overrides it with fixture rows.</summary>
     internal static Func<IReadOnlyList<ProjectStorageEntry>> Projects = () => [];
 
-    internal static Action<IReadOnlyList<string>> DeleteAllData = DeleteEverything;
+    internal static Action<IReadOnlyList<string>> DeleteAllData = folders => DeleteEverything(folders, null);
+
+    /// <summary>Velopack's Update.exe, one folder above the running version; null for a copy that
+    /// was not installed, such as a build in out/.</summary>
+    internal static string? Uninstaller => Environment.ProcessPath is { } exe
+        && Path.GetDirectoryName(Path.GetDirectoryName(exe)) is { } root
+        && File.Exists(Path.Combine(root, "Update.exe")) ? Path.Combine(root, "Update.exe") : null;
+
+    /// <summary>Delete all Deskweave data, then remove the program too. Update.exe runs the same
+    /// uninstall as Apps &amp; features, which takes Deskweave out of the agents' configs.</summary>
+    internal static Action Uninstall = () => DeleteEverything(DataFolders, Uninstaller);
 
     /// <summary>Deskweave's two data folders: local (workspaces, settings, logs) and roaming.</summary>
     internal static IReadOnlyList<string> DataFolders => [ProductContext.LocalRoot, ProductContext.RoamingRoot];
@@ -301,15 +311,24 @@ internal static class SettingsActions
 
     // --- Deleting everything --------------------------------------------------------------------
 
-    static void DeleteEverything(IReadOnlyList<string> folders)
+    static void DeleteEverything(IReadOnlyList<string> folders, string? uninstaller)
     {
+        Application application = Application.Current;
+        if (!QuitQuestion.Ask(application.MainWindow)) return;
         // Nothing may run out of a folder that is about to go, and nothing starts at sign-in any more.
         WorkspaceRuntime.Rest();
         SyncStartup(AppSettingsStore.Current with { StartWithWindows = false, FirstRunDone = true });
-        Application application = Application.Current;
         // Exit is raised after the app's own shutdown has saved what it saves, so this is the last word.
-        application.Exit += (_, _) => { foreach (string folder in folders) Remove(folder); };
-        if (application is App app) app.RequestQuit();
+        application.Exit += (_, _) =>
+        {
+            foreach (string folder in folders) Remove(folder);
+            if (uninstaller is null) return;
+            var start = new ProcessStartInfo(uninstaller) { UseShellExecute = false };
+            start.ArgumentList.Add("uninstall");
+            start.ArgumentList.Add("--silent");
+            Process.Start(start)?.Dispose();
+        };
+        if (application is App confirmedApp) confirmedApp.ShutdownAfterConfirmedQuit();
         else application.Shutdown();
     }
 

@@ -241,6 +241,32 @@ public static class InstallerProviderFixture {
     if ($codexConfigurationBefore) {
         Check ((Test-Path -LiteralPath $codexConfiguration) -and (Get-FileHash -LiteralPath $codexConfiguration).Hash -eq $codexConfigurationBefore) 'The complete install, workspace and uninstall sequence preserves the existing Codex configuration byte for byte'
     }
+
+    # --- reinstall, then Settings > Uninstall Deskweave --------------------------------------
+    # The same steps the Settings row takes: quit, delete both data folders, run Update.exe.
+    $setup = Start-Process -FilePath $installer -ArgumentList '--silent' -PassThru -WindowStyle Hidden
+    Check ($setup.WaitForExit(300000) -and $setup.ExitCode -eq 0) 'Reinstalling over kept data succeeds'
+    Check (WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30) 'Deskweave starts after the reinstall'
+    [IO.File]::WriteAllText($providerConfig, $providerFixture, (New-Object Text.UTF8Encoding $false))
+    Get-Process Deskweave -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
+    foreach ($folder in @((Join-Path $local 'Deskweave'), (Join-Path $env:APPDATA 'Deskweave'))) {
+        if (Test-Path $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
+    }
+    $un = Start-Process -FilePath $update -ArgumentList 'uninstall', '--silent' -PassThru -WindowStyle Hidden
+    Check ($un.WaitForExit(120000) -and $un.ExitCode -eq 0) 'Full uninstall returns success'
+    Start-Sleep -Seconds 5
+    $leftovers = @(
+        @($local, $env:APPDATA, $env:TEMP, "$env:APPDATA\Microsoft\Windows\Start Menu\Programs", "$env:USERPROFILE\Desktop") |
+            Where-Object { Test-Path $_ } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_ -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*Deskweave*' } } |
+            ForEach-Object { $_.FullName })
+    $report.fullUninstallLeftovers = $leftovers
+    Shot 'after-full-uninstall'
+    Check ($leftovers.Count -eq 0) ('Full uninstall leaves no Deskweave files or folders' + $(if ($leftovers) { ': ' + ($leftovers -join ', ') }))
+    Check (-not (Test-Path $uninstallKey)) 'Full uninstall removes the Apps & features entry'
+    Check ($null -eq (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).Deskweave) 'Full uninstall leaves nothing starting with Windows'
+    Check ($null -eq (Get-Content -Raw -LiteralPath $providerConfig | ConvertFrom-Json).mcpServers.deskweave) 'Full uninstall disconnects the agent'
+    Check (@(Get-Process Deskweave, Deskweave.WorkspaceBridge -ErrorAction SilentlyContinue).Count -eq 0) 'No Deskweave process is left running'
 }
 catch { $failure = $_.ToString() }
 finally {
