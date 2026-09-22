@@ -44,10 +44,12 @@ if ($Sign) {
         if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Signing needs $name in the environment." }
     }
     $signMetadata = Join-Path ([IO.Path]::GetTempPath()) ('deskweave-sign-' + [Guid]::NewGuid().ToString('N') + '.json')
-    [ordered]@{
+    $signJson = [ordered]@{
         Endpoint = $env:HIVEMIND_SIGN_ENDPOINT; CodeSigningAccountName = $env:HIVEMIND_SIGN_ACCOUNT; CertificateProfileName = $env:HIVEMIND_SIGN_PROFILE
         ExcludeCredentials = @('ManagedIdentityCredential', 'WorkloadIdentityCredential', 'SharedTokenCacheCredential', 'VisualStudioCredential', 'VisualStudioCodeCredential', 'AzureCliCredential', 'AzurePowerShellCredential', 'AzureDeveloperCliCredential', 'InteractiveBrowserCredential')
-    } | ConvertTo-Json | Set-Content -LiteralPath $signMetadata -Encoding UTF8
+    } | ConvertTo-Json
+    # No byte-order mark: the signing library fails on one with only "SignerSign() failed".
+    [IO.File]::WriteAllText($signMetadata, $signJson)
     $signing = @('--azureTrustedSignFile', $signMetadata)
 }
 try {
@@ -58,6 +60,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "vpk pack failed ($LASTEXITCODE)." }
 }
 finally { if ($signMetadata) { Remove-Item -LiteralPath $signMetadata -ErrorAction SilentlyContinue } }
+# A signing run once produced a package holding 38 of the app's files and still exited 0.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$package = Get-ChildItem -LiteralPath $staging -Filter '*-full.nupkg' | Select-Object -First 1
+$zip = [IO.Compression.ZipFile]::OpenRead($package.FullName)
+try { $packed = @($zip.Entries | Where-Object { $_.FullName -like 'lib/app/*' -and $_.Name }).Count } finally { $zip.Dispose() }
+$expected = @(Get-ChildItem -LiteralPath $payload -Recurse -File | Where-Object { $_.Extension -ne '.pdb' -and $_.Name -ne 'createdump.exe' }).Count
+if ($packed -lt $expected) { throw "The package holds $packed of the app's $expected files." }
 $built = Get-ChildItem -LiteralPath $staging -Filter '*Setup.exe' | Select-Object -First 1
 if (-not $built) { throw 'vpk reported success but produced no Setup.exe.' }
 # The name a person downloads. The update feed names the package, not this file.
