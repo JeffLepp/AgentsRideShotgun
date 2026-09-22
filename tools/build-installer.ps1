@@ -1,8 +1,8 @@
-param([string]$Version = '', [switch]$SkipPublish)
+param([string]$Version = '', [switch]$SkipPublish, [switch]$Sign)
 # Builds Deskweave-Setup: a per-user install (no admin) with a Start menu shortcut and an Apps &
 # features uninstall that takes Deskweave out of the agents' configs. Publishes fresh first, so
 # Deskweave must be closed. -SkipPublish packages a separately published, version-matched payload.
-# Public distribution requires a signing identity and separate SmartScreen/Smart App Control checks.
+# -Sign signs every binary and Setup with the Azure identity; public releases are always signed.
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sourceVersion = [string]([xml](Get-Content -Raw (Join-Path $root 'Directory.Build.props'))).Project.PropertyGroup[0].Version
@@ -36,15 +36,36 @@ $staging = Join-Path $root ('artifacts\installer-staging\' + [DateTime]::UtcNow.
 # A technical floor for this private candidate, matching its oldest observed test guest.
 # Edition/lifecycle support is narrower and is stated in LAUNCH.md; a build number cannot encode it.
 $packageRuntime = 'win10.0.19041-x64'
-& vpk pack --packId DeskweaveApp --packVersion $Version --packDir $payload --runtime $packageRuntime `
-    --packTitle Deskweave --packAuthors 'Jefferson Kline' --mainExe Deskweave.exe `
-    --icon (Join-Path $root 'app\Assets\Deskweave.ico') --shortcuts StartMenuRoot `
-    --outputDir $staging --noPortable --skip-updates
-if ($LASTEXITCODE -ne 0) { throw "vpk pack failed ($LASTEXITCODE)." }
+$signing = @()
+if ($Sign) {
+    # Azure Artifact Signing through the service principal already in the environment; the
+    # metadata file holds no secret and is deleted after packing.
+    foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'HIVEMIND_SIGN_ACCOUNT', 'HIVEMIND_SIGN_ENDPOINT', 'HIVEMIND_SIGN_PROFILE')) {
+        if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Signing needs $name in the environment." }
+    }
+    $signMetadata = Join-Path ([IO.Path]::GetTempPath()) ('deskweave-sign-' + [Guid]::NewGuid().ToString('N') + '.json')
+    [ordered]@{
+        Endpoint = $env:HIVEMIND_SIGN_ENDPOINT; CodeSigningAccountName = $env:HIVEMIND_SIGN_ACCOUNT; CertificateProfileName = $env:HIVEMIND_SIGN_PROFILE
+        ExcludeCredentials = @('ManagedIdentityCredential', 'WorkloadIdentityCredential', 'SharedTokenCacheCredential', 'VisualStudioCredential', 'VisualStudioCodeCredential', 'AzureCliCredential', 'AzurePowerShellCredential', 'AzureDeveloperCliCredential', 'InteractiveBrowserCredential')
+    } | ConvertTo-Json | Set-Content -LiteralPath $signMetadata -Encoding UTF8
+    $signing = @('--azureTrustedSignFile', $signMetadata)
+}
+try {
+    & vpk pack --packId DeskweaveApp --packVersion $Version --packDir $payload --runtime $packageRuntime `
+        --packTitle Deskweave --packAuthors 'Jefferson Kline' --mainExe Deskweave.exe `
+        --icon (Join-Path $root 'app\Assets\Deskweave.ico') --shortcuts StartMenuRoot `
+        --outputDir $staging --noPortable --skip-updates @signing
+    if ($LASTEXITCODE -ne 0) { throw "vpk pack failed ($LASTEXITCODE)." }
+}
+finally { if ($signMetadata) { Remove-Item -LiteralPath $signMetadata -ErrorAction SilentlyContinue } }
 $built = Get-ChildItem -LiteralPath $staging -Filter '*Setup.exe' | Select-Object -First 1
 if (-not $built) { throw 'vpk reported success but produced no Setup.exe.' }
 # The name a person downloads. The update feed names the package, not this file.
 $setup = Move-Item -LiteralPath $built.FullName -Destination (Join-Path $staging 'Deskweave-Setup.exe') -PassThru
+# vpk upload reads this list, so it has to name the file that is actually there.
+$assets = Join-Path $staging 'assets.win.json'
+[IO.File]::WriteAllText($assets, [IO.File]::ReadAllText($assets).Replace($built.Name, $setup.Name))
+if ($Sign -and (Get-AuthenticodeSignature -LiteralPath $setup.FullName).Status -ne 'Valid') { throw 'Setup is not validly signed.' }
 $manifest = [ordered]@{
     version = $Version; runtime = $packageRuntime; velopack = $sdkVersion; builtAt = [DateTimeOffset]::UtcNow.ToString('o')
     installerSha256 = (Get-FileHash -LiteralPath $setup.FullName).Hash

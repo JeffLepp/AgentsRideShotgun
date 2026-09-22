@@ -68,6 +68,7 @@ public partial class App : Application
                 (_, _) => Dispatcher.BeginInvoke(ShowWorkspace), null, Timeout.Infinite, false);
             StartWithWindows.Sync(AppSettingsStore.Current);
             AppSettingsStore.Changed += settings => StartWithWindows.Sync(settings);
+            Updates.Start((title, text) => Dispatcher.BeginInvoke(() => Tell(title, text)));
             // Started by Windows at sign-in: stay in the tray; the corner window still comes and goes.
             if (e.Args.Contains(StartWithWindows.Background)) return;
             // First launch comes before the hub and instead of it. It is shown once, whichever way
@@ -199,7 +200,7 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    static void LogFailure(Exception failure)
+    internal static void LogFailure(Exception failure)
     {
         try
         {
