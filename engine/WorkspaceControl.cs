@@ -33,7 +33,7 @@ public sealed record WorkspaceScreenState(bool Stale, DateTimeOffset? Taken, int
                 + (Taken is { } when ? ", taken at " + when.ToLocalTime().ToString("HH:mm:ss") : "")
             : "This picture is current")
         + (Unresponsive > 0
-            ? $". {Unresponsive} window{(Unresponsive == 1 ? " is" : "s are")} not responding and could not be photographed"
+            ? $". {Unresponsive} window{(Unresponsive == 1 ? " is" : "s are")} not responding, shown greyed as last seen"
             : PumpBusy ? ". The workspace desktop did not answer in time" : "")
         + ".";
 
@@ -115,6 +115,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool changed;
         lock (_gate)
         {
+            if (_disposed) return;
             _desktop.Revoke();
             _agentLease = 0;
             CancelInput();
@@ -145,6 +146,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool changed;
         lock (_gate)
         {
+            if (_disposed) return;
             _desktop.Revoke();
             _agentLease = 0;
             CancelInput();
@@ -161,7 +163,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool changed;
         lock (_gate)
         {
-            if (Driving == Driver.Owner) return;
+            if (_disposed || Driving == Driver.Owner) return;
             _desktop.Revoke();
             _agentLease = 0;
             CancelInput();
@@ -184,7 +186,7 @@ public sealed partial class WorkspaceControl : IDisposable
     /// <summary>The number the agent's input must carry, or zero when it is not allowed to act.</summary>
     long Ticket
     {
-        get { lock (_gate) return Driving == Driver.Agent
+        get { lock (_gate) return !_disposed && Driving == Driver.Agent
             && (_requiredLease.Value is not { } required || required == _agentLease) ? _agentLease : 0; }
     }
 
@@ -208,6 +210,12 @@ public sealed partial class WorkspaceControl : IDisposable
     {
         lock (_gate)
         {
+            if (_disposed)
+            {
+                var closed = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+                closed.Cancel();
+                return closed;
+            }
             var scope = CancellationTokenSource.CreateLinkedTokenSource(cancel, _inputStop.Token);
             if (ticket == 0 || Ticket != ticket) scope.Cancel();
             return scope;
@@ -251,6 +259,31 @@ public sealed partial class WorkspaceControl : IDisposable
             frame is null ? "nothing to photograph" : $"{frame.PixelWidth}x{frame.PixelHeight}");
         return frame;
     }
+
+    /// <summary>
+    /// Gives a window that has just stopped answering a moment to finish before it is photographed.
+    /// An app is often busy for a beat right after a click while it switches views, and a picture
+    /// taken inside that beat shows its last frame instead of what the click did. Costs one ask when
+    /// everything answers; a window that is really hung costs this wait and is then drawn greyed.
+    /// </summary>
+    /// <param name="afterInput">
+    /// Right after input, the app may not have started the work the input asked for, and would
+    /// answer an ask made that instant only to go quiet a moment later. A short beat first lets the
+    /// work start - and lets the click's own repaint reach the picture.
+    /// </param>
+    internal async Task Settle(nint window, CancellationToken cancel, bool afterInput = false)
+    {
+        try
+        {
+            if (afterInput) await Task.Delay(InputBeatMilliseconds, cancel).ConfigureAwait(false);
+            long until = Environment.TickCount64 + SettleMilliseconds;
+            while (!_desktop.Answers(window) && Environment.TickCount64 < until)
+                await Task.Delay(100, cancel).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    const int SettleMilliseconds = 2000, InputBeatMilliseconds = 150;
 
     /// <summary>
     /// The workspace screen, or the last one it had. A capture is bounded now, so it can come back
@@ -325,9 +358,11 @@ public sealed partial class WorkspaceControl : IDisposable
         IReadOnlyList<WorkspaceElement> found = _tree.Read(subject.Handle, false);
         // A whole-screen picture is already in screen coordinates; one window's picture starts at
         // that window's corner, and the element rectangles are in screen coordinates either way.
+        // A window's picture starts where it visibly starts, inside its invisible border.
+        AgentWindow shows = AgentDesktop.Drawn(subject);
         return (found, window == 0
             ? new System.Windows.Point(0, 0)
-            : new System.Windows.Point(subject.X, subject.Y));
+            : new System.Windows.Point(shows.X, shows.Y));
     }
 
     /// <summary>Whatever text an element holds. The cheap way to read a document or a field.</summary>
@@ -721,14 +756,21 @@ public sealed partial class WorkspaceControl : IDisposable
     /// Layer 3. Starts the workspace's own Chrome on a page and attaches to it. The transport it
     /// ended up with is on <see cref="BrowserTransport"/> and in the log.
     /// </summary>
-    public async Task<bool> OpenBrowser(string url, CancellationToken cancel = default)
+    public async Task<bool> OpenBrowser(string url, CancellationToken cancel = default) =>
+        (await OpenBrowserWithReceipt(url, cancel).ConfigureAwait(false)).Confirmed;
+
+    // Keep the receipt local to this call. A shared "last error" can be replaced by a queued browse
+    // between releasing the browser gate and constructing the first agent's response.
+    internal async Task<(bool Confirmed, string? Failure)> OpenBrowserWithReceipt(string url,
+        CancellationToken cancel = default)
     {
-        if (!Allowed("browser", url, out long ticket)) return false;
+        if (!Allowed("browser", url, out long ticket))
+            return (false, "Browser operation refused [control]: this caller does not hold control of the workspace.");
         using var input = InputScope(ticket, cancel);
         // One browser per workspace, started once. Without this gate a browse racing the warm-up
         // starts a second Chrome, which then hands off to the first and cannot be attached to.
         try { await _browserGate.WaitAsync(input.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return RevokedBrowser(); }
         try
         {
         // A browser the owner closed, or whose DevTools connection dropped, is not one to keep
@@ -747,24 +789,29 @@ public sealed partial class WorkspaceControl : IDisposable
             // Navigate the existing session instead; never replay a failed/partial navigation.
             bool navigated;
             try { navigated = await existing.Go(url, input.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
-            if (cancel.IsCancellationRequested || Ticket != ticket) return false;
-            Note("browser", url, navigated ? "navigated over " + existing.Transport : "navigation not confirmed; inspect before continuing");
-            return navigated;
+            catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return RevokedBrowser(); }
+            if (cancel.IsCancellationRequested || Ticket != ticket) return RevokedBrowser();
+            string? failure = navigated ? null : WorkspaceBrowser.NavigationFailureReceipt(existing.LastProtocolError);
+            Note("browser", url, navigated ? "navigated over " + existing.Transport : failure!);
+            return (navigated, failure);
         }
         WorkspaceBrowser? started;
         try { started = await WorkspaceBrowser.Start(_desktop, url, true, input.Token, ticket).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
-        if (cancel.IsCancellationRequested || Ticket != ticket) { started?.Abandon(); return false; }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return RevokedBrowser(); }
+        if (cancel.IsCancellationRequested || Ticket != ticket) { started?.Abandon(); return RevokedBrowser(); }
         _browser = started;
         bool confirmed = _browser?.InitialNavigationConfirmed == true;
-        Note("browser", url, _browser is null ? "DID NOT COME UP" : confirmed
-            ? "attached over " + _browser.Transport
-            : "attached over " + _browser.Transport + "; navigation not confirmed; inspect before continuing");
-        return confirmed;
+        string? receipt = confirmed ? null : _browser is null
+            ? WorkspaceBrowser.StartupFailureReceipt(_desktop.Name)
+            : WorkspaceBrowser.NavigationFailureReceipt(_browser.LastProtocolError);
+        Note("browser", url, confirmed ? "attached over " + _browser!.Transport : receipt!);
+        return (confirmed, receipt);
         }
         finally { _browserGate.Release(); }
     }
+
+    static (bool Confirmed, string? Failure) RevokedBrowser() =>
+        (false, "Browser operation stopped [control]: control was released or changed. Inspect the workspace before continuing.");
 
     readonly SemaphoreSlim _browserGate = new(1, 1);
 
@@ -789,7 +836,11 @@ public sealed partial class WorkspaceControl : IDisposable
                 || !File.Exists(Path.Combine(home, WorkspaceBrowser.UsedMark))) return;
             WorkspaceBrowser? started = await WorkspaceBrowser
                 .Start(_desktop, "about:blank", true, cancel, 0).ConfigureAwait(false);
-            if (started is null) { _evidence.Note("browser", "warm-up", "did not come up; browse will start it"); return; }
+            if (started is null)
+            {
+                _evidence.Note("browser", "warm-up", WorkspaceBrowser.StartupFailureReceipt(_desktop.Name));
+                return;
+            }
             if (_disposed || cancel.IsCancellationRequested) { started.Abandon(); return; }
             _browser = started;
             _evidence.Note("browser", "warm-up", "ready over " + started.Transport + "; browse will not pay the cold start");
@@ -844,6 +895,36 @@ public sealed partial class WorkspaceControl : IDisposable
 
     /// <summary>Whether the workspace browser is up and its connection still usable.</summary>
     public bool BrowserAlive => _browser is { Alive: true };
+
+    /// <summary>The workspace browser's own process, whose windows are pages; 0 while there is none.</summary>
+    internal int BrowserProcessId => _browser is { Alive: true } browser ? browser.ProcessId : 0;
+
+    // What the owner did that an agent would otherwise find out by surprise - he took one of its
+    // windows out onto his own desktop - handed to each connected agent with its next tool reply.
+    readonly List<(long Number, string Text)> _notes = [];
+    long _lastNote;
+
+    internal void TellAgents(string text)
+    {
+        lock (_notes)
+        {
+            _notes.Add((++_lastNote, text));
+            if (_notes.Count > 8) _notes.RemoveAt(0);
+        }
+    }
+
+    /// <summary>Where the notes stand now: a connection starts here and hears only what comes after.</summary>
+    internal long NoteMark { get { lock (_notes) return _lastNote; } }
+
+    internal IReadOnlyList<string> NotesSince(ref long seen)
+    {
+        lock (_notes)
+        {
+            long after = seen;
+            seen = _lastNote;
+            return [.. _notes.Where(note => note.Number > after).Select(note => note.Text)];
+        }
+    }
 
     /// <summary>The browser itself, for the measurement probes only.</summary>
     internal WorkspaceBrowser? Browser => _browser;
@@ -984,9 +1065,15 @@ public sealed partial class WorkspaceControl : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        lock (_gate) { _inputStop.Cancel(); _inputStop.Dispose(); }
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _agentLease = 0;
+            Became(Driver.Nobody);
+            _inputStop.Cancel();
+            _inputStop.Dispose();
+        }
         Wake("the workspace closed");
         _commands.Dispose();
         _desktop.Pulled -= Pulled;

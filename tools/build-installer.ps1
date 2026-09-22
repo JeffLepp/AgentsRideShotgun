@@ -33,7 +33,10 @@ $staging = Join-Path $root ('artifacts\installer-staging\' + [DateTime]::UtcNow.
 
 # The install id is not "Deskweave" on purpose: Velopack installs to %LOCALAPPDATA%\<id> and its
 # uninstall deletes that whole folder, while the owner's workspaces live in %LOCALAPPDATA%\Deskweave.
-& vpk pack --packId DeskweaveApp --packVersion $Version --packDir $payload --runtime win10.0.14393-x64 `
+# A technical floor for this private candidate, matching its oldest observed test guest.
+# Edition/lifecycle support is narrower and is stated in LAUNCH.md; a build number cannot encode it.
+$packageRuntime = 'win10.0.19041-x64'
+& vpk pack --packId DeskweaveApp --packVersion $Version --packDir $payload --runtime $packageRuntime `
     --packTitle Deskweave --packAuthors 'Jefferson Kline' --mainExe Deskweave.exe `
     --icon (Join-Path $root 'app\Assets\Deskweave.ico') --shortcuts StartMenuRoot `
     --outputDir $staging --noPortable --skip-updates
@@ -43,7 +46,7 @@ if (-not $built) { throw 'vpk reported success but produced no Setup.exe.' }
 # The name a person downloads. The update feed names the package, not this file.
 $setup = Move-Item -LiteralPath $built.FullName -Destination (Join-Path $staging 'Deskweave-Setup.exe') -PassThru
 $manifest = [ordered]@{
-    version = $Version; runtime = 'win10.0.14393-x64'; velopack = $sdkVersion; builtAt = [DateTimeOffset]::UtcNow.ToString('o')
+    version = $Version; runtime = $packageRuntime; velopack = $sdkVersion; builtAt = [DateTimeOffset]::UtcNow.ToString('o')
     installerSha256 = (Get-FileHash -LiteralPath $setup.FullName).Hash
     signature = [string](Get-AuthenticodeSignature -LiteralPath $setup.FullName).Status
     appSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'Deskweave.dll')).Hash

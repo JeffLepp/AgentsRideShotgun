@@ -51,20 +51,29 @@ public partial class SettingsView : UserControl
     // just because Page.Content moved on to a different tree - Page itself, and this view, stay
     // loaded throughout, so nothing here is ever disconnected from a live PresentationSource.
     readonly List<Action> _cleanup = [];
+    readonly bool _card;
     bool _listening;
     // True while controls are being set from the store, so they do not write it back.
     bool _following;
 
-    public SettingsView()
+    public SettingsView() : this(card: false) { }
+
+    /// <summary>With <paramref name="card"/>, the hub's narrow card: a home page of quick tiles and
+    /// categories, each page sliding in over it (SettingsView.Card.cs).</summary>
+    public SettingsView(bool card)
     {
+        _card = card;
         InitializeComponent();
+        if (card) BuildCard();
         // Bubbling, so an open dropdown or a shortcut being recorded takes Escape first.
         AddHandler(KeyDownEvent, new KeyEventHandler(EscapeGoesBack));
         Loaded += (_, _) => { Listen(true); Follow(AppSettingsStore.Current); };
         Unloaded += (_, _) => Listen(false);
+        IsVisibleChanged += (_, _) => { if (IsVisible) Follow(AppSettingsStore.Current); };
         // The host can focus the view itself; the chosen category takes it from there.
         GotKeyboardFocus += (_, e) => { if (ReferenceEquals(e.NewFocus, this)) Selected()?.Focus(); };
         Show("general");
+        if (card) ShowCardHome(animate: false);
     }
 
     /// <summary>"Workspaces" at the top of the list was chosen, or Escape pressed.</summary>
@@ -111,7 +120,8 @@ public partial class SettingsView : UserControl
         Page.Content = Build(id);
         Follow(AppSettingsStore.Current);
         Scroller.ScrollToTop();
-        if (IsLoaded && SystemParameters.ClientAreaAnimation)
+        if (_card) SlidePageIn();
+        else if (IsLoaded && SystemParameters.ClientAreaAnimation)
             Page.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150)));
     }
 
@@ -134,7 +144,14 @@ public partial class SettingsView : UserControl
     {
         if (e.Key != Key.Escape) return;
         e.Handled = true;
-        BackRequested?.Invoke();
+        GoBack();
+    }
+
+    /// <summary>One step back: in the card, from a page to the card's home; otherwise out of Settings.</summary>
+    internal void GoBack()
+    {
+        if (_card && !AtCardHome) ShowCardHome(animate: true);
+        else BackRequested?.Invoke();
     }
 
     /// <summary>Arrow keys, Home and End move the choice inside a group of radio buttons, as in Windows.</summary>
@@ -178,6 +195,7 @@ public partial class SettingsView : UserControl
         {
             foreach (Bound bound in _bound) bound.Show(settings);
             foreach (Action<AppSettings> follower in _followers) follower(settings);
+            if (_card) RefreshCardHome(settings);
         }
         finally { _following = false; }
     }

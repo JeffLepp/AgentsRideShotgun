@@ -1,18 +1,28 @@
 param(
     [string]$InstallerPath = 'C:\Users\WDAGUtilityAccount\Desktop\installer\Deskweave-Setup.exe',
     [string]$OutputDirectory = 'C:\Users\WDAGUtilityAccount\Desktop\results',
-    [switch]$VirtualMachine
+    [switch]$VirtualMachine,
+    [switch]$PreserveExistingCodexConfiguration
 )
 # Runs inside Windows Sandbox (Windows PowerShell 5.1) as a brand-new user: nothing installed, no
 # Claude Code, no Codex, no Chrome. Installs Deskweave from the mapped installer folder, checks
 # first launch, the bridge starting the app for an agent, a workspace browser with only Edge,
 # then uninstalls and checks what is left. Writes everything to the mapped results folder.
+# VM mode also supports a fresh Deskweave install in an existing Windows profile;
+# opt-in Codex preservation compares config hashes without reading credentials.
 $ErrorActionPreference = 'Stop'
 if ($VirtualMachine) {
     $machine = Get-CimInstance Win32_ComputerSystem
     if ($machine.Model -notmatch 'VirtualBox|Virtual Machine|VMware') { throw 'The VM check can only install inside a virtual machine.' }
+    foreach ($fixturePath in @('.claude.json', '.local\bin\claude.exe')) {
+        if (Test-Path -LiteralPath (Join-Path $env:USERPROFILE $fixturePath)) { throw 'Existing Claude configuration/executable would conflict with the uninstall fixture.' }
+    }
 }
 elseif ($env:USERNAME -ne 'WDAGUtilityAccount') { throw 'Run this script inside Windows Sandbox, never on the host.' }
+if ($PreserveExistingCodexConfiguration -and -not $VirtualMachine) { throw 'Existing-provider preservation is only for the VM gate.' }
+$codexConfiguration = Join-Path $env:USERPROFILE '.codex\config.toml'
+$codexConfigurationBefore = if (Test-Path -LiteralPath $codexConfiguration) { (Get-FileHash -LiteralPath $codexConfiguration).Hash } else { $null }
+if ($codexConfigurationBefore -and -not $PreserveExistingCodexConfiguration) { throw 'This gate requires a fresh Codex configuration or explicit VM preservation mode.' }
 $results = [IO.Path]::GetFullPath($OutputDirectory)
 $installer = [IO.Path]::GetFullPath($InstallerPath)
 $previousInstaller = Join-Path (Split-Path -Parent $installer) 'Deskweave-Previous-Setup.exe'
@@ -24,6 +34,7 @@ $report = [ordered]@{ observedAt = (Get-Date).ToString('o'); os = [Environment]:
 $windowsVersion = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
 $report.windows = [ordered]@{
     productName = $windowsVersion.ProductName
+    caption = (Get-CimInstance Win32_OperatingSystem).Caption
     displayVersion = $windowsVersion.DisplayVersion
     build = $windowsVersion.CurrentBuildNumber
     revision = $windowsVersion.UBR
@@ -96,13 +107,18 @@ try {
     $started = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30
     if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
     Check $started 'Deskweave starts after install'
-    Start-Sleep -Seconds 6
+    $clock.Restart()
+    $firstWindowReady = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle }).Count -gt 0 } 60
+    $report.firstWindowWaitSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
     Shot 'first-launch'
     $windows = @(Get-Process Deskweave | Where-Object { $_.MainWindowTitle } | ForEach-Object { $_.MainWindowTitle })
     $report.firstLaunchWindows = $windows
-    Check ($windows.Count -ge 1) 'First launch shows a window on a fresh PC'
+    Check ($firstWindowReady -and $windows.Count -ge 1) 'First launch shows a window on a fresh PC within 60 seconds'
     Check (-not (Test-Path (Join-Path $env:USERPROFILE '.claude.json'))) 'Unanswered first launch creates no Claude configuration'
-    Check (-not (Test-Path (Join-Path $env:USERPROFILE '.codex\config.toml'))) 'Unanswered first launch creates no Codex configuration'
+    if ($codexConfigurationBefore) {
+        Check ((Test-Path -LiteralPath $codexConfiguration) -and (Get-FileHash -LiteralPath $codexConfiguration).Hash -eq $codexConfigurationBefore) 'Unanswered first launch preserves the existing Codex configuration byte for byte'
+    }
+    else { Check (-not (Test-Path -LiteralPath $codexConfiguration)) 'Unanswered first launch creates no Codex configuration' }
     Get-Process Deskweave | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
 
     if ($initialInstaller -ne $installer) {
@@ -222,6 +238,9 @@ public static class InstallerProviderFixture {
     Check ($null -eq $providerAfter.mcpServers.deskweave) 'Uninstall removes its owned MCP entry through the provider command'
     Check ($providerAfter.retainedPreference -eq 'keep' -and $providerAfter.mcpServers.another_server.command -eq 'unrelated.exe') 'Uninstall preserves unrelated provider settings and MCP entries'
     Check ($null -eq (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).Deskweave) 'Nothing is left starting with Windows'
+    if ($codexConfigurationBefore) {
+        Check ((Test-Path -LiteralPath $codexConfiguration) -and (Get-FileHash -LiteralPath $codexConfiguration).Hash -eq $codexConfigurationBefore) 'The complete install, workspace and uninstall sequence preserves the existing Codex configuration byte for byte'
+    }
 }
 catch { $failure = $_.ToString() }
 finally {

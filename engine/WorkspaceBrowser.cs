@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Net.WebSockets;
@@ -236,15 +237,11 @@ public sealed partial class WorkspaceBrowser : IDisposable
             .ConfigureAwait(false);
         if (port is null && !cancel.IsCancellationRequested)
         {
-            // Measured 2026-09-21: under three workspaces cold-starting Chrome at once - the
-            // product's own design point - TryPort lost this race outright, twice in a row during
-            // a full gate run, while the same measurement in isolation never failed in three runs.
-            // Nothing here is actually broken; the budget below is simply sized for a machine that
-            // is not also running two other Chrome launches. TryPort's own cleanup (in its finally
-            // block below) already stopped the half-started process and waited out its profile
-            // lock before returning null, so this is a clean second attempt, not a second process
-            // racing the first one. One retry here replaces what every caller under load was
-            // already doing by hand (SleepGate.Navigate, the owner just calling `browse` again).
+            // One bounded retry after TryPort has stopped its unsuccessful launch. A retry is
+            // recovery, not evidence that the original failure was harmless or caused by load.
+            // Keep the failed stage visible if this attempt also fails. The earlier SleepGate
+            // failures were traced to that fixture's idle retirement, not a measured browser
+            // startup requirement; real installed-app startup still needs its own evidence.
             port = await TryPort(desktop, common, profile, url, cancel, lease, attempt: 2).ConfigureAwait(false);
         }
         return port is null ? null : await NavigateStarted(port, url, cancel).ConfigureAwait(false);
@@ -255,6 +252,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
     {
         try
         {
+            await browser.CloseLeftovers(cancel).ConfigureAwait(false);
             browser.InitialNavigationConfirmed = await browser.Go(url, cancel).ConfigureAwait(false);
             // A warm-up start is for later, not for now. Leaving it in front put Chrome over the
             // window the agent had just opened, so the next look photographed an empty browser and
@@ -274,33 +272,64 @@ public sealed partial class WorkspaceBrowser : IDisposable
     }
 
     /// <summary>
-    /// Measured 2026-08-23 on Chrome 139 and Windows 10 19045: this does not come up. Chromium on
-    /// Windows does not read its DevTools pipe from the standard handles, so nothing ever answers.
-    /// Kept, because it costs three seconds to ask and it is the transport that collides with
-    /// nothing; if a Chromium release starts answering, the product silently stops binding a port.
+    /// Chromium on Windows adopts raw inherited HANDLE values named by remote-debugging-io-pipes;
+    /// its CRT descriptors 3/4 are not populated by assigning standard input/output. Keep CDP
+    /// separate from stdout/stderr, then give startup the same attachment budget as the port route.
     /// </summary>
     static async Task<WorkspaceBrowser?> TryPipe(AgentDesktop desktop, string common, string url,
         CancellationToken cancel, long lease)
     {
         var toChrome = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
         var fromChrome = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
-        int pid = desktop.LaunchBrowser(ChromePath, common + "--remote-debugging-pipe " + Quote(url),
-            (toChrome.ClientSafePipeHandle.DangerousGetHandle(),
-             fromChrome.ClientSafePipeHandle.DangerousGetHandle()), lease);
-        // The child owns its ends now. Holding them open would keep our reader from ever seeing EOF.
-        toChrome.DisposeLocalCopyOfClientHandle();
-        fromChrome.DisposeLocalCopyOfClientHandle();
-        if (pid == 0) { toChrome.Dispose(); fromChrome.Dispose(); return null; }
-
-        var browser = new WorkspaceBrowser(desktop, "pipe", pid, toChrome, fromChrome);
-        // Chrome was started on this address, so nothing calls Go for it.
-        if (!Blank(url)) browser.HasContent = true;
-        if (await browser.Attach(cancel, TimeSpan.FromSeconds(3)).ConfigureAwait(false)) return browser;
-        browser.Dispose();
-        // This Chrome holds the workspace's profile. Leaving it would make the port attempt hand off
-        // to it and exit, and the port file would belong to a browser with no debugging port at all.
-        Stop(pid);
-        return null;
+        WorkspaceBrowser? browser = null;
+        int pid = 0;
+        bool attached = false;
+        try
+        {
+            nint read = toChrome.ClientSafePipeHandle.DangerousGetHandle();
+            nint write = fromChrome.ClientSafePipeHandle.DangerousGetHandle();
+            // Chromium's AdoptPipes parses uint32 decimal values (HANDLE values are valid when
+            // transferred as 32 bits between Windows processes). Read first, then write.
+            string ioPipes = unchecked((uint)(nuint)read).ToString(CultureInfo.InvariantCulture) + ","
+                + unchecked((uint)(nuint)write).ToString(CultureInfo.InvariantCulture);
+            cancel.ThrowIfCancellationRequested();
+            pid = desktop.LaunchBrowser(ChromePath,
+                common + "--remote-debugging-pipe --remote-debugging-io-pipes=" + ioPipes + " " + Quote(url),
+                (read, write), lease);
+            // Only the child keeps its client ends. Parent copies would keep the reader from EOF.
+            toChrome.DisposeLocalCopyOfClientHandle();
+            fromChrome.DisposeLocalCopyOfClientHandle();
+            if (pid == 0)
+            {
+                Record(desktop.Name, "pipe launch: the browser process itself would not launch");
+                return null;
+            }
+            browser = new WorkspaceBrowser(desktop, "pipe", pid, toChrome, fromChrome);
+            if (!Blank(url)) browser.HasContent = true;
+            if (await browser.Attach(cancel, TimeSpan.FromSeconds(20)).ConfigureAwait(false))
+            {
+                cancel.ThrowIfCancellationRequested();
+                attached = true;
+                _startFailures.TryRemove(desktop.Name, out _);
+                return browser;
+            }
+            cancel.ThrowIfCancellationRequested();
+            Record(desktop.Name, "pipe attachment: no page attached within 20s; "
+                + ProtocolFailureSummary(browser.LastProtocolError));
+            return null;
+        }
+        finally
+        {
+            if (!attached)
+            {
+                browser?.Dispose();
+                toChrome.Dispose();
+                fromChrome.Dispose();
+                // Preserve a successfully returned browser. A failed/cancelled attempt must release
+                // its profile before an explicit port fallback, and can stop only its workspace job.
+                if (pid > 0 && desktop.OwnsProcess(pid)) Stop(pid);
+            }
+        }
     }
 
     static void Stop(int pid)
@@ -377,7 +406,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
             catch (Exception ex) when (ex is WebSocketException or OperationCanceledException)
             {
                 socket.Dispose();
-                Record(desktop.Name, $"attempt {attempt}: DevToolsActivePort named port {port} but the WebSocket handshake failed: {ex.Message}");
+                Record(desktop.Name, $"attempt {attempt}: the DevTools WebSocket handshake failed ({ex.GetType().Name})");
                 return null;
             }
             browser = new WorkspaceBrowser(desktop, $"loopback port {port}", pid, socket: socket);
@@ -387,7 +416,8 @@ public sealed partial class WorkspaceBrowser : IDisposable
                 _startFailures.TryRemove(desktop.Name, out _);
                 return browser;
             }
-            Record(desktop.Name, $"attempt {attempt}: connected to DevTools on port {port} but no page attached within the budget");
+            Record(desktop.Name, $"attempt {attempt}: connected to DevTools but no page attached within 20s; "
+                + ProtocolFailureSummary(browser.LastProtocolError));
             return null;
         }
         finally
@@ -431,6 +461,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
     /// <summary>Sends the browser to a page and waits for it to finish loading.</summary>
     public async Task<bool> Go(string url, CancellationToken cancel = default)
     {
+        LastProtocolError = null;
         await Follow(cancel).ConfigureAwait(false);
         // A failed or cancelled navigation can still put partial page content on screen.
         if (!Blank(url))
@@ -445,13 +476,27 @@ public sealed partial class WorkspaceBrowser : IDisposable
         }
         JsonNode? sent = await Call("Page.navigate", new JsonObject { ["url"] = url }, cancel, _session)
             .ConfigureAwait(false);
-        if (sent is null || sent["errorText"]?.GetValue<string>() is { Length: > 0 }
-            || sent["isDownload"]?.GetValue<bool>() == true) return false;
+        if (sent is null) return false;
+        if (sent["errorText"]?.GetValue<string>() is { Length: > 0 } rejected)
+        {
+            LastProtocolError = rejected;
+            return false;
+        }
+        if (sent["isDownload"]?.GetValue<bool>() == true)
+        {
+            LastProtocolError = "The navigation became a download.";
+            return false;
+        }
         for (int wait = 0; wait < 40; wait++)
         {
             await Task.Delay(250, cancel).ConfigureAwait(false);
-            if (await Evaluate("document.readyState", cancel).ConfigureAwait(false) == "complete") return true;
+            if (await Evaluate("document.readyState", cancel).ConfigureAwait(false) == "complete")
+            {
+                LastProtocolError = null;
+                return true;
+            }
         }
+        LastProtocolError ??= "The page did not finish loading within the wait budget.";
         return false;
     }
 
@@ -459,17 +504,39 @@ public sealed partial class WorkspaceBrowser : IDisposable
     /// The page as an agent should see it: its text, and the things on it that can be acted on.
     /// This is the whole reason layer 3 exists - measured 2026-08-23, Chrome's element tree
     /// published 42 elements for a page whose text is right here.
+    ///
+    /// Each control leads with a selector that matches it and nothing else, so it can go straight
+    /// into page click or type. A bare `a "Today"` left an agent to invent one (2026-09-22). Built
+    /// from what the page already has - an id, a distinctive attribute, else its place in the
+    /// tree - without marking the page, which is the app being tested.
     /// </summary>
     public Task<string> Read(int limit = 20000, CancellationToken cancel = default) => Evaluate($$"""
         (() => {
+          const one = sel => { try { return document.querySelectorAll(sel).length === 1; } catch { return false; } };
+          const quote = v => '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+          const pick = el => {
+            const tag = el.tagName.toLowerCase();
+            if (el.id && one('#' + CSS.escape(el.id))) return '#' + CSS.escape(el.id);
+            for (const name of ['name', 'href', 'aria-label', 'placeholder', 'type', 'value', 'title']) {
+              const v = el.getAttribute(name);
+              if (v && v.length <= 100 && one(tag + '[' + name + '=' + quote(v) + ']')) return tag + '[' + name + '=' + quote(v) + ']';
+            }
+            let path = '';
+            for (let node = el; node && node.nodeType === 1 && node !== document.body; node = node.parentElement) {
+              if (node !== el && node.id && one('#' + CSS.escape(node.id))) return '#' + CSS.escape(node.id) + ' > ' + path;
+              const kin = node.parentElement ? [...node.parentElement.children].filter(c => c.tagName === node.tagName) : [node];
+              const part = node.tagName.toLowerCase() + (kin.length > 1 ? ':nth-of-type(' + (kin.indexOf(node) + 1) + ')' : '');
+              path = path ? part + ' > ' + path : part;
+            }
+            return 'body > ' + path;
+          };
           const seen = [];
           for (const el of document.querySelectorAll('a[href],button,input,textarea,select,[role=button]')) {
             const box = el.getBoundingClientRect();
             if (box.width === 0 || box.height === 0) continue;
             const what = (el.innerText || el.value || el.placeholder || el.name ||
-                          el.getAttribute('aria-label') || '').trim().slice(0, 80);
-            seen.push(el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + ' "' + what + '"' +
-                      (el.href ? ' -> ' + el.href : ''));
+                          el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+            seen.push(pick(el) + '  "' + what + '"' + (el.href ? ' -> ' + el.href : ''));
             if (seen.length > 200) break;
           }
           return document.title + '\n' + location.href + '\n\n' +
@@ -589,6 +656,9 @@ public sealed partial class WorkspaceBrowser : IDisposable
         catch (Exception ex) when (ex is IOException or WebSocketException or ObjectDisposedException
             or OperationCanceledException or InvalidOperationException)
         {
+            if (ex is OperationCanceledException && !cancel.IsCancellationRequested
+                && !_stopping.IsCancellationRequested)
+                LastProtocolError = "The DevTools command timed out.";
             lock (_gate) _waiting.Remove(id);
             return null;
         }

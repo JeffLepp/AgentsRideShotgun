@@ -112,7 +112,9 @@ internal sealed class TrayIcon : IDisposable
             handled = true;
             switch ((int)((long)lParam & 0xffff))
             {
+                case 0x202: // WM_LBUTTONUP: single-click fallback for older shell callbacks
                 case 0x203: // WM_LBUTTONDBLCLK: preserve the existing double-click action
+                case 0x400: // NIN_SELECT: ordinary activation with NOTIFYICON_VERSION_4
                 case 0x401: // NIN_KEYSELECT: Enter/Space from the notification area
                     OpenRequested?.Invoke();
                     break;

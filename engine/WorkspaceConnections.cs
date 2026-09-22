@@ -40,6 +40,57 @@ internal static class WorkspaceConnections
 
     internal static string DisplayName(AgentApp app) => app == AgentApp.ClaudeCode ? "Claude Code" : "Codex";
 
+    /// <summary>A configuration target, never a provider login or an inferred account identity.</summary>
+    internal sealed record AgentProfile(AgentApp App, string Name, string? Root, string Configuration, string? Launcher = null);
+
+    // A seam keeps numbered owner profiles out of isolated connection probes.
+    internal static Func<AgentApp, IReadOnlyList<AgentProfile>> Profiles = FindProfiles;
+
+    internal static (int Connected, int Total) ProfileCounts(AgentApp app)
+    {
+        IReadOnlyList<AgentProfile> profiles = Profiles(app);
+        return (profiles.Count(profile => ReadEntry(profile) == Entry.Current), profiles.Count);
+    }
+
+    static IReadOnlyList<AgentProfile> FindProfiles(AgentApp app) => FindProfiles(app,
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        Environment.GetEnvironmentVariable(app == AgentApp.ClaudeCode ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"));
+
+    internal static IReadOnlyList<AgentProfile> FindProfiles(AgentApp app, string user, string? effective)
+    {
+        bool claude = app == AgentApp.ClaudeCode;
+        string folder = claude ? ".claude" : ".codex";
+        string file = claude ? ".claude.json" : "config.toml";
+        List<AgentProfile> profiles = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        void Add(string name, string? root, string configuration, string? launcher = null)
+        {
+            try
+            {
+                configuration = Path.GetFullPath(configuration);
+                if (seen.Add(configuration)) profiles.Add(new(app, name, root is null ? null : Path.GetFullPath(root), configuration, launcher));
+                else if (launcher is not null)
+                {
+                    int index = profiles.FindIndex(profile => string.Equals(profile.Configuration, configuration, StringComparison.OrdinalIgnoreCase));
+                    if (index >= 0) profiles[index] = profiles[index] with { Launcher = launcher };
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { }
+        }
+        Add("Default", null, claude ? Path.Combine(user, file) : Path.Combine(user, folder, file));
+        if (!string.IsNullOrWhiteSpace(effective))
+            Add("Current profile", effective, Path.Combine(effective, file));
+        // Only the named local convention is discovered. No recursion, directory sweep, auth
+        // files or new empty profiles: custom locations remain the owner's explicit MCP setup.
+        for (int number = 1; number <= 9; number++)
+        {
+            string root = Path.Combine(user, folder + number);
+            string configuration = Path.Combine(root, file);
+            if (File.Exists(configuration)) Add("Profile " + number, root, configuration, (claude ? "claude" : "codex") + number);
+        }
+        return profiles;
+    }
+
     /// <summary>Where an agent app's own command lives, or null when it is not on this PC. A seam so
     /// the probes can point it at a stub and never reach the owner's real installation. Everything
     /// that asks where an agent is asks through here, and putting a stub in place forgets what
@@ -64,65 +115,37 @@ internal static class WorkspaceConnections
 
     /// <summary>Whether the app's own configuration has a working Deskweave entry in it. A field for
     /// the same reason <see cref="Locate"/> is one: first launch, Settings and <see cref="KeepUp"/> all
-    /// read through it, so a probe answers for every one of them at once. The default reads the file,
-    /// never writes it, and falls back on what the app's own command <see cref="Shows"/> a connect,
-    /// for the PC where the file it reads is not the file the agent writes.</summary>
-    internal static Func<AgentApp, bool> IsConnected = app => ReadEntry(app) == Entry.Current || Vouched(app);
+    /// read through it, so a probe answers for every one of them at once. Only the intended
+    /// profiles' own files can establish a connection; a wrapper's other root cannot vouch for it.</summary>
+    internal static Func<AgentApp, bool> IsConnected = app => ProfileCounts(app) is var counts && counts.Total > 0 && counts.Connected == counts.Total;
 
     /// <summary>Whether the app's configuration has anything under Deskweave's name, working or not.</summary>
-    internal static bool HasEntry(AgentApp app) => ReadEntry(app) != Entry.None;
-
-    /// <summary>
-    /// The agents whose own command showed Deskweave's entry in place after a connect. Only
-    /// <see cref="Change"/> writes it, and a disconnect takes it back, so nothing here ever claims
-    /// a connection that was not just made or is no longer wanted.
-    ///
-    /// It is what keeps the cheap readers cheap. <see cref="Shows"/> costs a process, which is
-    /// fine once after a write and out of the question on every Settings render, so its answer is
-    /// kept for the rest of the run: without it, a PC where the file read looks in the wrong place
-    /// would show "Found on this PC" in Settings forever and have <see cref="KeepUp"/> connecting
-    /// an already-connected agent every ten minutes until the app closes.
-    /// </summary>
-    static bool Vouched(AgentApp app)
-    {
-        lock (Vouches) return _vouched.Contains(app);
-    }
-
-    static void Vouch(AgentApp app, bool shown)
-    {
-        lock (Vouches)
-            if (shown) _vouched.Add(app);
-            else _vouched.Remove(app);
-    }
-
-    static readonly Lock Vouches = new();
-    static readonly HashSet<AgentApp> _vouched = [];
+    internal static bool HasEntry(AgentApp app) => Profiles(app).Any(profile => ReadEntry(profile) != Entry.None);
 
     /// <summary>
     /// What an agent app's configuration holds under Deskweave's name. Stale is an entry that runs
     /// some other bridge or ticket: an older install, a moved folder, a test build. Counting one as
     /// connected left the agent pointed at a pipe nobody serves, with nothing ever replacing it.
     /// </summary>
-    internal enum Entry { None, Current, Stale }
+    internal enum Entry { None, Current, Stale, Disabled, Unreadable }
 
-    static Entry ReadEntry(AgentApp app)
+    static Entry ReadEntry(AgentProfile target, bool ignoreDisabled = false)
     {
-        string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         try
         {
-            if (app == AgentApp.Codex)
+            if (target.App == AgentApp.Codex)
             {
-                string codex = Path.Combine(Environment.GetEnvironmentVariable("CODEX_HOME") is { Length: > 0 } home
-                    ? home : Path.Combine(profile, ".codex"), "config.toml");
+                string codex = target.Configuration;
                 if (!File.Exists(codex)) return Entry.None;
                 var table = new StringBuilder();
                 bool inside = false, found = false;
                 foreach (string line in File.ReadLines(codex))
                 {
                     string trimmed = line.Trim();
-                    if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+                    if (trimmed.StartsWith('[') && trimmed.IndexOf(']') is >= 0 and var end)
                     {
-                        inside = trimmed is "[mcp_servers.deskweave]" or "[mcp_servers.\"deskweave\"]";
+                        string header = trimmed[..(end + 1)];
+                        inside = header is "[mcp_servers.deskweave]" or "[mcp_servers.\"deskweave\"]" or "[mcp_servers.'deskweave']";
                         found |= inside;
                         continue;
                     }
@@ -130,13 +153,18 @@ internal static class WorkspaceConnections
                 }
                 if (!found) return Entry.None;
                 string text = table.ToString();
+                // A provider-side off switch is owner intent, even if this bridge has moved.
+                // Only this table's boolean counts: an env key or another server's flag does not.
+                if (!ignoreDisabled && System.Text.RegularExpressions.Regex.IsMatch(text,
+                    "(?m)^[ \\t]*(?:enabled|\"enabled\"|'enabled')[ \\t]*=[ \\t]*false[ \\t]*(?:#[^\\r\\n]*)?\\r?$"))
+                    return Entry.Disabled;
                 return Runs(TomlStrings(text, "command").FirstOrDefault(), TomlStrings(text, "args")) ? Entry.Current : Entry.Stale;
             }
-            string claude = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } folder
-                ? Path.Combine(folder, ".claude.json") : Path.Combine(profile, ".claude.json");
+            string claude = target.Configuration;
             if (!File.Exists(claude)) return Entry.None;
             using var stream = File.OpenRead(claude);
             using var document = JsonDocument.Parse(stream);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return Entry.Unreadable;
             if (!document.RootElement.TryGetProperty("mcpServers", out JsonElement servers)
                 || servers.ValueKind != JsonValueKind.Object || !servers.TryGetProperty(AppName, out JsonElement entry)) return Entry.None;
             string? command = entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("command", out JsonElement c)
@@ -146,7 +174,7 @@ internal static class WorkspaceConnections
                 ? [.. a.EnumerateArray().Select(arg => arg.ValueKind == JsonValueKind.String ? arg.GetString() ?? "" : "")] : [];
             return Runs(command, args) ? Entry.Current : Entry.Stale;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return Entry.None; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { return Entry.Unreadable; }
     }
 
     /// <summary>Whether an entry runs this Deskweave's bridge against its one router ticket.</summary>
@@ -209,123 +237,94 @@ internal static class WorkspaceConnections
     /// loop all come through here. No model runs and nothing else in the configuration moves.
     /// </summary>
     internal static Func<AgentApp, bool, CancellationToken, Task<string?>> SetConnected = Change;
+    static readonly SemaphoreSlim[] Changes = [new(1, 1), new(1, 1)];
+    static readonly AsyncLocal<bool> AutomaticChange = new();
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<AgentApp, string> Failures = new();
+    internal static string? LastFailure(AgentApp app) => Failures.GetValueOrDefault(app);
+
+    static string? RememberResult(AgentApp app, string? why)
+    {
+        if (why is null) Failures.TryRemove(app, out _);
+        else { Failures[app] = why; Trace.TraceWarning("Deskweave connection: {0}", why); }
+        return why;
+    }
 
     static async Task<string?> Change(AgentApp app, bool connect, CancellationToken cancel)
     {
-        string name = DisplayName(app);
         string? cli = Locate(app);
-        if (cli is null) return name + " isn't installed on this PC.";
-        if (connect && !File.Exists(Bridge)) return "Deskweave's workspace bridge is missing. Reinstall Deskweave.";
-        string[] scope = app == AgentApp.ClaudeCode ? ["--scope", "user"] : [];
+        if (cli is null) return RememberResult(app, DisplayName(app) + " isn't installed on this PC.");
+        if (connect && !File.Exists(Bridge)) return RememberResult(app, "Deskweave's workspace bridge is missing. Reinstall Deskweave.");
         using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         bound.CancelAfter(TimeSpan.FromSeconds(30));
+        bool automatic = AutomaticChange.Value;
+        bool Permitted() => !connect || !TurnedOff(app) && (!automatic || AppSettingsStore.Current.ConnectAgents);
+        List<string> failures = [];
+        SemaphoreSlim gate = Changes[(int)app];
+        bool entered = false;
+        try
+        {
+            await gate.WaitAsync(bound.Token).ConfigureAwait(false);
+            entered = true;
+            foreach (AgentProfile profile in Profiles(app))
+            {
+                if (!Permitted()) break;
+                if (automatic && ReadEntry(profile) is Entry.Current or Entry.Disabled) continue;
+                try
+                {
+                    // A numbered launcher can honor its root when the default wrapper clears it.
+                    string command = ProfileCommand(profile, cli);
+                    if (await ChangeProfile(profile, command, connect, bound.Token, Permitted).ConfigureAwait(false) is { } why) failures.Add(why);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+                { failures.Add(DisplayName(app) + " (" + profile.Name + ") could not update its connection: " + ex.Message); }
+            }
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        { failures.Add(DisplayName(app) + " connection changes timed out. Try again in Settings."); }
+        finally { if (entered) gate.Release(); }
+        return RememberResult(app, failures.Count == 0 ? null : string.Join(" ", failures));
+    }
+
+    static string ProfileCommand(AgentProfile profile, string fallback)
+    {
+        // A test's Locate seam is authoritative. Real profile writes prefer the provider's native
+        // CLI because user launcher wrappers can clear/replace scoped configuration variables.
+        if (_locate != (Func<AgentApp, string?>)Discover) return fallback;
+        string user = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string? native = profile.App == AgentApp.ClaudeCode
+            ? Existing(Path.Combine(user, ".local", "bin", "claude.exe"))
+            : Existing(Path.Combine(user, ".local", "bin", "codex.exe")) ?? Packaged();
+        return native ?? (profile.Launcher is { } alias ? Command(alias) : null) ?? fallback;
+    }
+
+    static async Task<string?> ChangeProfile(AgentProfile profile, string cli, bool connect, CancellationToken cancel, Func<bool>? permitted = null)
+    {
+        string name = DisplayName(profile.App) + " (" + profile.Name + ")";
+        string[] scope = profile.App == AgentApp.ClaudeCode ? ["--scope", "user"] : [];
         // Replace, never duplicate: an entry from an older Deskweave, working or stale, comes out first.
         // A stale one left in place would make the add below refuse the name.
-        bool had = HasEntry(app);
-        if (had) await Run(cli, ["mcp", "remove", .. scope, AppName], bound.Token, null).ConfigureAwait(false);
-        // Whatever the remove did, what this run was told about the entry has stopped being true.
-        Vouch(app, false);
-        if (!connect) return HasEntry(app) ? $"{name} kept its Deskweave entry. Remove it in {name}'s MCP settings." : null;
+        Entry entry = ReadEntry(profile);
+        if (entry == Entry.Unreadable) return $"{name} configuration could not be read. No change was requested.";
+        if (permitted?.Invoke() == false) return null;
+        bool had = entry != Entry.None;
+        if (had)
+        {
+            await Run(cli, ["mcp", "remove", .. scope, AppName], cancel, profile.Root, profile.App, true).ConfigureAwait(false);
+            if (ReadEntry(profile) != Entry.None)
+                return $"{name} kept its Deskweave entry. Its launcher may use a different configuration profile; remove it in the provider's MCP settings.";
+        }
+        if (!connect) return null;
+        if (permitted?.Invoke() == false) return null;
         await Run(cli, ["mcp", "add", .. scope, AppName, "--", Bridge, "--workspace", WorkspaceAccessStore.RouterTicket],
-            bound.Token, null).ConfigureAwait(false);
-        // What the configuration holds now, not what the command claimed: one that exits 0 without
-        // writing the entry has connected nothing. The file first, because it costs nothing; the
-        // app's own command after, because it is the one that knows where it wrote. Its exit code
-        // is not the question either - an add that refuses a name it already holds has still left
-        // the owner connected, and telling him it failed would be the same lie in reverse.
-        if (IsConnected(app)) return null;
-        if (await Shows(app, cli, bound.Token).ConfigureAwait(false)) { Vouch(app, true); return null; }
+            cancel, profile.Root, profile.App, true).ConfigureAwait(false);
+        // Never count a write to some other account/profile as this target's connection. This
+        // also removes the old provider-wide vouch that could survive removal or a root switch.
+        if (ReadEntry(profile) == Entry.Current) return null;
         return had
             // The old entry came out for the replacement and the new one did not go in. Saying
             // nothing changed would be a lie, and it would hide a connection that is gone.
             ? $"{name} did not accept the connection, and its earlier Deskweave entry came out with it. Connect it again in Settings."
-            : $"{name} did not accept the connection. Nothing else was changed.";
-    }
-
-    /// <summary>
-    /// Whether the app's own command shows Deskweave's entry in place, running this install's
-    /// bridge against its one router ticket - <see cref="Runs"/>'s question, asked of the tool that
-    /// did the write instead of a file.
-    ///
-    /// The two can disagree, because the command's environment is not Deskweave's. `claude` on PATH
-    /// may be a shim that clears CLAUDE_CONFIG_DIR before calling the real one, and then the add
-    /// lands in ~/.claude.json while <see cref="ReadEntry"/> opens the folder that variable names.
-    /// Nothing crashes: the owner is told a connection he just made was refused, and the keep-up
-    /// loop makes it again every ten minutes forever. The command cannot disagree with itself.
-    ///
-    /// False is "did not show it", never "it is not there". A command that fails, times out or
-    /// prints something this does not understand leaves <see cref="ReadEntry"/>'s answer standing,
-    /// so a provider that changes its output turns the fix off rather than breaking connecting.
-    /// </summary>
-    static async Task<bool> Shows(AgentApp app, string cli, CancellationToken cancel)
-    {
-        // Its own budget inside Change's 30 s: `claude mcp get` health-checks the server it names,
-        // and a bridge that cannot reach Deskweave waits. A check that hangs must not spend the
-        // time the write was given, or cost the owner twice the wait before he is told no.
-        using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        bound.CancelAfter(TimeSpan.FromSeconds(8));
-        try
-        {
-            var shown = await Run(cli, app == AgentApp.Codex ? ["mcp", "list", "--json"] : ["mcp", "get", AppName],
-                bound.Token, null).ConfigureAwait(false);
-            if (shown.Code != 0) return false;   // Claude Code exits 1 for a name it does not have
-            return app == AgentApp.Codex ? ShownByCodex(shown.Output) : ShownByClaude(shown.Output);
-        }
-        // A command that is not there any more, or one the app is still writing its answer to.
-        // Cancellation the caller asked for is the app closing, and belongs to the caller.
-        catch (Exception ex) when (ex is IOException or JsonException or System.ComponentModel.Win32Exception
-            || ex is OperationCanceledException && !cancel.IsCancellationRequested) { return false; }
-    }
-
-    /// <summary>
-    /// Deskweave's entry in what `codex mcp list --json` prints, which is the array
-    /// <see cref="Codex"/> already reads for a single workspace's own entry.
-    /// </summary>
-    static bool ShownByCodex(string json)
-    {
-        using var document = JsonDocument.Parse(json);
-        if (document.RootElement.ValueKind != JsonValueKind.Array) return false;
-        foreach (JsonElement server in document.RootElement.EnumerateArray())
-        {
-            if (server.ValueKind != JsonValueKind.Object || !server.TryGetProperty("name", out JsonElement name)
-                || name.ValueKind != JsonValueKind.String || name.GetString() != AppName) continue;
-            if (!server.TryGetProperty("transport", out JsonElement transport)
-                || transport.ValueKind != JsonValueKind.Object) return false;
-            string? command = transport.TryGetProperty("command", out JsonElement c) && c.ValueKind == JsonValueKind.String
-                ? c.GetString() : null;
-            List<string> args = transport.TryGetProperty("args", out JsonElement a) && a.ValueKind == JsonValueKind.Array
-                ? [.. a.EnumerateArray().Select(arg => arg.ValueKind == JsonValueKind.String ? arg.GetString() ?? "" : "")] : [];
-            return Runs(command, args);
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// Deskweave's entry in what `claude mcp get deskweave` prints. Claude Code has no --json for
-    /// mcp (2.1.278), and `mcp list` puts the name, the command and the args on one line with no
-    /// separator between them, which is not something to take a path out of. `get` labels Command
-    /// and Args on lines of their own, and health-checks the one server it was asked about rather
-    /// than every server the owner has.
-    ///
-    /// Its args come back joined by spaces. Deskweave writes exactly two, the second a path that
-    /// can hold spaces itself, so only the first space between them is a separator - and any other
-    /// entry that splits wrong is one <see cref="Runs"/> was going to refuse anyway. Whether the
-    /// health check passed is not read: the question is what the agent would run, and Deskweave's
-    /// own router may still be starting.
-    /// </summary>
-    static bool ShownByClaude(string text)
-    {
-        string? command = null, arguments = null;
-        foreach (string line in text.Split('\n'))
-        {
-            string trimmed = line.Trim();
-            if (trimmed.StartsWith("Command:", StringComparison.Ordinal)) command ??= trimmed["Command:".Length..].Trim();
-            else if (trimmed.StartsWith("Args:", StringComparison.Ordinal)) arguments ??= trimmed["Args:".Length..].Trim();
-        }
-        if (command is null || arguments is null) return false;
-        int between = arguments.IndexOf(' ');
-        string[] args = between < 0 ? [arguments] : [arguments[..between], arguments[(between + 1)..]];
-        return Runs(command, args);
+            : $"{name} did not accept the connection in the intended profile. Its launcher may use another configuration profile. No unrelated entries were requested to change.";
     }
 
     /// <summary>
@@ -356,8 +355,9 @@ internal static class WorkspaceConnections
     /// <summary>Whether the owner turned this agent off, on first launch or in Settings.</summary>
     internal static bool TurnedOff(AgentApp app) => AppSettingsStore.Current.AgentsOff.Contains(app.ToString());
 
-    /// <summary>An agent the keep-up loop should still connect: on this PC, not connected, not refused.</summary>
-    internal static bool Missing(AgentApp app) => IsInstalled(app) && !IsConnected(app) && !TurnedOff(app);
+    /// <summary>An agent with a repairable profile. Provider-side disabled entries stay off.</summary>
+    internal static bool Missing(AgentApp app) => IsInstalled(app) && !IsConnected(app) && !TurnedOff(app)
+        && Profiles(app).Any(profile => ReadEntry(profile) is Entry.None or Entry.Stale or Entry.Unreadable);
 
     /// <summary>How often a PC with a supported agent still missing is looked at again.</summary>
     internal static TimeSpan KeepUpEvery = TimeSpan.FromMinutes(10);
@@ -366,10 +366,9 @@ internal static class WorkspaceConnections
 
     /// <summary>
     /// The owner pressed Start once, so an agent installed later is connected without being asked
-    /// again (MVP_SPEC, Behavior). Looks now and then every <see cref="KeepUpEvery"/>, and stops
-    /// itself once no supported agent is still missing, so the ordinary PC pays nothing. Off the UI
-    /// thread: finding an agent's command walks folders. Does nothing without consent, and never
-    /// touches an agent the owner turned off.
+    /// again (MVP_SPEC, Behavior). Keeps its inexpensive ten-minute check after existing profiles
+    /// are connected, so another local profile created later is found too. Off the UI thread.
+    /// Does nothing without consent, and never touches an agent the owner turned off.
     /// </summary>
     internal static void KeepUp()
     {
@@ -377,6 +376,7 @@ internal static class WorkspaceConnections
         var stop = _keepingUp = new CancellationTokenSource();
         _ = Task.Run(async () =>
         {
+            AutomaticChange.Value = true;
             using var clock = new PeriodicTimer(KeepUpEvery);
             try
             {
@@ -385,10 +385,17 @@ internal static class WorkspaceConnections
                     // Both answers can change while this waits: consent can be withdrawn, and an
                     // agent can be turned off in Settings. Either one is read again every pass.
                     if (!AppSettingsStore.Current.ConnectAgents) continue;
-                    await Connect(Supported.Where(Missing), stop.Token).ConfigureAwait(false);
-                    // Only an answer ends this, not an empty PC: every supported agent is either
-                    // connected or turned off. One that is not installed yet is what it waits for.
-                    if (Supported.All(app => IsConnected(app) || TurnedOff(app))) return;
+                    foreach (AgentApp app in Supported)
+                    {
+                        try
+                        {
+                            if (!AppSettingsStore.Current.ConnectAgents || !Missing(app)) continue;
+                            await SetConnected(app, true, stop.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
+                        catch (Exception ex) when (ex is not OutOfMemoryException)
+                        { RememberResult(app, DisplayName(app) + " connection could not be updated: " + ex.Message); }
+                    }
                 }
                 while (await clock.WaitForNextTickAsync(stop.Token).ConfigureAwait(false));
             }
@@ -437,12 +444,15 @@ internal static class WorkspaceConnections
             : "Codex connection removed. Turn Agent access off to disconnect existing clients immediately.";
     }
 
-    static async Task<(int Code, string Output)> Run(string cli, string[] arguments, CancellationToken cancel, string? profileRoot)
+    static async Task<(int Code, string Output)> Run(string cli, string[] arguments, CancellationToken cancel, string? profileRoot,
+        AgentApp app = AgentApp.Codex, bool targetProfile = false)
     {
         var start = new ProcessStartInfo(cli) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (string argument in arguments) start.ArgumentList.Add(argument);
-        if (profileRoot is not null) start.Environment["CODEX_HOME"] = profileRoot;
+        string homeVariable = app == AgentApp.ClaudeCode ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
+        if (profileRoot is not null) start.Environment[homeVariable] = profileRoot;
+        else if (targetProfile) start.Environment.Remove(homeVariable);
         using var process = Process.Start(start) ?? throw new IOException("Codex did not start.");
         try
         {
@@ -464,9 +474,13 @@ internal static class WorkspaceConnections
     internal static async Task RemoveOwnedConnections()
     {
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        await Task.WhenAll(Enum.GetValues<AgentApp>().Select(async app =>
+        await Task.WhenAll(Supported.SelectMany(app => Profiles(app)).Where(profile => ReadEntry(profile, ignoreDisabled: true) == Entry.Current).Select(async profile =>
         {
-            try { if (IsConnected(app)) await SetConnected(app, false, budget.Token).ConfigureAwait(false); }
+            try
+            {
+                string? cli = Locate(profile.App);
+                if (cli is not null) await ChangeProfile(profile, ProfileCommand(profile, cli), false, budget.Token).ConfigureAwait(false);
+            }
             catch (Exception ex) when (ex is not OutOfMemoryException) { }
         })).ConfigureAwait(false);
         if (!Directory.Exists(WorkspaceAccessStore.Root)) return;

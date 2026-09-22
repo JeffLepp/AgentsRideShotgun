@@ -77,17 +77,25 @@ static class Program
     {
         // A folder: the UI gate. --mvp <folder> [scene name prefix]: the reference-screen harness (Mvp.cs).
         bool mvp = args.Length is 2 or 3 && args[0] == "--mvp";
-        if (!mvp && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
+        bool cornerRendering = args.Length == 2 && args[0] == "--corner-rendering";
+        bool cornerDocking = args.Length == 2 && args[0] == "--corner-docking";
+        if (!mvp && !cornerRendering && !cornerDocking && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
         {
-            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix]");
+            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix] | --corner-rendering <output-folder> | --corner-docking <output-folder>");
             return 2;
         }
-        _output = Path.GetFullPath(mvp ? args[1] : args[0]);
+        _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking ? args[1] : args[0]);
         Directory.CreateDirectory(_output);
         // The scenes stand in for every agent seam; if one is ever missed, what it writes lands here and
         // not in the owner's own configuration, which is what the gate-1 run did.
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", Path.Combine(_output, "agents", "claude"));
         Environment.SetEnvironmentVariable("CODEX_HOME", Path.Combine(_output, "agents", "codex"));
+        WorkspaceConnections.Profiles = app =>
+        {
+            bool claude = app == WorkspaceConnections.AgentApp.ClaudeCode;
+            string root = Path.Combine(_output, "agents", claude ? "claude" : "codex");
+            return [new(app, "Probe", root, Path.Combine(root, claude ? ".claude.json" : "config.toml"))];
+        };
         // ponytail: one probe at a time on this PC, so parallel worktrees don't fight over the screen,
         // focus and CPU timings. Never released by hand; closing it at exit hands the turn on.
         using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
@@ -101,6 +109,7 @@ static class Program
         // depend on the owner's game, and their explicit navigation must not activate over it.
         WorkspacePresentation.SuppressedForTests = () => false;
         MainWindow.AllowActivationForTests = false;
+        using var focus = new FocusGuard();
         using var watchdog = new System.Threading.Timer(_ =>
         {
             Report(new TimeoutException("UI probe exceeded its three-minute limit."));
@@ -124,7 +133,21 @@ static class Program
         application.Dispatcher.BeginInvoke(async () =>
         {
             Exception? failure = null;
-            try { await (mvp ? Mvp.Run(_output, args.Length == 3 ? args[2] : null) : Run()); }
+            try
+            {
+                if (cornerDocking)
+                {
+                    AppearanceManager.Apply(ThemeChoice.Light);
+                    await CornerScenes.DockingChecks();
+                }
+                else if (cornerRendering)
+                {
+                    AppearanceManager.Apply(ThemeChoice.Light);
+                    await CornerScenes.RenderingLifecycleChecks();
+                }
+                else if (mvp) await Mvp.Run(_output, args.Length == 3 ? args[2] : null);
+                else await Run();
+            }
             catch (Exception e) { failure = e; }
             finally
             {
@@ -203,11 +226,13 @@ static class Program
         Check(WorkspaceRuntime.Of(created.Id) is not null && _window.Hub.Working.Any(e => e.Id == created.Id),
             "Starting it again brings it back under Working");
 
-        // Clicking a card or row widens the window onto that workspace (brief A.5).
+        // Rows expand in place; Show more opens the full workspace.
         InvokePrivate(_window, "WorkingCard_Click", new Button { Tag = created.Id }, new RoutedEventArgs());
         await Settle();
-        Check(_window.DisplayMode == "wide" && _window.SelectedWorkspaceId == created.Id,
-            "Clicking a working card widens the window onto that workspace");
+        Check(_window.DisplayMode == "stack" && _window.Hub.Find(created.Id)!.Expanded,
+            "Clicking a working card expands that workspace inside the strip");
+        _window.ShowWide(created.Id);
+        await Settle();
         Check(_window.Hub.Working.Any(e => e.Id == created.Id && e.Selected), "The sidebar marks the open workspace selected");
         Capture("03-wide.png");
         await ScreenClickChecks(created.Id);
@@ -218,8 +243,9 @@ static class Program
         string scratchId = _window.Hub.Asleep.First(e => e.Name == "Scratch").Id;
         InvokePrivate(_window, "AsleepRow_Click", new Button { Tag = scratchId }, new RoutedEventArgs());
         await Settle();
-        Check(_window.DisplayMode == "wide" && _window.SelectedWorkspaceId == scratchId,
-            "Clicking a recent row also opens that workspace in the wide window");
+        Check(_window.DisplayMode == "stack" && _window.Hub.Find(scratchId)!.Expanded,
+            "Clicking a recent row expands that workspace inside the strip");
+        _window.TogglePreview(scratchId);
         _window.ShowStack();
         await Settle();
 
@@ -236,10 +262,13 @@ static class Program
         Check(Find<Border>("FilterHost").Visibility == Visibility.Collapsed && Find<ItemsControl>("StackAsleepList").Items.Count == 1,
             "Escape clears the filter and shows every workspace again");
 
-        // The gear opens Settings (brief A.7); Escape from a wide workspace returns to the stack (brief A.5).
+        // The gear opens Settings inside the card, the window keeping its size (owner's pick,
+        // 2026-09-22); Escape from a wide workspace returns to the stack (brief A.5).
+        double stackWidth = _window.ActualWidth;
         Click("SettingsButton");
         await Settle();
-        Check(_window.DisplayMode == "settings", "The gear button opens Settings in the wide window");
+        Check(_window.DisplayMode == "cardsettings" && _window.CardSettings is { IsVisible: true, AtCardHome: true }
+            && Math.Abs(_window.ActualWidth - stackWidth) < 2, "The gear button opens Settings inside the card");
         _window.ShowStack();
         await Settle();
 
@@ -317,6 +346,8 @@ static class Program
         if (slice is not null and not ("hub" or "corner" or "settings" or "firstrun" or "scaling"))
             throw new ArgumentException("DESKWEAVE_UI_GATE_SLICE must be hub, corner, settings, firstrun or scaling.");
         if (slice is null or "hub") await HubScenes.Gate();
+        if (slice is null or "hub") await InlineScenes.Gate();
+        if (slice is null or "hub") await CardScenes.Gate();
         if (slice is null or "corner")
         {
             // Corner behavior is intentionally suppressed while any hub is visible. Leave the main
@@ -532,7 +563,9 @@ static class Program
         WorkspaceFullView view = _window.OpenWorkspaceView!;
         System.Windows.Controls.Image picture = view.ScreenPicture;
         AgentDesktop computer = WorkspaceRuntime.Of(id)!.Computer!;
-        for (int i = 0; i < 20 && (picture.Source is null || computer.Windows().Count == 0); i++) await Settle();
+        // A workspace starts empty; the click needs a window to land on, so this brings its own.
+        if (computer.Windows().Count == 0) computer.Launch(Path.Combine(Environment.SystemDirectory, "notepad.exe"));
+        for (int i = 0; i < 40 && (picture.Source is null || computer.Windows().Count == 0); i++) await Settle();
         var source = (BitmapSource?)picture.Source;
         lines.Add($"screen metrics : {AgentDesktop.ScreenWidth}x{AgentDesktop.ScreenHeight}");
         lines.Add($"frame          : {(source is null ? "none" : $"{source.PixelWidth}x{source.PixelHeight}")}");
@@ -567,9 +600,11 @@ static class Program
         Check(taken, "A press on the picture is taken by the workspace page");
         Check(clock.ElapsedMilliseconds < 100,
             "The window never waits on the workspace's own pump to send a click");
-        for (int i = 0; i < 20 && computer.LastClickedForTests != front.Handle; i++) await Settle();
+        // The window under the point may be a control inside the front window (Notepad's text
+        // area); it is the front window's own either way.
+        for (int i = 0; i < 20 && RootOf(computer.LastClickedForTests) != front.Handle; i++) await Settle();
         lines.Add($"landed on      : {computer.LastClickedForTests} (front {front.Handle})");
-        Check(computer.LastClickedForTests == front.Handle,
+        Check(RootOf(computer.LastClickedForTests) == front.Handle,
             "A click on the picture lands on the window that is under that point on the workspace screen");
 
         // And the whole gesture, which is what makes the picture the machine rather than a remote
@@ -694,10 +729,16 @@ static class Program
         encoder.Save(output);
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern nint GetAncestor(nint window, uint flags);
+    internal static nint RootOf(nint window) => window == 0 ? 0 : GetAncestor(window, 2);
+
     internal static void Check(bool condition, string claim)
     {
         if (!condition) throw new InvalidOperationException(claim);
         Passed.Add(claim);
+        // Timed, so anything the run did on the owner's desktop can be matched to the check that did it.
+        try { File.AppendAllText(Path.Combine(_output, "progress.log"), $"{DateTime.Now:HH:mm:ss.fff} {claim}\n"); }
+        catch (IOException) { }
     }
 
     /// <summary>
@@ -711,9 +752,18 @@ static class Program
     {
         var (locate, connected, set) =
             (WorkspaceConnections.Locate, WorkspaceConnections.IsConnected, WorkspaceConnections.SetConnected);
+        var profiles = SettingsActions.ReadProfileCounts;
+        var failure = SettingsActions.ReadConnectionFailure;
+        SettingsActions.ReadProfileCounts = app => (WorkspaceConnections.IsConnected(app) ? 1 : 0,
+            WorkspaceConnections.IsInstalled(app) ? 1 : 0);
+        SettingsActions.ReadConnectionFailure = _ => null;
         return new Restore(() =>
+        {
             (WorkspaceConnections.Locate, WorkspaceConnections.IsConnected, WorkspaceConnections.SetConnected)
-                = (locate, connected, set));
+                = (locate, connected, set);
+            SettingsActions.ReadProfileCounts = profiles;
+            SettingsActions.ReadConnectionFailure = failure;
+        });
     }
 
     /// <summary>What is on this PC, as the three states a row shows.</summary>

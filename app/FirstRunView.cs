@@ -126,7 +126,7 @@ public sealed class FirstRunWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var mark = new Path { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
+        var mark = new Path { Width = 15, Height = 15, Stretch = System.Windows.Media.Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center };
         mark.SetResourceReference(StyleProperty, "MarkIcon");   // the hub's title bar, to the DIP
         grid.Children.Add(mark);
 

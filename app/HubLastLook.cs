@@ -60,7 +60,7 @@ internal static class HubLastLook
             Loading.Remove(id);
             BitmapSource? image = read.IsCompletedSuccessfully ? read.Result : null;
             Cache[id] = new Held(written, length, image);
-            if (image is not null) entry.Preview = image;
+            if (image is not null && entry.PreviewPlane is null) entry.Preview = image;
         }));
     }
 

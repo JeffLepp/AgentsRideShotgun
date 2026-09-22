@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{--bg:#f6f8fc;--ink:#0f1522;--muted:#556074;--line:rgba(20,30,60,.10);--desk:#ffffff;--editor:#ffffff;--appbar:#eef1f5;--code:#dfe4ec;--accent:#2e6bf6;--on:#ffffff}
+.dark{--bg:#0a0e18;--ink:#eef2fa;--muted:#8f9ab0;--line:rgba(255,255,255,.09);--desk:#131a29;--editor:#131a29;--appbar:#1b2336;--code:#232d42;--accent:#7ea6ff;--on:#0b1a3a}
+html,body{margin:0;width:1280px;height:440px;overflow:hidden}
+body{background:var(--bg);
+  color:var(--ink);font-family:"Bricolage Grotesque","Segoe UI",sans-serif;position:relative}
+.left{position:absolute;left:72px;top:0;bottom:0;width:560px;display:flex;flex-direction:column;justify-content:center}
+.brand{display:flex;align-items:center;gap:18px}
+.brand img{width:76px;height:76px}
+.brand b{font-weight:800;font-size:64px;letter-spacing:-.025em;line-height:1}
+h1{font-weight:800;font-size:38px;line-height:1.08;letter-spacing:-.02em;margin:30px 0 14px}
+p{font:500 18px/1.5 "Segoe UI Variable Text","Segoe UI",sans-serif;color:var(--muted);margin:0;max-width:520px}
+.right{position:absolute;right:64px;top:50px;width:520px;height:340px}
+.desk{position:absolute;inset:0;border-radius:18px;background:var(--desk);border:1px solid var(--line);overflow:hidden}
+.editor{position:absolute;left:22px;top:22px;width:300px;height:230px;border-radius:10px;background:var(--editor);border:1px solid var(--line)}
+.editor i{position:absolute;left:18px;height:7px;border-radius:4px;background:var(--code)}
+.editor i.a{background:var(--accent);opacity:.7}
+
+.wall{position:absolute;inset:0;background:#1f5fae}
+.dark .wall{background:#173f7a}
+.icons{position:absolute;left:14px;top:14px;display:flex;flex-direction:column;gap:12px;width:62px;align-items:center}
+.icons div{display:flex;flex-direction:column;align-items:center;gap:4px;font:500 10.5px "Segoe UI",sans-serif;color:#fff;text-align:center;line-height:1.15}
+.icons svg{width:30px;height:30px}
+.taskbar{position:absolute;left:0;right:0;bottom:0;height:34px;background:#0e1726;display:flex;align-items:center;gap:10px;padding:0 12px}
+.taskbar .tb{width:18px;height:18px;border-radius:4px}
+.taskbar .search{width:120px;height:20px;border-radius:10px;background:#1d2a40}
+.taskbar .clock{margin-left:auto;font:500 11px "Segoe UI",sans-serif;color:#cfd8e6}
+.app{position:absolute;left:96px;top:24px;width:292px;height:212px;border-radius:8px;background:var(--editor);overflow:hidden;box-shadow:0 6px 16px rgba(0,0,0,.25)}
+.app .bar{height:22px;background:var(--appbar);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 8px}
+.app .bar i{position:static;display:block;width:8px;height:2px;border-radius:1px;background:var(--muted)}
+.app .code{position:absolute;inset:22px 0 0 0}
+.app .code i{position:absolute;left:16px;height:6px;border-radius:3px;background:var(--code)}
+.app .code i.a{background:var(--accent);opacity:.75}
+.corner{position:absolute;right:18px;bottom:50px;width:196px;border-radius:10px;overflow:hidden;border:3px solid var(--accent);box-shadow:0 10px 24px rgba(0,0,0,.30)}
+.chip{position:absolute;right:18px;bottom:188px;background:var(--accent);color:var(--on);font:600 13px "Segoe UI",sans-serif;padding:5px 11px;border-radius:99px}
+.chip i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--on);margin-right:7px;vertical-align:1px}
+.corner img{display:block;width:100%}
+.label{position:absolute;font:500 12px "JetBrains Mono",monospace;color:var(--muted);letter-spacing:.02em}
+</style></head>
+<body>
+<div class="left">
+  <div class="brand"><img src="assets/icon-256.png" alt=""><b>Deskweave</b></div>
+  <h1>Give your agent<br>a desktop of its own.</h1>
+  <p>A second Windows desktop for Claude Code and Codex, right beside yours. It tests your app over there. You keep working over here.</p>
+</div>
+<div class="right">
+  <div class="desk">
+    <div class="wall"></div>
+    <div class="icons">
+      <div><svg viewBox="0 0 30 30"><path d="M8 9h14l-1.5 16h-11z" fill="#dfe8f5"/><rect x="6" y="6" width="18" height="3" rx="1" fill="#f5f8fc"/></svg>Recycle Bin</div>
+      <div><svg viewBox="0 0 30 30"><rect x="4" y="6" width="22" height="15" rx="2" fill="#dfe8f5"/><rect x="6" y="8" width="18" height="11" fill="#5b9bff"/><rect x="11" y="22" width="8" height="2" fill="#dfe8f5"/></svg>This PC</div>
+      <div><svg viewBox="0 0 30 30"><path d="M3 9a2 2 0 0 1 2-2h7l2 2h11a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="#f4c542"/></svg>Projects</div>
+      <div><svg viewBox="0 0 30 30"><rect x="4" y="4" width="22" height="22" rx="5" fill="#2e6bf6"/><path d="M12 11l-4 4 4 4M18 11l4 4-4 4" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Editor</div>
+    </div>
+    <div class="app"><div class="bar"><i></i><i></i><i></i></div><div class="code">
+      <i style="top:14px;width:110px" class="a"></i><i style="top:30px;width:200px"></i><i style="top:46px;width:160px;left:32px"></i><i style="top:62px;width:220px;left:32px"></i>
+      <i style="top:78px;width:140px;left:32px"></i><i style="top:94px;width:180px"></i><i style="top:110px;width:84px" class="a"></i><i style="top:126px;width:210px;left:32px"></i><i style="top:142px;width:130px;left:32px"></i><i style="top:158px;width:170px"></i>
+    </div></div>
+    <div class="taskbar">
+      <svg class="tb" viewBox="0 0 18 18"><rect x="1" y="1" width="7" height="7" fill="#5b9bff"/><rect x="10" y="1" width="7" height="7" fill="#5b9bff"/><rect x="1" y="10" width="7" height="7" fill="#5b9bff"/><rect x="10" y="10" width="7" height="7" fill="#5b9bff"/></svg>
+      <span class="search"></span>
+      <span class="tb" style="background:#f4c542"></span><span class="tb" style="background:#2e6bf6"></span><span class="tb" style="background:#e8eef7"></span>
+      <span class="clock">10:42</span>
+    </div>
+        <div class="chip"><i></i>Claude Code is testing</div>
+    <div class="corner"><img id="shot" src="assets/shots/corner-light.png" alt=""></div>
+  </div>
+  <div class="label" style="left:24px;bottom:-26px">your desktop</div>
+  <div class="label" style="right:22px;bottom:-26px">your agent's desktop</div>
+</div>
+<script>
+if (location.search.indexOf('dark') >= 0) { document.body.classList.add('dark'); document.getElementById('shot').src = 'assets/shots/corner-dark.png'; }
+</script>
+</body></html>

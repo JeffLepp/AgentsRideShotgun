@@ -39,11 +39,41 @@ public partial class SettingsView
     /// <summary>One row in a card (reference .srw): optional leading icon, the text, and a control
     /// on the right with an 8 DIP gap. The hairline between rows is added by <see cref="Group"/>,
     /// not here, so a row looks the same whether it is a plain row or a radio choice.</summary>
-    static Border Row(UIElement text, FrameworkElement? control = null, UIElement? icon = null)
+    Border Row(UIElement text, FrameworkElement? control = null, UIElement? icon = null)
     {
         var grid = new Grid();
         if (icon is not null) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
+        // In the 340 DIP card a dropdown or a two-step confirm beside the label would squeeze the
+        // label to a few words a line, so it goes under the label instead, the label's full width.
+        bool under = _card && control is not null && (control is ComboBox || control.GetType() == typeof(ContentControl)
+            || control is StackPanel { Children: var children } && children.OfType<ComboBox>().Any());
+        if (under)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            if (text is FrameworkElement upperText) upperText.VerticalAlignment = VerticalAlignment.Center;
+            int textColumn = 0;
+            if (icon is FrameworkElement leadIcon)
+            {
+                leadIcon.Margin = new Thickness(0, 0, 12, 0);
+                leadIcon.VerticalAlignment = VerticalAlignment.Center;
+                grid.Children.Add(leadIcon);
+                textColumn = 1;
+            }
+            Grid.SetColumn(text, textColumn);
+            grid.Children.Add(text);
+            control!.Margin = new Thickness(0, 8, 0, 2);
+            control.HorizontalAlignment = control is ComboBox ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
+            if (control is ComboBox) control.MaxWidth = double.PositiveInfinity;
+            if (control is ContentControl { HorizontalContentAlignment: HorizontalAlignment.Right } confirm) confirm.HorizontalContentAlignment = HorizontalAlignment.Left;
+            Grid.SetRow(control, 1);
+            Grid.SetColumnSpan(control, grid.ColumnDefinitions.Count);
+            grid.Children.Add(control);
+            var stacked = new Border { Child = grid, BorderThickness = new Thickness(0) };
+            stacked.SetResourceReference(StyleProperty, "SettingRow");
+            return stacked;
+        }
         if (control is not null) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         int column = 0;
         if (icon is not null)

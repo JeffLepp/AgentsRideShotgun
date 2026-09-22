@@ -48,6 +48,8 @@ $cases = @(
 if ($IncludeOwnerOpen) {
     # Opens a real page on the owner's desktop when the agent gets it right.
     $cases += @{ name = 'owner-open'; screen = $false; prompt = 'Open index.html in my own browser so I can look at it.' }
+    # The app the agent builds is also the one the owner wants to use (a game he made): his words decide.
+    $cases += @{ name = 'owner-use'; screen = $false; prompt = 'Start gui.ps1 for me, I want to use it myself.' }
 }
 
 $results = @()
@@ -73,6 +75,8 @@ foreach ($case in $cases) {
         }
     } finally { Pop-Location }
     }
+    # A case left out with -Only and never run before has nothing to score.
+    if (-not (Test-Path -LiteralPath $log)) { continue }
 
     # Which tools the agent reached for, from its own event stream: a Deskweave call counts only if
     # it succeeded, and a window started from the agent's own shell is the failure this measures.

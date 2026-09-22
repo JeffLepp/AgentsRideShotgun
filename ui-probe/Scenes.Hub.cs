@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -38,6 +39,45 @@ static class HubScenes
         window.Height = 560;
         await scene.Settle();
         return window;
+    }
+
+    /// <summary>The app's own question before something that cannot be undone, as deleting a
+    /// workspace asks it. Its content is what is photographed; Windows draws the frame.</summary>
+    [Scene("question-delete", "")]
+    static async Task<FrameworkElement> DeleteQuestion(SceneContext scene)
+    {
+        Window dialog = scene.Own(Question.Build(null, "Delete shop?",
+            "Its screen, the files on its page, its history and its browser sign-ins are deleted, and anything "
+            + "running on it stops. Your project folder is not touched. This can't be undone.", "Delete", danger: true));
+        dialog.Show();
+        await scene.Settle();
+        return (FrameworkElement)dialog.Content;
+    }
+
+    /// <summary>The tray menu, drawn by its own renderer off-screen and shown as a picture.</summary>
+    [Scene("tray-menu", "")]
+    static async Task<FrameworkElement> TrayMenuScene(SceneContext scene)
+    {
+        await scene.Settle(50);
+        using System.Windows.Forms.ContextMenuStrip menu = TrayMenu.Build(() => { }, () => { }, () => { }, () => { }, () => { });
+        menu.PerformLayout();
+        System.Drawing.Size size = menu.GetPreferredSize(System.Drawing.Size.Empty);
+        menu.Size = size;
+        using var bitmap = new System.Drawing.Bitmap(size.Width, size.Height);
+        menu.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, size.Width, size.Height));
+        using var stream = new MemoryStream();
+        bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+        stream.Position = 0;
+        var picture = new System.Windows.Media.Imaging.BitmapImage();
+        picture.BeginInit();
+        picture.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+        picture.StreamSource = stream;
+        picture.EndInit();
+        var image = new System.Windows.Controls.Image { Source = picture, Width = size.Width, Height = size.Height, Stretch = System.Windows.Media.Stretch.None };
+        var window = scene.Own(new Window { Content = image, SizeToContent = SizeToContent.WidthAndHeight, WindowStyle = WindowStyle.None });
+        window.Show();
+        await scene.Settle();
+        return image;
     }
 
     [Scene("hub-long-names", "")]
@@ -271,6 +311,7 @@ static class HubScenes
             previewWindow.ShowSettings();
             await Task.Delay(300);
             Program.Check(!previewWindow.PreviewLoopRunning, "Opening Settings stops the working-card preview loop");
+            Program.Check(ModuleEntry.HubShowing, "Visible Settings keeps the automatic corner hidden while preview capture is stopped");
             previewWindow.ShowStack();
             await Task.Delay(300);
             Program.Check(previewWindow.PreviewLoopRunning, "...and returning from Settings to the stack starts it again");
@@ -284,6 +325,30 @@ static class HubScenes
                 "...one second plugged in, two and a half on battery");
         }
         finally { previewWindow.Dispose(); previewWindow.Close(); }
+
+        // Recent keeps the last eight; an older one is still one search away.
+        var longWindow = new MainWindow { ShowActivated = false, Left = SceneContext.OffScreen.X, Top = SceneContext.OffScreen.Y };
+        try
+        {
+            longWindow.Show();
+            longWindow.Hub.LoadFixture([], [.. Enumerable.Range(1, 12).Select(i => new HubEntry("old-" + i) { Name = "project-" + i, Age = i + "d" })]);
+            await Task.Delay(150);
+            Program.Check(longWindow.StackAsleepList.Items.Count == 8
+                    && longWindow.StackAsleepList.Items.Cast<HubEntry>().Select(e => e.Name).SequenceEqual(Enumerable.Range(1, 8).Select(i => "project-" + i)),
+                "Recent shows the eight most recent workspaces, newest first");
+            Program.Check(longWindow.SidebarAsleepList.Items.Count == 8, "The wide window's Recent keeps the same eight");
+            longWindow.FilterBox.Text = "project-12";
+            await Task.Delay(100);
+            Program.Check(longWindow.StackAsleepList.Items.Count == 1
+                    && ((HubEntry)longWindow.StackAsleepList.Items[0]).Name == "project-12",
+                "Search still finds a workspace older than the last eight");
+            longWindow.FilterBox.Text = "";
+            longWindow.SelectWorkspace("old-11");
+            await Task.Delay(100);
+            Program.Check(longWindow.SidebarAsleepList.Items.Cast<HubEntry>().Any(e => e.Id == "old-11"),
+                "An older workspace stays listed in the sidebar while it is the one open");
+        }
+        finally { longWindow.Close(); }
 
         await SleepAndControlGate();
         TrayChecks();

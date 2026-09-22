@@ -461,10 +461,15 @@ public sealed class WorkspaceCommands : IDisposable
 
     static string Quote(string path) => "\"" + path + "\"";
 
+    /// <summary>
+    /// A long command cut in the middle, not at the end: what it runs is usually last, after a
+    /// `cd /d "..."` into a long folder, and two jobs cut at 120 characters read the same
+    /// (2026-09-22: "python groceries.py" was lost off the end of both listed jobs).
+    /// </summary>
     internal static string Short(string command)
     {
         string one = Crlf(command).Replace("\r\n", " ; ").Trim();
-        return one.Length > 120 ? one[..120] + "..." : one;
+        return one.Length > 120 ? one[..40] + " ... " + one[^75..] : one;
     }
 
     public void Dispose()

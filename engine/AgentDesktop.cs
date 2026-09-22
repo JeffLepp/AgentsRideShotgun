@@ -208,9 +208,8 @@ public sealed partial class AgentDesktop : IDisposable
     /// application route, not a security claim against deliberate same-user USER32 calls.
     /// </summary>
     /// <param name="handles">
-    /// Standard input and output for the child, inherited. Only the browser transport uses this:
-    /// Chrome's DevTools pipe is a pair of inherited handles rather than a port, so it collides with
-    /// nothing on the owner's PC.
+    /// Standard input and output for the child, inherited. Browser DevTools uses LaunchBrowser
+    /// instead: its explicitly named pipe handles must not also receive stdout or stderr.
     /// </param>
     public int Launch(string exe, string? arguments = null, (nint In, nint Out)? handles = null, long lease = 0)
     {
@@ -233,24 +232,27 @@ public sealed partial class AgentDesktop : IDisposable
         {
             if (_disposed || Revoked(lease)) return 0;
             _browserLimits ??= new WorkspaceLimits(Power, restrictUserObjects: false);
-            return LaunchCore(exe, arguments, handles, lease, _browserLimits);
+            return LaunchCore(exe, arguments, handles, lease, _browserLimits, pipeHandlesOnly: handles is not null);
         }
     }
 
     int LaunchCore(string exe, string? arguments, (nint In, nint Out)? handles, long lease,
-        WorkspaceLimits? limits)
+        WorkspaceLimits? limits, bool pipeHandlesOnly = false)
     {
         // A WPF program chooses how it draws while it starts, and only a software renderer leaves
         // pixels a desktop Windows does not compose can hand back. On before the process runs, off
         // again once it is up: see WorkspaceRenderMode.
         IDisposable? softened = WorkspaceRenderMode.Soften();
-        try { return LaunchCore(exe, arguments, handles, lease, limits, ref softened); }
+        try { return LaunchCore(exe, arguments, handles, lease, limits, ref softened, pipeHandlesOnly); }
         finally { softened?.Dispose(); }
     }
 
     int LaunchCore(string exe, string? arguments, (nint In, nint Out)? handles, long lease,
-        WorkspaceLimits? limits, ref IDisposable? softened)
+        WorkspaceLimits? limits, ref IDisposable? softened, bool pipeHandlesOnly)
     {
+        // Inspect the exact image we will start. A visible console can otherwise be delegated to
+        // Windows Terminal through COM on Default, despite lpDesktop naming this workspace.
+        if (!TryConsoleImage(exe, out string image, out bool console)) return 0;
         var info = new Native.StartupInfo { cb = Marshal.SizeOf<Native.StartupInfo>() };
         // The only supported way to place a process on another desktop. The managed process API has no
         // field for it, which is why this goes straight to CreateProcessW.
@@ -261,21 +263,40 @@ public sealed partial class AgentDesktop : IDisposable
         // already owns, so its output lands on the owner's screen instead of the agent's desktop.
         // CREATE_UNICODE_ENVIRONMENT is required whenever an environment block is passed at all.
         uint flags = Native.CreateSuspended | Native.CreateNewConsole | Native.CreateUnicodeEnvironment;
-        bool inherit = handles is not null;
+        string? consoleTitle = null;
+        if (console && handles is null)
+        {
+            // The inbox console explicitly refuses default-terminal handoff for minimized startup.
+            // This takes effect before console allocation; hiding an already delegated window is late.
+            consoleTitle = "Deskweave console " + Guid.NewGuid().ToString("N");
+            info.lpTitle = consoleTitle;
+            info.dwFlags |= ConsoleStartfUseShowWindow;
+            info.wShowWindow = ConsoleShowMinNoActive;
+        }
         if (handles is not null)
         {
             // A new console would replace the std handles we are trying to hand over.
-            flags = Native.CreateSuspended | Native.CreateUnicodeEnvironment;
-            info.dwFlags |= Native.StartfUseStdHandles;
-            info.hStdInput = handles.Value.In;
-            info.hStdOutput = handles.Value.Out;
-            info.hStdError = handles.Value.Out;
+            // CREATE_NO_WINDOW also prevents a redirected console from delegating to Terminal.
+            flags = Native.CreateSuspended | Native.CreateUnicodeEnvironment | ConsoleCreateNoWindow;
+            if (!pipeHandlesOnly)
+            {
+                info.dwFlags |= Native.StartfUseStdHandles;
+                info.hStdInput = handles.Value.In;
+                info.hStdOutput = handles.Value.Out;
+                info.hStdError = handles.Value.Out;
+            }
+            // Chromium adopts its two inherited CDP handles from --remote-debugging-io-pipes.
+            // Sending ordinary stdout/stderr there would corrupt its NUL-delimited JSON frames.
         }
         // CreateProcess uses the same primary token as this process. A separate desktop changes
         // where windows appear, not which task files the user can access. Never elevate or lower
         // the token merely because a program is running in a workspace.
-        bool started = Native.CreateProcessW(null, command, 0, 0, inherit, flags,
-            _sandbox?.Environment ?? 0, _sandbox?.Folder, ref info, out Native.ProcessInfo created);
+        Native.ProcessInfo created;
+        bool started = handles is { } inherited
+            ? CreateWithHandles(image, command, flags, _sandbox?.Environment ?? 0, _sandbox?.Folder,
+                ref info, inherited, out created)
+            : Native.CreateProcessW(image, command, 0, 0, false, flags,
+                _sandbox?.Environment ?? 0, _sandbox?.Folder, ref info, out created);
         if (!started) return 0;
 
         bool resumed = false;
@@ -289,6 +310,8 @@ public sealed partial class AgentDesktop : IDisposable
             if (Revoked(lease)) return 0;
             if (Native.ResumeThread(created.hThread) == uint.MaxValue) return 0;
             resumed = true;
+            if (consoleTitle is not null)
+                RestoreConsoleWhenReady(consoleTitle, System.IO.Path.GetFileName(image), lease);
 
             if (limits is null)
             {
@@ -314,6 +337,47 @@ public sealed partial class AgentDesktop : IDisposable
             Native.CloseHandle(created.hThread);
             if (!processHandleRetained) Native.CloseHandle(created.hProcess);
         }
+    }
+
+    // Each launch receives only its requested handles. A per-desktop launch lock cannot prevent
+    // another workspace's inheritable pipe ends from existing in this process at the same time.
+    // Never fall back to unrestricted inheritance if Windows refuses the explicit list.
+    static bool CreateWithHandles(string image, StringBuilder command, uint flags,
+        nint environment, string? directory, ref Native.StartupInfo info,
+        (nint In, nint Out) handles, out Native.ProcessInfo created)
+    {
+        created = default;
+        if (!Inheritable(handles.In) || !Inheritable(handles.Out)) return false;
+        int count = handles.In == handles.Out ? 1 : 2;
+        nuint bytes = 0;
+        if (Native.InitializeProcThreadAttributeList(0, 1, 0, ref bytes)
+            || Marshal.GetLastWin32Error() != 122 || bytes == 0 || bytes > int.MaxValue) return false;
+        nint list = 0, values = 0;
+        bool initialized = false;
+        try
+        {
+            list = Marshal.AllocHGlobal((int)bytes);
+            if (!Native.InitializeProcThreadAttributeList(list, 1, 0, ref bytes)) return false;
+            initialized = true;
+            values = Marshal.AllocHGlobal(count * nint.Size);
+            Marshal.WriteIntPtr(values, 0, handles.In);
+            if (count == 2) Marshal.WriteIntPtr(values, nint.Size, handles.Out);
+            if (!Native.UpdateProcThreadAttribute(list, 0, Native.ProcThreadAttributeHandleList,
+                values, (nuint)(count * nint.Size), 0, 0)) return false;
+            var extended = new Native.StartupInfoEx { StartupInfo = info, lpAttributeList = list };
+            extended.StartupInfo.cb = Marshal.SizeOf<Native.StartupInfoEx>();
+            return Native.CreateProcessW(image, command, 0, 0, true,
+                flags | Native.ExtendedStartupInfoPresent, environment, directory, ref extended, out created);
+        }
+        finally
+        {
+            if (initialized) Native.DeleteProcThreadAttributeList(list);
+            if (values != 0) Marshal.FreeHGlobal(values);
+            if (list != 0) Marshal.FreeHGlobal(list);
+        }
+
+        static bool Inheritable(nint handle) => handle != 0 && handle != -1
+            && Native.GetHandleInformation(handle, out uint value) && (value & 1) != 0;
     }
 
     /// <summary>
@@ -348,23 +412,38 @@ public sealed partial class AgentDesktop : IDisposable
     public BitmapSource? CaptureScreen(int width, int height) => Capture(width, height).Image;
 
     /// <summary>
-    /// One bounded capture attempt. Never waits on the desktop pump for longer than
-    /// <see cref="CaptureBound"/>, and never on an application for longer than a message timeout, so
-    /// a workspace holding a wedged program still gives back the panel, the owner's takeover and
-    /// shutdown. What it could not photograph is reported rather than quietly missing.
+    /// One bounded wait for a capture. Native PrintWindow can outlast the caller's bound; keep
+    /// that capture pending until the pump finishes it so later viewers cannot build a backlog.
+    /// What it could not photograph is reported rather than quietly missing.
     /// </summary>
     public DesktopFrame Capture(int width, int height)
-        => _capture.Take(width, height, CaptureBound, () =>
     {
-        // The corner and agent may ask simultaneously. Share that bounded frame; never queue
-        // duplicate composites or return no first image just because the preview got here first.
+        if (Volatile.Read(ref _disposed)) return new(null, 0, 0, false);
+        // Preserve direct use from the desktop thread; waiting on its own queue would deadlock.
+        if (Thread.CurrentThread == _thread) return CaptureOnPump(width, height);
+        return _capture.Take(width, height, CaptureBound, () => QueueCapture(width, height));
+    }
+
+    Task<DesktopFrame> QueueCapture(int width, int height)
+    {
+        var done = new TaskCompletionSource<DesktopFrame>(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            DesktopFrame? frame = Run(() => CaptureOnPump(width, height), CaptureBound);
-            return frame ?? new DesktopFrame(null, 0, 0, true);
+            _work.Add(() =>
+            {
+                try
+                {
+                    done.TrySetResult(Volatile.Read(ref _disposed)
+                        ? new DesktopFrame(null, 0, 0, false) : CaptureOnPump(width, height));
+                }
+                catch (Exception error) { done.TrySetException(error); }
+            });
         }
-        catch (ObjectDisposedException) { return new DesktopFrame(null, 0, 0, false); }
-    });
+        // CompleteAdding can race submission; a disposed collection has the same unavailable
+        // result. An accepted capture completes on the pump, even while Dispose drains the queue.
+        catch (InvalidOperationException) { done.TrySetResult(new(null, 0, 0, false)); }
+        return done.Task;
+    }
 
     readonly WorkspaceCaptureGate _capture = new();
 
@@ -398,36 +477,99 @@ public sealed partial class AgentDesktop : IDisposable
             previousCanvas = Native.SelectObject(canvasDc, canvas);
             WorkspaceWall.Paint(canvasDc, screenDc, width, height);
 
-            // Back to front, so the window the agent is actually using ends up on top.
+            // Back to front, so the window the agent is actually using ends up on top. A window wholly
+            // inside one printed in front of it is not printed at all: that one's copy covers every
+            // pixel of it anyway, and PrintWindow is most of a frame's cost - with a maximized app
+            // in front, every other window's.
+            // Each window is drawn only where it really shows: see Drawn.
+            AgentWindow[] drawn = [.. windows.Select(Drawn)];
+            int[] hiddenBy = HiddenBehind(drawn);
+            var unprinted = new HashSet<int>();
+            var kept = new HashSet<nint>();
             for (int i = windows.Count - 1; i >= 0; i--)
+                if (hiddenBy[i] < 0 && !Print(windows[i], drawn[i])) unprinted.Add(i);
+            // A window meant to hide others that then failed to print left a hole where they belong.
+            // That rare frame is drawn again the plain way, every window.
+            if (hiddenBy.Any(unprinted.Contains))
             {
-                AgentWindow window = windows[i];
+                WorkspaceWall.Paint(canvasDc, screenDc, width, height);
+                for (int i = windows.Count - 1; i >= 0; i--) Print(windows[i], drawn[i]);
+            }
+            // Only what is on screen is worth keeping: a window that closed or went behind another
+            // gives its picture back, so this holds at most one bitmap per visible window.
+            foreach (nint gone in _prints.Keys.Where(handle => !kept.Contains(handle)).ToArray())
+                ForgetPrint(gone);
+
+            bool Print(AgentWindow window, AgentWindow shows)
+            {
                 // PrintWindow sends WM_PRINT and waits for the window's own thread to draw. A window
                 // that is not pumping never answers, and there is no timeout on that call, so it is
-                // left out of the picture instead of taking the capture down with it.
-                if (!window.Responding) continue;
+                // drawn from its last picture instead of taking the capture down with it.
+                if (!window.Responding) { Ghost(window, shows); return false; }
                 nint windowDc = Native.CreateCompatibleDC(screenDc);
-                if (windowDc == 0) continue;
-                // The pair this iteration owns is given back on its own, so one bad window does not
-                // leak another DC and bitmap on every frame after it.
-                nint bitmap = 0, previous = 0;
+                if (windowDc == 0) return false;
+                // The window's bitmap from the last frame is printed into again when it is still the
+                // same size, rather than made and thrown away on every frame.
+                bool reused = _prints.TryGetValue(window.Handle, out WindowPrint last)
+                    && last.Width == window.Width && last.Height == window.Height;
+                nint bitmap = reused ? last.Bitmap : 0, previous = 0;
+                bool keep = false;
                 try
                 {
-                    bitmap = Native.CreateCompatibleBitmap(screenDc, window.Width, window.Height);
-                    if (bitmap == 0) continue;
+                    if (!reused) bitmap = Native.CreateCompatibleBitmap(screenDc, window.Width, window.Height);
+                    if (bitmap == 0) return false;
                     previous = Native.SelectObject(windowDc, bitmap);
                     // PW_RENDERFULLCONTENT: a secondary desktop is not DWM-composited, and without this
                     // flag hardware-accelerated windows print as black.
-                    if (Native.PrintWindow(window.Handle, windowDc, Native.PwRenderFullContent))
-                        Native.BitBlt(canvasDc, window.X, window.Y, window.Width, window.Height,
-                            windowDc, 0, 0, Native.SrcCopy);
+                    if (!Native.PrintWindow(window.Handle, windowDc, Native.PwRenderFullContent)) return false;
+                    Native.BitBlt(canvasDc, shows.X, shows.Y, shows.Width, shows.Height,
+                        windowDc, shows.X - window.X, shows.Y - window.Y, Native.SrcCopy);
+                    keep = true;
+                    return true;
                 }
                 finally
                 {
                     if (previous != 0) Native.SelectObject(windowDc, previous);
-                    if (bitmap != 0) Native.DeleteObject(bitmap);
                     Native.DeleteDC(windowDc);
+                    // The pair this window owns is given back on its own, so one bad window does not
+                    // leak a bitmap on every frame after it.
+                    if (keep)
+                    {
+                        if (!reused) { ForgetPrint(window.Handle); _prints[window.Handle] = new(bitmap, window.Width, window.Height); }
+                        kept.Add(window.Handle);
+                    }
+                    else if (reused) ForgetPrint(window.Handle);
+                    else if (bitmap != 0) Native.DeleteObject(bitmap);
                 }
+            }
+
+            // A window that is not answering is drawn where it is, as it last looked, washed pale and
+            // labelled. Leaving it out showed whatever was behind it - another app, the browser - as
+            // though that were the window asked about, and an agent read it that way (2026-09-22).
+            void Ghost(AgentWindow window, AgentWindow shows)
+            {
+                var box = new Native.Rect
+                {
+                    Left = shows.X, Top = shows.Y, Right = shows.X + shows.Width, Bottom = shows.Y + shows.Height,
+                };
+                if (_prints.TryGetValue(window.Handle, out WindowPrint last)
+                    && last.Width == window.Width && last.Height == window.Height)
+                {
+                    nint source = Native.CreateCompatibleDC(screenDc);
+                    nint previous = Native.SelectObject(source, last.Bitmap);
+                    Native.BitBlt(canvasDc, shows.X, shows.Y, shows.Width, shows.Height,
+                        source, shows.X - window.X, shows.Y - window.Y, Native.SrcCopy);
+                    Native.SelectObject(source, previous);
+                    Native.DeleteDC(source);
+                    kept.Add(window.Handle);
+                    Wash(canvasDc, screenDc, box);
+                }
+                else
+                {
+                    Native.SetBkColor(canvasDc, 0x00E6E6E6);
+                    Native.ExtTextOutW(canvasDc, 0, 0, Native.EtoOpaque, ref box, null, 0, 0);
+                }
+                Label(canvasDc, box, "Not responding");
             }
 
             // Out of the device context before it is read, exactly as before. The finally below then
@@ -459,6 +601,110 @@ public sealed partial class AgentDesktop : IDisposable
             if (canvasDc != 0) Native.DeleteDC(canvasDc);
             Native.ReleaseDC(0, screenDc);
         }
+    }
+
+    /// <summary>
+    /// The part of a window that is actually drawn. A sizable Windows 10 window carries an invisible
+    /// resize border, 7 px on the left, right and bottom at 100%, inside its rectangle; the owner's
+    /// desktop shows what is behind it there, but PrintWindow paints it black, and every window on
+    /// an agent's screen wore a black frame in the corner and the hub (2026-09-22). DWM reports the
+    /// visible frame even for a window on a workspace desktop; anything it reports outside the
+    /// rectangle is not believed, and a window it knows nothing about is drawn whole as before.
+    /// </summary>
+    internal static AgentWindow Drawn(AgentWindow window)
+    {
+        if (Native.DwmGetWindowAttribute(window.Handle, Native.DwmwaExtendedFrameBounds,
+                out Native.Rect frame, Marshal.SizeOf<Native.Rect>()) != 0
+            || frame.Left < window.X || frame.Top < window.Y
+            || frame.Right > window.X + window.Width || frame.Bottom > window.Y + window.Height
+            || frame.Right - frame.Left < window.Width / 2 || frame.Bottom - frame.Top < window.Height / 2)
+            return window;
+        return window with { X = frame.Left, Y = frame.Top, Width = frame.Right - frame.Left, Height = frame.Bottom - frame.Top };
+    }
+
+    /// <summary>One window's last good picture, a bitmap this desktop owns until it forgets it.</summary>
+    readonly record struct WindowPrint(nint Bitmap, int Width, int Height);
+
+    // Only ever touched on the pump thread, and after it has stopped, by Dispose.
+    readonly Dictionary<nint, WindowPrint> _prints = [];
+
+    void ForgetPrint(nint window)
+    {
+        if (_prints.Remove(window, out WindowPrint print)) Native.DeleteObject(print.Bitmap);
+    }
+
+    /// <summary>Pales a piece of the canvas the way Windows pales a window that has stopped answering.</summary>
+    static void Wash(nint canvasDc, nint screenDc, Native.Rect box)
+    {
+        nint paint = Native.CreateCompatibleDC(screenDc);
+        nint pixel = Native.CreateCompatibleBitmap(screenDc, 1, 1);
+        nint previous = Native.SelectObject(paint, pixel);
+        try
+        {
+            var one = new Native.Rect { Right = 1, Bottom = 1 };
+            Native.SetBkColor(paint, 0x00FFFFFF);
+            Native.ExtTextOutW(paint, 0, 0, Native.EtoOpaque, ref one, null, 0, 0);
+            Native.AlphaBlend(canvasDc, box.Left, box.Top, box.Right - box.Left, box.Bottom - box.Top,
+                paint, 0, 0, 1, 1, Native.ConstantAlpha(150));
+        }
+        finally
+        {
+            Native.SelectObject(paint, previous);
+            Native.DeleteObject(pixel);
+            Native.DeleteDC(paint);
+        }
+    }
+
+    /// <summary>A dark tag in the middle of a box, sized to the screen so it reads at any resolution.</summary>
+    static void Label(nint canvasDc, Native.Rect box, string text)
+    {
+        int size = Math.Max(14, (int)Math.Round(ScreenHeight / 50.0));
+        nint font = Native.CreateFontW(-size, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        nint previous = font == 0 ? 0 : Native.SelectObject(canvasDc, font);
+        try
+        {
+            var measured = new Native.Rect();
+            Native.DrawTextW(canvasDc, text, text.Length, ref measured, Native.DtSingleLine | Native.DtCalcRect);
+            int width = measured.Right - measured.Left + size * 2, height = measured.Bottom - measured.Top + size;
+            int left = (box.Left + box.Right - width) / 2, top = (box.Top + box.Bottom - height) / 2;
+            var tag = new Native.Rect { Left = left, Top = top, Right = left + width, Bottom = top + height };
+            Native.SetBkColor(canvasDc, 0x00302C2A);
+            Native.ExtTextOutW(canvasDc, 0, 0, Native.EtoOpaque, ref tag, null, 0, 0);
+            Native.SetBkMode(canvasDc, Native.Transparent);
+            Native.SetTextColor(canvasDc, 0x00FFFFFF);
+            Native.DrawTextW(canvasDc, text, text.Length, ref tag, Native.DtCenter | Native.DtVCenter | Native.DtSingleLine);
+        }
+        finally
+        {
+            if (previous != 0) Native.SelectObject(canvasDc, previous);
+            if (font != 0) Native.DeleteObject(font);
+        }
+    }
+
+    /// <summary>
+    /// For each window, front first, the index of a window in front of it whose rectangle holds all
+    /// of it, or -1 when some of it can be seen. Only a window that will be printed can hide one.
+    /// </summary>
+    internal static int[] HiddenBehind(IReadOnlyList<AgentWindow> windows)
+    {
+        var hiddenBy = new int[windows.Count];
+        var covers = new List<int>();
+        for (int i = 0; i < windows.Count; i++)
+        {
+            AgentWindow window = windows[i];
+            hiddenBy[i] = -1;
+            foreach (int front in covers)
+            {
+                AgentWindow cover = windows[front];
+                if (window.X < cover.X || window.Y < cover.Y || window.X + window.Width > cover.X + cover.Width
+                    || window.Y + window.Height > cover.Y + cover.Height) continue;
+                hiddenBy[i] = front;
+                break;
+            }
+            // A hidden window lies inside its cover, so anything it would hide, that cover hides too.
+            if (hiddenBy[i] < 0 && window.Responding) covers.Add(i);
+        }
+        return hiddenBy;
     }
 
     /// <summary>
@@ -496,7 +742,10 @@ public sealed partial class AgentDesktop : IDisposable
                 previous = 0;
                 try
                 {
-                    BitmapSource raw = Imaging.CreateBitmapSourceFromHBitmap(bitmap, 0, Int32Rect.Empty,
+                    // Only the part that shows, as on the whole screen: see Drawn.
+                    AgentWindow shows = Drawn(new AgentWindow(window, "", "", rect.Left, rect.Top, width, height));
+                    BitmapSource raw = Imaging.CreateBitmapSourceFromHBitmap(bitmap, 0,
+                        new Int32Rect(shows.X - rect.Left, shows.Y - rect.Top, shows.Width, shows.Height),
                         BitmapSizeOptions.FromEmptyOptions());
                     raw.Freeze();
                     image = new FormatConvertedBitmap(raw, PixelFormats.Bgr32, null, 0);
@@ -978,6 +1227,7 @@ public sealed partial class AgentDesktop : IDisposable
         {
             if (_ownsDesktop) Native.CloseDesktop(_desktop);
             _work.Dispose();
+            foreach (nint window in _prints.Keys.ToArray()) ForgetPrint(window);
         }
         _sandbox?.Dispose();
     }
@@ -1072,6 +1322,17 @@ public sealed partial class AgentDesktop : IDisposable
         else _notAnswering[window] = Environment.TickCount64 + HungRememberMilliseconds;
         return answered;
     }
+
+    /// <summary>
+    /// Whether every window on the screen answers right now, or just the one given - asked afresh
+    /// rather than from the brief memory of an earlier "no", because the caller is waiting for that
+    /// "no" to turn into a "yes". False too when the pump itself is too busy to ask.
+    /// </summary>
+    internal bool Answers(nint window = 0) => Run(() =>
+    {
+        _notAnswering.Clear();
+        return window == 0 ? WindowsOnScreen().All(open => open.Responding) : Answering(window);
+    }, CaptureBound);
 
     // Only ever touched on the pump thread, which is the one thread that enumerates windows.
     readonly Dictionary<nint, long> _notAnswering = [];

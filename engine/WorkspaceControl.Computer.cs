@@ -46,10 +46,14 @@ public sealed partial class WorkspaceControl
                 if (WorkspaceComputer.Bounds(action, width, height) is { } why) return Rejected(why);
                 if (request.Target == "desktop" && action.ScrollX != 0)
                     return Rejected("Native horizontal scrolling is not supported. Browser target supports both axes.");
+                if (action.Control > 0 && _tree.Known(action.Control) is null)
+                    return Rejected($"Control {action.Control} is not known. Number the controls again with controls or marks.");
             }
+            string? missed = null;
             ComputerReceipt receipt = await WorkspaceComputer.Execute(request.Actions, ownsLease, async action =>
             {
                 if (!ownsLease() || input.IsCancellationRequested) return false;
+                if (action.Control > 0) return AtControl(action, ticket, ref missed);
                 // Back into the coordinates the desktop and the browser use, immediately before the
                 // action goes out - never in the receipt, which stays in the model's own space.
                 ComputerAction placed = WorkspaceMarks.ToSource(action, scale);
@@ -60,10 +64,17 @@ public sealed partial class WorkspaceControl
                 _evidence.Note("computer." + action.Type, request.Target, sent ? "input delivered; verify outcome" : "not confirmed; do not replay");
                 return sent;
             }, input.Token).ConfigureAwait(false);
+            if (missed is not null && receipt.Status == "interrupted")
+                receipt = receipt with { Reason = missed + " " + receipt.Reason };
 
             BitmapSource? frame = null;
             if (request.Screenshot && ownsLease() && !input.IsCancellationRequested)
             {
+                // An app is often busy for a beat right after it is clicked. Waiting that beat out
+                // here is free; a picture of its last frame costs the agent another look.
+                if (browser is null)
+                    await Settle(0, input.Token, afterInput: receipt.Completed.Any(done => done is not ("wait" or "screenshot")))
+                        .ConfigureAwait(false);
                 // One evidence frame and one model image per group. Screenshots are optional for text-only work.
                 try
                 {
@@ -92,5 +103,43 @@ public sealed partial class WorkspaceControl
             return new(receipt, request.Target, frame?.PixelWidth ?? width, frame?.PixelHeight ?? height, frame);
         }
         finally { _computerActions.Release(); }
+    }
+
+    /// <summary>
+    /// A pointer action aimed at a numbered control, at wherever that control is now. A plain left
+    /// click on a WPF control presses that exact control through the tree: WPF cannot be clicked by
+    /// message on a workspace desktop (see AgentDesktop.Click), and pressing by point there resolves
+    /// whatever sits at the centre - a label inside a button, an icon inside a list item - rather
+    /// than the control the number names. Anything the tree cannot press, and every other kind of
+    /// pointer action, goes to the control's centre the ordinary way.
+    /// </summary>
+    bool AtControl(ComputerAction action, long ticket, ref string? missed)
+    {
+        (int x, int y, bool wpf, string? why) = _tree.Where(action.Control);
+        if (why is not null)
+        {
+            missed = why;
+            _evidence.Note("computer." + action.Type, "control " + action.Control, "refused; " + why);
+            return false;
+        }
+        if (wpf && action is { Type: "click", Button: "left" })
+        {
+            WorkspaceTree.TreeAction pressed = _tree.TryPress(action.Control, () => Ticket == ticket);
+            if (pressed == WorkspaceTree.TreeAction.Applied)
+            {
+                _evidence.Note("computer.click", "control " + action.Control, "pressed through the tree; verify outcome");
+                return true;
+            }
+            if (pressed == WorkspaceTree.TreeAction.Refused)
+            {
+                missed = $"Control {action.Control} changed before it could be pressed. Number the controls again.";
+                _evidence.Note("computer.click", "control " + action.Control, "refused; " + missed);
+                return false;
+            }
+        }
+        bool sent = _desktop.ComputerInput(action with { X = x, Y = y }, ticket);
+        _evidence.Note("computer." + action.Type, $"control {action.Control} at ({x},{y})",
+            sent ? "input delivered; verify outcome" : "not confirmed; do not replay");
+        return sent;
     }
 }

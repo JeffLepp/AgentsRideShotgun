@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text.Json;
 using HiveMind.AgentWorkspaces;
 
 /// <summary>
@@ -9,7 +11,40 @@ using HiveMind.AgentWorkspaces;
 /// </summary>
 internal static class SleepGate
 {
-    internal static void Run(Action<bool, string> check)
+    internal static int RunStandalone(string output)
+    {
+        Directory.CreateDirectory(output);
+        string fixture = Path.Combine(Path.GetDirectoryName(output)!, "sf-" + Guid.NewGuid().ToString("N")[..8]);
+        using var store = WorkspaceStore.UseRootForTests(Path.Combine(fixture, "w"));
+        using var settings = AppSettingsStore.UseFileForTests(Path.Combine(fixture, "settings.json"));
+        using var watchdog = new Timer(_ =>
+        {
+            File.WriteAllText(Path.Combine(output, "timeout.txt"), "Sleep gate exceeded 180 seconds.");
+            Environment.Exit(2);
+        }, null, TimeSpan.FromSeconds(180), Timeout.InfiniteTimeSpan);
+        var claims = new List<string>();
+        string? failure = null;
+        try { Run(Check, output); }
+        catch (Exception ex) { failure = ex.ToString(); }
+        string engine = typeof(WorkspaceRuntime).Assembly.Location;
+        File.WriteAllText(Path.Combine(output, "sleep-gate.json"), JsonSerializer.Serialize(new
+        {
+            status = failure is null ? "passed" : "failed", observedAt = DateTimeOffset.UtcNow,
+            os = Environment.OSVersion.ToString(), engine,
+            engineSha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(engine))),
+            fixture, claims, failure, globalInputEventsSent = 0, modelCalls = 0,
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        return failure is null ? 0 : 1;
+
+        void Check(bool passed, string claim)
+        {
+            if (!passed) throw new InvalidOperationException(claim);
+            claims.Add(claim);
+            File.AppendAllText(Path.Combine(output, "progress.log"), "PASS " + claim + Environment.NewLine);
+        }
+    }
+
+    internal static void Run(Action<bool, string> check, string output)
     {
         TimeSpan sleepBefore = WorkspaceRuntime.SleepAfter;
         TimeSpan dozeBefore = WorkspaceRuntime.DozeInterval;
@@ -26,8 +61,14 @@ internal static class SleepGate
             ClockTicksOffUiThread(check);
             ConcurrentStart(check);
             RunningCommandStaysAwake(check);
+            // Performance is measured with ordinary lifetimes. These direct control-plane calls
+            // do not acquire an MCP access lease, so the 150 ms idle timer would retire the
+            // fixture during a normal multi-second browser launch and mislabel it a startup race.
+            WorkspaceRuntime.SleepAfter = sleepBefore;
+            WorkspaceRuntime.DozeInterval = dozeBefore;
+            WorkspaceExternalAccess.MaxUseAge = useAgeBefore;
             WakeCost(check);
-            RoundTripCost(check);
+            RoundTripCost(check, output);
         }
         finally
         {
@@ -142,71 +183,83 @@ internal static class SleepGate
     /// measured getting back to an equivalent state: browser up and renavigated to the same page,
     /// one app running again. This is the number SleepAfter's comment is chosen against.
     /// </summary>
-    static void RoundTripCost(Action<bool, string> check)
+    static void RoundTripCost(Action<bool, string> check, string output)
     {
-        if (!File.Exists(WorkspaceBrowser.ChromePath))
-        {
-            check(true, "Round-trip cost not measured: no supported browser is installed on this machine");
-            return;
-        }
+        check(File.Exists(WorkspaceBrowser.ChromePath), "A supported browser is installed for the sleep round trip");
         StoredWorkspace workspace = NewWorkspace("SleepRoundTrip");
         WorkspaceAccessStore.Write(workspace.Id, new WorkspaceAccessPolicy(true, false) { PrewarmBrowser = true });
         string notepad = Path.Combine(Environment.SystemDirectory, "notepad.exe");
-
-        WorkspaceRuntime before = WorkspaceRuntime.Start(workspace);
-        string folder = before.Computer!.Folder!;
-        string page = new Uri(Path.Combine(folder, "round-trip.html")).AbsoluteUri;
-        File.WriteAllText(Path.Combine(folder, "round-trip.html"), "<title>round trip</title><h1>round trip</h1>");
-        before.Plane!.AgentTakes();
-        before.Computer.Launch(notepad);
-        if (!Navigate(before.Plane, page))
-        {
-            // A Chrome cold start can lose a race under heavy concurrent load - the rest of this
-            // gate, or three real workspaces on the owner's machine, both create exactly that load.
-            // WorkspaceControl.Prewarm already treats a browser that does not come up as silent and
-            // retryable, not a defect; that is a browser-launch reliability question (see prompt 5,
-            // FIX-PROMPTS-2026-09-20.md), not a sleep/wake one, so it does not fail this gate - it
-            // just means this run has no clean number to report.
-            check(true, "Round-trip cost not measured this run: the browser did not come up before sleep even after retrying");
-            before.Dispose();
-            return;
-        }
-
-        var clock = Stopwatch.StartNew();
-        before.Dispose(); // sleep: the desktop, the browser process, the app and the shell all die here
-        WorkspaceRuntime woken = WorkspaceRuntime.Start(WorkspaceStore.All().Single(w => w.Id == workspace.Id));
-        woken.Plane!.AgentTakes();
-        woken.Computer!.Launch(notepad);
-        bool navigatedAfter = Navigate(woken.Plane, page);
-        TimeSpan roundTrip = clock.Elapsed;
+        var beforeAttempts = new List<NavigationAttempt>();
+        var afterAttempts = new List<NavigationAttempt>();
+        double? roundTripMilliseconds = null;
         try
         {
-            if (!navigatedAfter)
-            {
-                check(true, "Round-trip cost not measured this run: the browser did not come back up after waking even after retrying");
-                return;
-            }
+            WorkspaceRuntime before = WorkspaceRuntime.Start(workspace);
+            string folder = before.Computer!.Folder!;
+            string page = new Uri(Path.Combine(folder, "round-trip.html")).AbsoluteUri;
+            File.WriteAllText(Path.Combine(folder, "round-trip.html"), "<title>round trip</title><h1>round trip</h1>");
+            before.Plane!.AgentTakes();
+            before.Computer.Launch(notepad);
+            check(Navigate(before, page, beforeAttempts), "The pre-sleep browser navigates while its workspace stays alive: "
+                + JsonSerializer.Serialize(beforeAttempts));
+
+            var clock = Stopwatch.StartNew();
+            before.Dispose(); // sleep: the desktop, browser, app and shell die; the folder remains
+            WorkspaceRuntime woken = WorkspaceRuntime.Start(WorkspaceStore.All().Single(w => w.Id == workspace.Id));
+            woken.Plane!.AgentTakes();
+            woken.Computer!.Launch(notepad);
+            bool navigatedAfter = Navigate(woken, page, afterAttempts);
+            TimeSpan roundTrip = clock.Elapsed;
+            roundTripMilliseconds = roundTrip.TotalMilliseconds;
+            check(navigatedAfter, "The woken browser navigates while its workspace stays alive: "
+                + JsonSerializer.Serialize(afterAttempts));
             check(File.Exists(Path.Combine(folder, "evidence", "actions.log")),
                 "The evidence log written before sleep is still on disk after waking - sleep tears down the desktop, not the workspace folder");
             check(roundTrip < TimeSpan.FromMinutes(3), "Full round trip after sleep - new desktop, browser relaunched and renavigated, "
                 + $"one app relaunched - took {roundTrip.TotalSeconds:0.0} s. This is the cost SleepAfter's comment is measured against");
         }
-        finally { woken.Dispose(); }
+        finally
+        {
+            File.WriteAllText(Path.Combine(output, "sleep-round-trip.json"), JsonSerializer.Serialize(new
+            {
+                workspace = workspace.Id, browser = WorkspaceBrowser.ChromePath,
+                sleepAfterMilliseconds = WorkspaceRuntime.SleepAfter.TotalMilliseconds,
+                dozeIntervalMilliseconds = WorkspaceRuntime.DozeInterval.TotalMilliseconds,
+                maxUseAgeMilliseconds = WorkspaceExternalAccess.MaxUseAge.TotalMilliseconds,
+                beforeAttempts, afterAttempts, roundTripMilliseconds,
+            }, new JsonSerializerOptions { WriteIndented = true }));
+            WorkspaceRuntime.Of(workspace.Id)?.Dispose();
+        }
     }
 
-    /// <summary>
-    /// Opens the page, retrying past a Chrome cold start that loses a race under load - the same
-    /// tolerance a real agent gets by just calling `browse` again.
-    /// </summary>
-    static bool Navigate(WorkspaceControl plane, string page)
+    sealed record NavigationAttempt(int Attempt, double Milliseconds, bool Confirmed, bool BrowserAlive,
+        bool RuntimeAlive, string? Failure, string? Exception);
+
+    // Retrying this static local page is safe. Keep every result: failure is not evidence of load,
+    // and a retired workspace cannot be recovered by calling its disposed control plane again.
+    static bool Navigate(WorkspaceRuntime runtime, string page, List<NavigationAttempt> attempts)
     {
         for (int attempt = 0; attempt < 3; attempt++)
         {
-            bool ok;
-            try { ok = plane.OpenBrowser(page, CancellationToken.None).GetAwaiter().GetResult() && plane.BrowserAlive; }
-            catch (Exception) { ok = false; }
-            if (ok) return true;
-            Thread.Sleep(1000);
+            var clock = Stopwatch.StartNew();
+            bool confirmed = false, browserAlive = false;
+            string? failure = null, exception = null;
+            try
+            {
+                if (runtime.Plane is { } plane)
+                {
+                    (confirmed, failure) = plane.OpenBrowserWithReceipt(page).GetAwaiter().GetResult();
+                    browserAlive = plane.BrowserAlive;
+                }
+                else failure = "The fixture workspace has already stopped.";
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { exception = ex.ToString(); }
+            bool runtimeAlive = ReferenceEquals(runtime, WorkspaceRuntime.Of(runtime.Id));
+            attempts.Add(new(attempt + 1, clock.Elapsed.TotalMilliseconds, confirmed, browserAlive,
+                runtimeAlive, failure, exception));
+            if (confirmed && browserAlive && runtimeAlive) return true;
+            if (!runtimeAlive) return false;
+            if (attempt < 2) Thread.Sleep(1000);
         }
         return false;
     }

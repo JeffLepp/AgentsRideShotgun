@@ -182,7 +182,13 @@ static partial class Native
     public static extern bool ShowWindow(nint window, int command);
 
     public const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoZOrder = 0x0004,
-        SwpNoActivate = 0x0010, SwpNoOwnerZOrder = 0x0200;
+        SwpNoActivate = 0x0010, SwpNoOwnerZOrder = 0x0200, SwpAsyncWindowPos = 0x4000;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    public static extern nint GetWindowLongPtrW(nint window, int index);
+
+    public const int GwlStyle = -16;
+    public const long WsThickFrame = 0x00040000;
     public const nint HwndTopmost = -1, HwndNoTopmost = -2, HwndBottom = 1;
     public const int SwMaximize = 3, SwMinimize = 6, SwRestore = 9;
     public const uint CreateSuspended = 0x00000004;
@@ -345,6 +351,40 @@ static partial class Native
     public static extern bool ExtTextOutW(nint deviceContext, int x, int y, uint options,
         ref Rect rect, string? text, uint count, nint spacing);
 
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(nint window, int attribute, out Rect value, int size);
+
+    public const int DwmwaExtendedFrameBounds = 9;
+
+    [DllImport("gdi32.dll")]
+    public static extern int SetTextColor(nint deviceContext, int color);
+
+    [DllImport("gdi32.dll")]
+    public static extern int SetBkMode(nint deviceContext, int mode);
+
+    public const int Transparent = 1;
+
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+    public static extern nint CreateFontW(int height, int width, int escapement, int orientation, int weight,
+        uint italic, uint underline, uint strikeOut, uint charSet, uint outPrecision, uint clipPrecision,
+        uint quality, uint pitchAndFamily, string face);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int DrawTextW(nint deviceContext, string text, int count, ref Rect rect, uint format);
+
+    public const uint DtCenter = 0x1, DtVCenter = 0x4, DtSingleLine = 0x20, DtCalcRect = 0x400;
+
+    /// <summary>
+    /// Blends a source over a destination at one constant opacity. The blend function is the
+    /// BLENDFUNCTION struct packed into four bytes: AC_SRC_OVER, no flags, the opacity, no per-pixel
+    /// alpha.
+    /// </summary>
+    [DllImport("msimg32.dll")]
+    public static extern bool AlphaBlend(nint destination, int x, int y, int width, int height,
+        nint source, int sourceX, int sourceY, int sourceWidth, int sourceHeight, int blend);
+
+    public static int ConstantAlpha(byte opacity) => opacity << 16;
+
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool CloseHandle(nint handle);
 
@@ -369,6 +409,27 @@ static partial class Native
     public static extern bool CreateProcessW(string? application, StringBuilder command,
         nint processAttributes, nint threadAttributes, bool inheritHandles, uint flags,
         nint environment, string? directory, ref StartupInfo startup, out ProcessInfo created);
+
+    public const uint ExtendedStartupInfoPresent = 0x00080000;
+    public const uint ProcThreadAttributeHandleList = 0x00020002;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool CreateProcessW(string? application, StringBuilder command,
+        nint processAttributes, nint threadAttributes, bool inheritHandles, uint flags,
+        nint environment, string? directory, ref StartupInfoEx startup, out ProcessInfo created);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetHandleInformation(nint handle, out uint flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool InitializeProcThreadAttributeList(nint list, uint count, uint flags, ref nuint bytes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool UpdateProcThreadAttribute(nint list, uint flags, nuint attribute,
+        nint value, nuint bytes, nint previousValue, nint returnBytes);
+
+    [DllImport("kernel32.dll")]
+    public static extern void DeleteProcThreadAttributeList(nint list);
 
     // --- clipboard broker (Milestone 1C) -------------------------------------------------------
 
@@ -625,6 +686,13 @@ static partial class Native
         public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
         public short wShowWindow, cbReserved2;
         public nint lpReserved2, hStdInput, hStdOutput, hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct StartupInfoEx
+    {
+        public StartupInfo StartupInfo;
+        public nint lpAttributeList;
     }
 
     [StructLayout(LayoutKind.Sequential)]

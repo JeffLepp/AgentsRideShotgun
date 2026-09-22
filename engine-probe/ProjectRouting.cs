@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.IO;
+using System.Reflection;
 using System.Windows.Media.Imaging;
 using HiveMind.AgentWorkspaces;
 
@@ -31,36 +33,8 @@ internal static class ProjectRouting
             check(looks[AgentScreenLook.Simple] == 0x141A20 && looks[AgentScreenLook.Full] != looks[AgentScreenLook.Simple],
                 "Full desktop paints the agent screen's background; Simple keeps the plain fill");
         }
-        var gate = new WorkspaceCaptureGate();
-        using var entered = new ManualResetEventSlim();
-        using var finish = new ManualResetEventSlim();
-        var picture = new DesktopFrame(null, 3, 0, false);
-        int composites = 0;
-        Task<DesktopFrame> first = Task.Run(() => gate.Take(640, 480, TimeSpan.FromSeconds(2), () =>
-        {
-            Interlocked.Increment(ref composites);
-            entered.Set();
-            finish.Wait(TimeSpan.FromSeconds(2));
-            return picture;
-        }));
-        check(entered.Wait(TimeSpan.FromSeconds(2)), "The controlled capture begins within its bound");
-        Task<DesktopFrame> second = Task.Run(() => gate.Take(640, 480, TimeSpan.FromSeconds(2), () =>
-        {
-            Interlocked.Increment(ref composites);
-            return picture;
-        }));
-        try
-        {
-            check(!second.Wait(100), "A concurrent agent screenshot waits for the preview's in-flight frame");
-            check(gate.Take(320, 240, TimeSpan.FromMilliseconds(20), () => picture).TimedOut,
-                "Concurrent requests never receive an image in the wrong coordinate space");
-            check(gate.Take(640, 480, TimeSpan.FromMilliseconds(20), () => picture).TimedOut,
-                "Waiting for a busy capture remains bounded");
-        }
-        finally { finish.Set(); }
-        Task.WaitAll(first, second);
-        check(composites == 1 && ReferenceEquals(first.Result, second.Result),
-            "The agent and preview receive the same frame from one composite, with no duplicate capture queue");
+        CaptureGateChecks(check);
+        CapturePumpChecks(check);
         string evidenceHome = Directory.CreateTempSubdirectory("Deskweave-evidence-").FullName;
         string frames = Path.Combine(evidenceHome, "evidence", "frames");
         Directory.CreateDirectory(frames);
@@ -116,6 +90,9 @@ internal static class ProjectRouting
         check(WorkspaceHome.Decide(records, child, "claude-code", _ => true).Existing == "alpha"
             && WorkspaceHome.Decide(records.Reverse(), alpha.ToUpperInvariant(), "codex-mcp-client", _ => false).Existing == "alpha",
             "Different agents, folder casing and record order all reuse the same project workspace");
+        check(new[] { "claude-code", "claude-code account 2", "codex-mcp-client", "codex account 2", "gemini-cli", "custom MCP client" }
+                .All(client => WorkspaceHome.Decide(records, child, client, _ => true).Existing == "alpha"),
+            "Project routing is independent of provider/profile labels, including generic MCP clients, while account authentication remains with the provider");
         check(WorkspaceHome.Decide(records, beta, "codex-mcp-client", _ => false) is { Existing: null, Name: "Beta" },
             "A new project creates its own workspace despite legacy shared or per-agent workspaces");
         check(WorkspaceHome.Decide(records, root, "claude-code", _ => true).Existing == "scratch"
@@ -128,5 +105,129 @@ internal static class ProjectRouting
         check(WorkspaceHome.EnsureScratch().Id == scratch.Id && WorkspaceStore.All().Count == before + 1
             && WorkspaceRuntime.Of(scratch.Id) is null,
             "Repeated Scratch initialization creates exactly one saved record and no running desktop");
+    }
+
+    static void CaptureGateChecks(Action<bool, string> check)
+    {
+        var gate = new WorkspaceCaptureGate();
+        using var entered = new ManualResetEventSlim();
+        var finish = new TaskCompletionSource<DesktopFrame>();
+        var picture = new DesktopFrame(null, 3, 0, false);
+        int composites = 0;
+        Task<DesktopFrame> first = Task.Run(() => gate.Take(640, 480, TimeSpan.FromSeconds(2), () =>
+        {
+            Interlocked.Increment(ref composites);
+            entered.Set();
+            return finish.Task;
+        }));
+        check(entered.Wait(TimeSpan.FromSeconds(2)), "The controlled capture begins within its bound");
+        Task<DesktopFrame> second = Task.Run(() => gate.Take(640, 480, TimeSpan.FromSeconds(2), () =>
+        {
+            Interlocked.Increment(ref composites);
+            return Task.FromResult(picture);
+        }));
+        try
+        {
+            check(!second.Wait(100), "A concurrent agent screenshot waits for the preview's in-flight frame");
+            check(gate.Take(320, 240, TimeSpan.FromMilliseconds(20), () => Task.FromResult(picture)).TimedOut,
+                "Concurrent requests never receive an image in the wrong coordinate space");
+            check(gate.Take(640, 480, TimeSpan.FromMilliseconds(20), () => Task.FromResult(picture)).TimedOut,
+                "Waiting for a busy capture remains bounded");
+        }
+        finally { finish.TrySetResult(picture); }
+        Task.WaitAll(first, second);
+        check(composites == 1 && ReferenceEquals(first.Result, second.Result),
+            "The agent and preview receive the same frame from one composite, with no duplicate capture queue");
+        var outstanding = new TaskCompletionSource<DesktopFrame>();
+        int submissions = 0;
+        Task<DesktopFrame> Begin()
+        {
+            submissions++;
+            return outstanding.Task;
+        }
+        TimeSpan shortWait = TimeSpan.FromMilliseconds(20);
+        check(gate.Take(640, 480, shortWait, Begin).TimedOut,
+            "The caller that submits a capture may time out while the native operation remains pending");
+        bool followersTimedOut = Enumerable.Range(0, 3).All(_ => gate.Take(640, 480, shortWait, Begin).TimedOut);
+        check(followersTimedOut && submissions == 1,
+            "Later preview ticks share the same capture after the first caller times out, without resubmitting it");
+        check(gate.Take(320, 240, shortWait, Begin).TimedOut && submissions == 1,
+            "A timed-out capture still protects its coordinate space until the operation finishes");
+        outstanding.SetResult(picture);
+        var nextPicture = new DesktopFrame(null, 7, 0, false);
+        DesktopFrame next = gate.Take(320, 240, shortWait, () =>
+        {
+            submissions++;
+            return Task.FromResult(nextPicture);
+        });
+        check(submissions == 2 && ReferenceEquals(next, nextPicture),
+            "Completion releases the capture flight so the next request can obtain a new frame and size");
+
+        var failed = new TaskCompletionSource<DesktopFrame>();
+        check(gate.Take(640, 480, shortWait, () => failed.Task).TimedOut,
+            "A caller can leave before a later native capture failure");
+        failed.SetException(new IOException("controlled late capture failure"));
+        check(ReferenceEquals(gate.Take(640, 480, shortWait, () => Task.FromResult(picture)), picture),
+            "A capture fault after all callers timed out releases the flight and allows recovery");
+        bool submissionFailed = false;
+        try { gate.Take(640, 480, shortWait, () => throw new IOException("controlled enqueue failure")); }
+        catch (IOException) { submissionFailed = true; }
+        check(submissionFailed && ReferenceEquals(gate.Take(640, 480, shortWait, () => Task.FromResult(picture)), picture),
+            "Submission failure reaches its caller and does not strand the capture gate");
+    }
+
+    static void CapturePumpChecks(Action<bool, string> check)
+    {
+        using var desktop = AgentDesktop.Create(AgentDesktop.NameFor("capture" + Guid.NewGuid().ToString("N")[..8]));
+        // Control the real serial pump without launching a window or relying on a hung third-party app.
+        var work = (BlockingCollection<Action>)typeof(AgentDesktop).GetField("_work", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(desktop)!;
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var actionRan = new ManualResetEventSlim();
+        int actions = 0;
+        work.Add(() => { entered.Set(); release.Wait(TimeSpan.FromSeconds(15)); });
+        try
+        {
+            check(entered.Wait(TimeSpan.FromSeconds(2)), "The real desktop pump is held by a controlled fixture operation");
+            DesktopFrame first = desktop.Capture(640, 480);
+            work.Add(() => { Interlocked.Increment(ref actions); actionRan.Set(); });
+            DesktopFrame later = desktop.Capture(640, 480);
+            check(first.TimedOut && later.TimedOut && work.Count == 2,
+                "Repeated real capture timeouts leave one queued capture and the independently queued action");
+        }
+        finally { release.Set(); }
+        check(actionRan.Wait(TimeSpan.FromSeconds(5)) && actions == 1,
+            "The non-capture pump action runs exactly once after the pending capture, without being skipped or replayed");
+        check(desktop.Capture(640, 480) is { Complete: true, Image.PixelWidth: 640, Image.PixelHeight: 480 },
+            "Real screenshot capture recovers when the held desktop pump resumes");
+
+        entered.Reset();
+        release.Reset();
+        work.Add(() => { entered.Set(); release.Wait(TimeSpan.FromSeconds(15)); });
+        Task? disposing = null;
+        Task<DesktopFrame>? pending = null;
+        try
+        {
+            check(entered.Wait(TimeSpan.FromSeconds(2)), "The disposal fixture holds the desktop pump before a capture is queued");
+            pending = Task.Run(() => desktop.Capture(640, 480));
+            check(SpinWait.SpinUntil(() => work.Count == 1, TimeSpan.FromSeconds(2)),
+                "A real capture is submitted before desktop disposal starts");
+            disposing = Task.Run(desktop.Dispose);
+            check(SpinWait.SpinUntil(() => work.IsAddingCompleted, TimeSpan.FromSeconds(2)),
+                "Disposal closes capture submission before draining the held pump");
+            release.Set();
+            check(Task.WaitAll([pending, disposing], TimeSpan.FromSeconds(8))
+                && pending.Result is { Image: null, TimedOut: false },
+                "An accepted capture completes as unavailable during teardown instead of stranding or faulting its caller");
+            check(desktop.Capture(640, 480) is { Image: null, TimedOut: false },
+                "Capture after desktop disposal returns unavailable without submitting to the closed queue");
+        }
+        finally
+        {
+            release.Set();
+            if (disposing is not null) disposing.Wait(TimeSpan.FromSeconds(8));
+            if (pending is not null) pending.Wait(TimeSpan.FromSeconds(3));
+        }
     }
 }

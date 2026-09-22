@@ -71,6 +71,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             if (IsVisible) { _screenTimer.Start(); ScreenTick(null, EventArgs.Empty); }
             else _screenTimer.Stop();
         };
+        // The pointer arriving speeds the picture up now, not at the end of a glance-paced wait.
+        ScreenImage.MouseEnter += (_, _) => { if (_screenTimer is { IsEnabled: true }) ScreenTick(null, EventArgs.Empty); };
         Unloaded += (_, _) => StopLive();
     }
 
@@ -265,13 +267,24 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         ScreenTick(null, EventArgs.Empty);
     }
 
+    /// <summary>The pointer is on the picture or this page holds control, so it redraws fast enough to drive.</summary>
+    bool HandsOn => ScreenImage.IsMouseOver || _input?.OwnsControl == true;
+    long _livedAt;
+
     async void ScreenTick(object? sender, EventArgs e)
     {
         if (_disposed || _id is not { } id || !IsVisible) return;
         // Like the stack's loop, the pace is re-read every tick rather than kept from the start, so
-        // a power change reaches this screen without a restart.
-        if (_screenTimer is { } beat) beat.Interval = HubPreview.Interval();
-        RefreshLive();
+        // a power change, or the owner's hand arriving or leaving, reaches this screen at once.
+        bool handsOn = HandsOn;
+        if (_screenTimer is { } beat) beat.Interval = handsOn ? HubPreview.HandsOnInterval() : HubPreview.Interval();
+        // Only the picture speeds up. The pills and the memory line read the store and the system,
+        // and keep the glance pace however fast frames are coming.
+        if (!handsOn || Environment.TickCount64 - _livedAt >= HubPreview.Interval().TotalMilliseconds)
+        {
+            _livedAt = Environment.TickCount64;
+            RefreshLive();
+        }
         // One capture in flight at a time: a slow Task.Run from an earlier tick must finish (or be
         // dropped below) before another starts, rather than racing it.
         if (_capturingScreen) return;
@@ -466,13 +479,18 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     }
     void RenameBox_LostFocus(object sender, RoutedEventArgs e) => CommitRename();
 
+    internal static Func<bool>? ConfirmDeleteForTests;
+
     void DeleteWorkspace(string id)
     {
         StoredWorkspace? workspace = WorkspaceStore.Find(id);
         if (workspace is null) return;
-        if (MessageBox.Show(Window.GetWindow(this), $"Delete {workspace.Name} and all files inside its workspace folder?\n\n"
-                + "Its running desktop and active work will stop. This cannot be undone.",
-                "Delete workspace", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        // What goes is what lives in the workspace folder: the agent's screen, the files on its page, its
+        // history and browser sign-ins. The project folder is never touched, and a person deciding
+        // whether to press Delete needs that said more than anything else.
+        if (!(ConfirmDeleteForTests?.Invoke() ?? Question.Ask(Window.GetWindow(this), "Delete " + workspace.Name + "?",
+                "Its screen, the files on its page, its history and its browser sign-ins are deleted, and anything "
+                + "running on it stops. Your project folder is not touched. This can't be undone.", "Delete", danger: true))) return;
         WorkspaceRuntime.Of(id)?.Dispose();
         WorkspaceAccessStore.Write(id, new WorkspaceAccessPolicy());
         WorkspaceAccessStore.Withdraw(id);

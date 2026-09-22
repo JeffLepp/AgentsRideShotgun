@@ -24,6 +24,10 @@ internal static class Program
 
     static int RunMain(string[] args)
     {
+        if (args.Length == 3 && args[0] == "--router-owned-client")
+            return RouterStartup.OwnedClient(args[1], args[2]);
+        if (args.Length == 10 && args[0] == "--inheritance-child")
+            return HandleInheritance.Child(args);
         if (args.Length == 2 && args[0] == "--grandchild")
         {
             File.WriteAllText(args[1], JsonSerializer.Serialize(new { pid = Environment.ProcessId, desktop = DesktopName() }));
@@ -51,6 +55,7 @@ internal static class Program
         // environment, in each app's own format, and starts no model.
         if (args.Length > 0 && args[0] == "mcp") return FirstRunConnections.Cli(args);
         if (args.Length == 3 && args[0] == "--render-mode-child") return RenderModeProbe.Child(args[1], args[2]);
+        if (args.Length == 3 && args[0] == "--popout-fixture") return PopOutProbe.Fixture(args[1], args[2]);
         // ponytail: one probe at a time on this PC (see ui-probe); child modes above never wait for it.
         using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
         try { turn.WaitOne(); } catch (AbandonedMutexException) { }
@@ -64,10 +69,30 @@ internal static class Program
             return ClickProof.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--native-dialog-press" && Path.IsPathFullyQualified(args[1]))
             return NativeDialogPress.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--console-routing" && Path.IsPathFullyQualified(args[1]))
+            return ConsoleRouting.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--handle-inheritance" && Path.IsPathFullyQualified(args[1]))
+            return HandleInheritance.RunStandalone(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--tree-budget" && Path.IsPathFullyQualified(args[1]))
             return TreeBudgetProof.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--live-router" && Path.IsPathFullyQualified(args[1]))
             return LiveRouter.RunStandalone(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--router-startup" && Path.IsPathFullyQualified(args[1]))
+            return RouterStartup.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--pop-out" && Path.IsPathFullyQualified(args[1]))
+            return PopOutProbe.RunStandalone(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--notepad-dialog" && Path.IsPathFullyQualified(args[1]))
+            return NotepadDialogProbe.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--chrome-restore" && Path.IsPathFullyQualified(args[1]))
+            return ChromeRestoreProbe.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--focus" && Path.IsPathFullyQualified(args[1]))
+            return FocusProbe.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--page-read" && Path.IsPathFullyQualified(args[1]))
+            return PageReadProbe.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--agent-view" && Path.IsPathFullyQualified(args[1]))
+            return AgentViewProbe.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--sleep-gate" && Path.IsPathFullyQualified(args[1]))
+            return SleepGate.RunStandalone(Path.GetFullPath(args[1]));
         if (args.Length != 1 || !Path.IsPathFullyQualified(args[0])) return 2;
         return Run(Path.GetFullPath(args[0]));
     }
@@ -82,6 +107,12 @@ internal static class Program
         // writes into the fixture. The shell that started the probe may name the owner's real roots.
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", Path.Combine(fixture, "agents", "claude"));
         Environment.SetEnvironmentVariable("CODEX_HOME", Path.Combine(fixture, "agents", "codex"));
+        WorkspaceConnections.Profiles = app =>
+        {
+            bool claude = app == WorkspaceConnections.AgentApp.ClaudeCode;
+            string home = Path.Combine(fixture, "agents", claude ? "claude" : "codex");
+            return [new(app, "Fixture", home, Path.Combine(home, claude ? ".claude.json" : "config.toml"))];
+        };
         var claims = new List<string>();
         var observedProcesses = new List<int>();
         string? failure = null;
@@ -171,12 +202,34 @@ internal static class Program
                     "Packaged Deskweave bridge initializes as standard MCP");
                 competitor.Request("initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "Competing probe", version = "1" } });
                 string file = Path.Combine(firstFolder, "retained-output.txt");
-                Check(!Client.Failed(client.Tool("save", new { path = file, text = "taken" })) && File.ReadAllText(file) == "taken",
+                // Writes and reads go through run: the agent's own tools do file work, so the
+                // workspace no longer offers file tools of its own.
+                JsonElement Save(Client who, string text) => who.Tool("run", new
+                {
+                    command = "[IO.File]::WriteAllText('" + file.Replace("'", "''") + "', '" + text + "')", shell = "powershell", seconds = 20,
+                });
+                string Load(Client who) => Client.Text(who.Tool("run", new
+                {
+                    command = "[IO.File]::ReadAllText('" + file.Replace("'", "''") + "')", shell = "powershell", seconds = 20,
+                }));
+                Check(!Client.Failed(Save(client, "taken")) && File.ReadAllText(file) == "taken",
                     "An external client's first action takes control by itself");
                 Check(!Client.Failed(client.Tool("acquire")), "External client holds its workspace lease");
                 Check(Client.Failed(competitor.Tool("acquire")), "A second MCP client cannot acquire the same workspace concurrently");
-                Check(Client.Failed(competitor.Tool("save", new { path = file, text = "competing" })) && File.ReadAllText(file) == "taken",
+                Check(Client.Failed(Save(competitor, "competing")) && File.ReadAllText(file) == "taken",
                     "A second MCP client cannot write while the first holds control");
+                client.Tool("release");
+                using (var anotherProfile = new Client(first.Id))
+                {
+                    anotherProfile.Request("initialize", new { protocolVersion = "2025-06-18", capabilities = new { },
+                        clientInfo = new { name = "Deskweave engine probe", version = "1" } });
+                    Check(!Client.Failed(anotherProfile.Tool("acquire"))
+                        && Client.Failed(Save(client, "wrong identity"))
+                        && Load(anotherProfile).Contains("taken", StringComparison.Ordinal),
+                        "Two profiles using the same client label have distinct leases and share the same saved file readback");
+                }
+                Check(!Client.Failed(client.Tool("acquire")) && File.ReadAllText(file) == "taken",
+                    "Disconnecting the controlling profile frees the shared workspace for another session without losing its file");
                 const string expected = "Deskweave native command result";
                 var command = client.Tool("run", new
                 {
@@ -185,11 +238,11 @@ internal static class Program
                 });
                 Check(!Client.Failed(command) && Client.Text(command).Contains("native-command-complete", StringComparison.Ordinal)
                     && File.ReadAllText(file) == expected, "Real workspace PowerShell execution has a matching independent final-file oracle");
-                Check(Client.Text(client.Tool("file", new { path = file })).Contains(expected, StringComparison.Ordinal),
-                    "MCP file readback agrees with the filesystem oracle");
+                Check(Load(client).Contains(expected, StringComparison.Ordinal),
+                    "MCP readback agrees with the filesystem oracle");
                 BrowserProbe.Run(one, client, Check, output, observedProcesses);
                 one.Plane.OwnerTakes();
-                Check(Client.Failed(client.Tool("save", new { path = file, text = "must not overwrite" })) && File.ReadAllText(file) == expected,
+                Check(Client.Failed(Save(client, "must not overwrite")) && File.ReadAllText(file) == expected,
                     "Owner takeover revokes external writes without replay or file modification");
                 Check(Client.Failed(client.Tool("acquire")), "External client cannot reacquire while the owner holds control");
                 one.Access!.Configure(policy with { Enabled = false });
@@ -210,9 +263,11 @@ internal static class Program
             LiveRouter.Run(Check, output);
             ProjectRouting.Run(Check, output);
             RenderModeProbe.Run(Check, output);
-            SleepGate.Run(Check);
+            HandleInheritance.Run(Check, output);
+            SleepGate.Run(Check, output);
             PrewarmProbe.Run(Check);
             OpenRouteProbe.Run(Check);
+            PopOutProbe.Run(Check, Path.Combine(fixture, "popout"));
         }
         catch (Exception ex) { failure = ex.ToString(); }
         finally

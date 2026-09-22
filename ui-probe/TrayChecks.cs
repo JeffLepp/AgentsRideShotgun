@@ -48,10 +48,12 @@ internal static class TrayChecks
         int opens = 0, balloons = 0;
         tray.OpenRequested += () => opens++;
         tray.BalloonClicked += () => balloons++;
+        SendMessage(tray.Handle, TrayIcon.CallbackMessage, 0, 0x202);
+        SendMessage(tray.Handle, TrayIcon.CallbackMessage, 0, (1 << 16) | 0x400);
         SendMessage(tray.Handle, TrayIcon.CallbackMessage, 0, 0x203);
         SendMessage(tray.Handle, TrayIcon.CallbackMessage, 0, (1 << 16) | 0x401);
         SendMessage(tray.Handle, TrayIcon.CallbackMessage, 0, 0x405);
-        Program.Check(opens == 2 && balloons == 1, "Tray double-click, keyboard activation and notification clicks retain their actions");
+        Program.Check(opens == 4 && balloons == 1, "Tray single-click, version-4 selection, double-click, keyboard activation and notification clicks retain their actions");
         // Show the existing native menu on the test monitor, not at the owner's mouse position.
         var screen = Screen.AllScreens.FirstOrDefault(s => !s.Primary);
         bool interactive = Environment.GetEnvironmentVariable("DESKWEAVE_UI_ALLOW_FOREGROUND") == "1";

@@ -6,3 +6,7 @@ artifacts/
 .worktrees/
 .vs/
 *.user
+
+# Launch art scratch: rendered previews and contact sheets.
+launch/_*
+launch/assets/_*

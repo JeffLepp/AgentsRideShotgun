@@ -232,6 +232,42 @@ public sealed class WorkspaceTree : IDisposable
     public WorkspaceElement? Known(int id) => Run(() => _known.TryGetValue(id, out Entry? e) ? e.Info : null);
 
     /// <summary>
+    /// Where a numbered control is right now, for a pointer action aimed at it: its live centre,
+    /// whether WPF draws it, or why it cannot be aimed at. Unlike <see cref="Validate"/>, a control
+    /// that has moved is fine - the number names the control, not the place it was - but one that
+    /// became something else, went off screen, or sits under another program's window is refused,
+    /// because a click at its centre would land on whatever is there instead.
+    /// </summary>
+    internal (int X, int Y, bool Wpf, string? Why) Where(int id) => Run<(int, int, bool, string?)>(() =>
+    {
+        if (!_known.TryGetValue(id, out Entry? entry))
+            return (0, 0, false, $"Control {id} is not known. Number the controls again with controls or marks.");
+        try
+        {
+            var now = entry.Element.Current;
+            WorkspaceElement was = entry.Info;
+            if (now.ProcessId != entry.Process || !entry.Element.GetRuntimeId().SequenceEqual(entry.RuntimeId)
+                || (now.Name ?? string.Empty) != was.Name
+                || now.ControlType?.ProgrammaticName?.Split('.')[^1] != was.Type)
+                return (0, 0, false, $"Control {id} changed. Number the controls again.");
+            System.Windows.Rect box = now.BoundingRectangle;
+            if (now.IsOffscreen || box.IsEmpty || box.Width <= 0 || box.Height <= 0)
+                return (0, 0, false, $"Control {id} is not on the screen now; it may be scrolled away or hidden.");
+            int x = (int)(box.X + box.Width / 2), y = (int)(box.Y + box.Height / 2);
+            // This thread is bound to the workspace desktop, so this asks that desktop what is on top.
+            nint top = Native.WindowFromPoint(new Native.Point { X = x, Y = y });
+            Native.GetWindowThreadProcessId(top, out int owner);
+            if (top == 0 || owner != entry.Process)
+                return (0, 0, false, $"Control {id} is covered by another window. Bring its window to the front first.");
+            return (x, y, now.FrameworkId == "WPF", null);
+        }
+        catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException)
+        {
+            return (0, 0, false, $"Control {id} is gone. Number the controls again.");
+        }
+    });
+
+    /// <summary>
     /// Presses an element through its supported provider. TryPress distinguishes an unsupported
     /// route (eligible for a validated point press) from a refused or possibly dispatched action.
     /// </summary>
@@ -243,9 +279,13 @@ public sealed class WorkspaceTree : IDisposable
         // implementation fails on a non-input desktop (measured: Win32Exception, "Hot key is
         // already registered"). Choose the existing validated point route BEFORE invoking.
         // Never reinterpret a provider exception as permission to replay a possible action.
+        // The same holds for a task dialog's buttons - Notepad's "Save changes?" prompt, every
+        // TaskDialog - which are comctl32's CCPushButton under a DirectUI provider (measured
+        // 2026-09-22: Invoke refused, the prompt stayed up, and an agent could not answer it).
         var now = element.Current;
-        if (now.ControlType == ControlType.Button && now.FrameworkId == "Win32"
-            && now.ClassName == "Button" && now.NativeWindowHandle != 0)
+        if (now.ControlType == ControlType.Button && now.NativeWindowHandle != 0
+            && (now.FrameworkId == "Win32" && now.ClassName == "Button"
+                || now.FrameworkId == "DirectUI" && now.ClassName == "CCPushButton"))
             return false;
         if (element.TryGetCurrentPattern(InvokePattern.Pattern, out object? invoke))
         { CheckAction(mayAct); ((InvokePattern)invoke).Invoke(); return true; }

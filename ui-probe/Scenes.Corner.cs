@@ -1,6 +1,9 @@
+using System.Collections;
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 using HiveMind.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
@@ -8,7 +11,7 @@ namespace Deskweave.UiProbe;
 /// <summary>Corner window states: references 02 and 08-14. Every
 /// scene fixtures a <see cref="WorkspacePeekWindow"/> directly through its internal methods, off
 /// screen - no running desktop, no real workspace.</summary>
-static class CornerScenes
+static partial class CornerScenes
 {
     [Scene("corner-working", "08-corner-working", 60, 43, 344, 215)]
     static async Task<FrameworkElement> Working(SceneContext scene)
@@ -20,6 +23,25 @@ static class CornerScenes
         window.SetActive(true);
         window.Place(new Rect(SceneContext.OffScreen, window.VisibleSize));
         window.Arrive();
+        await scene.Settle();
+        return window.PhotographCard();
+    }
+
+    /// <summary>Open on my desktop over the window the pointer is on. No reference: new with the
+    /// pop-out, checked by eye in both themes.</summary>
+    [Scene("corner-pop-out", "", 60, 43, 344, 215)]
+    static async Task<FrameworkElement> PopOut(SceneContext scene)
+    {
+        var window = scene.Own(new WorkspacePeekWindow());
+        window.Configure(new Size(344, 215), grown: false, canGrow: false);
+        window.Describe("shop", "Claude Code", PeekTone.Working);
+        window.ShowFrame(scene.Site("shop"));
+        window.SetActive(true);
+        window.ForceHoverForTests(true);
+        window.Place(new Rect(SceneContext.OffScreen, window.VisibleSize));
+        window.Arrive();
+        await scene.Settle();
+        window.ShowPopOutForTests(new Rect(118, 52, 214, 150));
         await scene.Settle();
         return window.PhotographCard();
     }
@@ -141,6 +163,9 @@ static class CornerScenes
         await PresentationScenes.Gate();
         SizeChecks();
         DropChromeChecks();
+        await RenderingLifecycleChecks();
+        await DockTransitionChecks();
+        await DockPolicyChecks();
         await IntegrationChecks();
         // Wave 1's fix round (design/WAVE1.md item 14): these drive the real WorkspacePeekHost and a
         // real WorkspacePeekWindow through internal seams - reflection into the host's own private
@@ -200,6 +225,17 @@ static class CornerScenes
             "A dragged width survives as the corner size");
         Program.Check(!WorkspacePeekPlacement.Grown(new AppSettings()) && WorkspacePeekPlacement.Grown(dragged),
             "Grown is only true once the card is wider than Small");
+
+        Rect work = new(0, 0, 1920, 1040);
+        Rect big = new(1221, 597, 683, 427);
+        Rect small = WorkspacePeekPlacement.Regrow(big, WorkspacePeekPlacement.Card(344), work);
+        Program.Check(small.Right == big.Right && small.Bottom == big.Bottom && small.Width == 344,
+            "Shrink by the button keeps a bottom-right card in its corner instead of at the big card's top left");
+        Program.Check(WorkspacePeekPlacement.Regrow(small, WorkspacePeekPlacement.Card(683), work) == big,
+            "Grow by the button puts it back exactly where it was grown");
+        Rect nearTopLeft = new(100, 80, 683, 427);
+        Program.Check(WorkspacePeekPlacement.Regrow(nearTopLeft, WorkspacePeekPlacement.Card(344), work).TopLeft == nearTopLeft.TopLeft,
+            "A card near the top left shrinks toward that corner");
     }
 
     static void DropChromeChecks()
@@ -213,6 +249,112 @@ static class CornerScenes
             Program.Check(window.DropHidesChrome, "A file over the card hides its pill, actions and grip");
         }
         finally { window.Close(); }
+    }
+
+    internal static async Task RenderingLifecycleChecks()
+    {
+        // Change only this probe process's WPF cache, as the existing reduced-motion fixture does.
+        // Never write the owner's Windows animation preference.
+        Type parameters = typeof(SystemParameters);
+        Type slot = parameters.GetNestedType("CacheSlot", BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("SystemParameters no longer caches ClientAreaAnimation by slot.");
+        FieldInfo value = parameters.GetField("_clientAreaAnimation", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var valid = (BitArray)parameters.GetField("_cacheValid", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        int index = (int)Enum.Parse(slot, "ClientAreaAnimation");
+        bool hadMotion = SystemParameters.ClientAreaAnimation;
+        void Motion(bool on) { value.SetValue(null, on); valid[index] = true; }
+
+        var window = ProbeWindow.OffScreen(new WorkspacePeekWindow());
+        var front = (Border)window.FindName("FrontCard")!;
+        var shadow = (Border)window.FindName("CardShadow")!;
+        var root = (FrameworkElement)window.FindName("Root")!;
+        var line = (FrameworkElement)window.FindName("ActivityLine")!;
+        var brush = (LinearGradientBrush)window.FindName("ActivityBrush")!;
+        bool Animated() => brush.RelativeTransform.HasAnimatedProperties;
+        bool ShadowAligned()
+        {
+            window.UpdateLayout();
+            Rect cardBounds = front.TransformToAncestor(root).TransformBounds(new Rect(front.RenderSize));
+            Rect shadowBounds = shadow.TransformToAncestor(root).TransformBounds(new Rect(shadow.RenderSize));
+            return cardBounds == shadowBounds && front.CornerRadius == shadow.CornerRadius
+                && front.Opacity == shadow.Opacity && shadow.ActualWidth > 0 && shadow.ActualHeight > 0;
+        }
+        async Task CaptureWholeWindow(string name)
+        {
+            // Retain the transparent margin and shadow, unlike the cropped reference scenes.
+            // Let any arrival finish so opacity/rise do not obscure a resize or DPI comparison.
+            await Task.Delay(200);
+            string folder = Path.Combine(Program.Output, "corner-whole-window");
+            Directory.CreateDirectory(folder);
+            Mvp.Save(Mvp.Photograph(window, 1), Path.Combine(folder, name + "-96dpi.png"));
+            Mvp.Save(Mvp.Photograph(window, 1.5), Path.Combine(folder, name + "-144dpi.png"));
+        }
+
+        try
+        {
+            Motion(true);
+            window.Configure(WorkspacePeekPlacement.Card(344), grown: false, canGrow: false);
+            window.Place(new Rect(SceneContext.OffScreen, window.VisibleSize));
+            window.SetActive(true);
+            Program.Check(!Animated(), "A hidden active corner has no decorative animation clock before its first appearance");
+            window.Arrive();
+            await Task.Delay(300);
+            Program.Check(Animated() && line.IsVisible && ProbeWindow.IsOffScreen(window),
+                "An active corner animates when shown without moving the fixture onto an owner's monitor");
+            Program.Check(ShadowAligned(), "The corner shadow aligns with the rendered card at its default size");
+            await CaptureWholeWindow("default-344");
+
+            window.SetTabs([new PeekTab("one", "one", PeekTone.Working, true),
+                new PeekTab("two", "two", PeekTone.Quiet, false)]);
+            window.Configure(WorkspacePeekPlacement.Card(760), grown: true, canGrow: false);
+            window.Place(new Rect(SceneContext.OffScreen, window.VisibleSize));
+            await Task.Delay(80);
+            Program.Check(ShadowAligned() && Close(front.ActualWidth, 760)
+                && Close(front.TranslatePoint(new Point(), root).Y, WorkspacePeekWindow.ShadowMargin + WorkspacePeekWindow.TabBand),
+                "Growing the corner with tabs keeps the shadow at the actual card size and offset");
+            await CaptureWholeWindow("grown-760-tabs");
+
+            window.HideImmediately();
+            Program.Check(!window.IsVisible && !Animated(), "Fullscreen suppression removes the hidden corner's activity clock");
+            window.Arrive();
+            await Task.Delay(80);
+            Program.Check(Animated(), "Reopening a suppressed corner restores its requested activity without another state update");
+
+            window.Leave();
+            Program.Check(!Animated(), "Normal corner dismissal stops decorative animation as the exit begins");
+            window.Arrive();
+            Program.Check(Animated(), "Activity resumes when a new arrival interrupts the corner's exit");
+            window.Leave();
+            await Task.Delay(300);
+            Program.Check(!window.IsVisible && !Animated(), "A completed corner fade leaves no activity clock running");
+
+            Motion(false);
+            window.Arrive();
+            await Task.Delay(80);
+            Program.Check(line.IsVisible && !Animated(), "Reopening with reduced motion retains a static working indicator");
+            Motion(true);
+            window.SetActive(true);
+            window.Hide();
+            Program.Check(!Animated(), "A direct hide also stops the corner's activity clock");
+            window.SetActive(false);
+            window.Arrive();
+            Program.Check(!Animated() && line.Visibility == Visibility.Collapsed,
+                "Activity ending while hidden stays quiet when the corner returns");
+
+            window.SetTabs([]);
+            window.Configure(WorkspacePeekPlacement.Card(220), grown: false, canGrow: false);
+            window.Place(new Rect(SceneContext.OffScreen, window.VisibleSize));
+            await Task.Delay(80);
+            Program.Check(ShadowAligned() && Close(front.ActualWidth, 220)
+                && Close(front.TranslatePoint(new Point(), root).Y, WorkspacePeekWindow.ShadowMargin),
+                "Shrinking to the minimum without tabs keeps the shadow aligned with the card");
+            await CaptureWholeWindow("minimum-220");
+        }
+        finally
+        {
+            window.Close();
+            Motion(hadMotion);
+        }
     }
 
     static void CarryOnChecks()
@@ -363,6 +505,9 @@ static class CornerScenes
             // Full desktop's drawn taskbar, on this real workspace (its desktop is hidden: nothing
             // opens on the owner's screen).
             AppSettingsStore.Update(s => s with { AgentScreen = AgentScreenLook.Full });
+            // A workspace starts empty; the strip needs a window to list.
+            runtime.Computer!.Launch(Path.Combine(Environment.SystemDirectory, "notepad.exe"));
+            for (int i = 0; i < 40 && runtime.Computer.Windows().Count == 0; i++) await Task.Delay(100);
             var strip = new WorkspaceTaskbar(() => runtime, () => { }, 40);
             await strip.Refresh();
             Program.Check(strip.Titles.Count >= 1 && AgentDesktop.TaskbarBand == (int)Math.Round(48.0 * AgentDesktop.ScreenWidth / 1440),
@@ -531,7 +676,8 @@ static class CornerScenes
             Program.Check(window.Watching, "Hovering holds the real window up past five quiet seconds");
             window.ForceHoverForTests(false);
             await Task.Delay(5800);
-            Program.Check(!window.Watching, "Letting go of hover lets the window fade after five quiet seconds");
+            Program.Check(!window.Watching && window.Docked && EdgeTab(window) is { IsVisible: true },
+                "Letting go of hover tucks the window into a reachable edge tab after five quiet seconds");
 
             // Pinned stays up idle no matter how long the workspace has been quiet (item 15's "pinned stays" claim).
             InvokeHost("StirFrom", stored.Id);
@@ -540,7 +686,7 @@ static class CornerScenes
             Program.Check(GateWindow() is { Watching: true }, "Pinned keeps the real window up past five quiet seconds");
             AppSettingsStore.Update(s => s with { CornerPinned = false });
             await Task.Delay(5800);
-            Program.Check(GateWindow() is { Watching: false }, "Un-pinning lets the real window fade once quiet again");
+            Program.Check(GateWindow() is { Watching: false, Docked: true }, "Un-pinning tucks the real window into its edge tab once quiet again");
 
             // The tray request never touches CornerPinned, and its summon survives past the next
             // timer tick rather than only until it - checked in Off mode, where nothing else shows it.

@@ -44,7 +44,7 @@ internal static class LiveRouter
                 JsonElement hello = session.Request("initialize", Hello);
                 JsonElement tools = session.Request("tools/list", new { });
                 Check(hello.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString() == "deskweave"
-                    && tools.GetProperty("result").GetProperty("tools").GetArrayLength() > 20,
+                    && tools.GetProperty("result").GetProperty("tools").GetArrayLength() == WorkspaceMcp.ExternalToolSchemas.Length,
                     "After 400 clients drop before the handshake, the packaged bridge still initializes and lists the tools");
                 Check(Text(session.Tool("status")).StartsWith("No workspace yet", StringComparison.Ordinal),
                     "A status call through the router answers without starting a workspace");

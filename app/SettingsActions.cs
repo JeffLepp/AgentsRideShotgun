@@ -108,6 +108,8 @@ internal static class SettingsStorage
 internal static class SettingsActions
 {
     internal static Func<AppSettings, bool> SyncStartup = StartWithWindows.Sync;
+    internal static Func<WorkspaceConnections.AgentApp, (int Connected, int Total)> ReadProfileCounts = WorkspaceConnections.ProfileCounts;
+    internal static Func<WorkspaceConnections.AgentApp, string?> ReadConnectionFailure = WorkspaceConnections.LastFailure;
 
     /// <summary>What an agent row shows. Not a seam of its own: it reads the two engine fields
     /// (<see cref="WorkspaceConnections.Locate"/>, <see cref="WorkspaceConnections.IsConnected"/>)

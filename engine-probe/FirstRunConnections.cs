@@ -25,11 +25,13 @@ internal static class FirstRunConnections
         string? wasClaude = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
         string? wasCodex = Environment.GetEnvironmentVariable("CODEX_HOME");
         var wasLocate = WorkspaceConnections.Locate;
+        var wasProfiles = WorkspaceConnections.Profiles;
         AppSettings before = AppSettingsStore.Current;
         try
         {
             Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", claudeHome);
             Environment.SetEnvironmentVariable("CODEX_HOME", codexHome);
+            WorkspaceConnections.Profiles = SingleProfiles;
             string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             string realClaude = Path.Combine(profile, ".claude.json");
             string realCodex = Path.Combine(profile, ".codex");
@@ -70,8 +72,8 @@ internal static class FirstRunConnections
                 && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode) && Entries(claudeFile) == 0,
                 "A replacement that fails says the earlier entry came out with it, not that nothing changed");
             Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is { } nothing
-                && nothing.EndsWith("Nothing else was changed.", StringComparison.Ordinal) && Entries(claudeFile) == 0,
-                "A connection that fails with no entry to replace says nothing else changed, and nothing did");
+                && nothing.Contains("intended profile", StringComparison.Ordinal) && Entries(claudeFile) == 0,
+                "A connection that fails with no entry to replace identifies the unconnected target profile");
 
             // A command that exits 0 and writes nothing has connected nothing, whatever it says.
             Environment.SetEnvironmentVariable("DESKWEAVE_STUB", "silent");
@@ -82,23 +84,27 @@ internal static class FirstRunConnections
             Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is null && Entries(claudeFile) == 1,
                 "Connecting again after a refusal puts the one entry back");
 
-            // A command whose own environment is not Deskweave's: `claude` on PATH can be a wrapper
-            // that clears CLAUDE_CONFIG_DIR before calling the real one, so the add lands in a file
-            // the read never opens. Nothing crashes - the owner is told the connection he has just
-            // made was refused, and told again every ten minutes. The tool that did the write is
-            // asked whether the write happened, because it is the only thing that knows.
+            // A launcher can ignore the selected root. Its report about a different profile
+            // cannot count as success for this one, or make its Settings switch lie later.
             Set(WorkspaceConnections.AgentApp.ClaudeCode, false);
             Environment.SetEnvironmentVariable("DESKWEAVE_STUB", "elsewhere");
             string shim = Path.Combine(claudeHome, "shim", ".claude.json");
-            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is null
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is { } wrongRoot
+                && wrongRoot.Contains("intended profile", StringComparison.Ordinal)
                 && Entries(shim) == 1 && Entries(claudeFile) == 0
-                && WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode),
-                "An agent that writes where Deskweave cannot read is connected on its own command's word, not called refused");
+                && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode),
+                "A wrapper writing another profile is reported clearly and never counts the intended profile connected");
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", null);
+            if (Directory.Exists(Path.GetDirectoryName(shim)!)) Directory.Delete(Path.GetDirectoryName(shim)!, recursive: true);
+            Set(WorkspaceConnections.AgentApp.ClaudeCode, true);
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", "remove-silent");
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, false) is not null
+                && Entries(claudeFile) == 1 && WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode),
+                "A wrapper that leaves its actual connection in place is not reported as disconnected");
             Environment.SetEnvironmentVariable("DESKWEAVE_STUB", null);
             Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, false) is null
-                && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode),
-                "Disconnecting forgets what the agent's command showed, so nothing goes on saying connected");
-            if (Directory.Exists(Path.GetDirectoryName(shim)!)) Directory.Delete(Path.GetDirectoryName(shim)!, recursive: true);
+                && Entries(claudeFile) == 0 && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.ClaudeCode),
+                "Disconnecting is confirmed against the actual intended profile file");
             Set(WorkspaceConnections.AgentApp.ClaudeCode, true);
 
             // An entry under Deskweave's name that runs something else: an older install, a moved
@@ -117,6 +123,87 @@ internal static class FirstRunConnections
                 "args = [\"--workspace\", '" + WorkspaceAccessStore.RouterTicket + "']"]);
             Check(WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex),
                 "An entry in the literal-string form Codex itself writes counts as connected, so nothing rewrites it");
+
+            string enabledCodex = File.ReadAllText(codexFile);
+            File.WriteAllText(codexFile, enabledCodex.Replace("[mcp_servers.deskweave]", "[mcp_servers.\"deskweave\"] # profile", StringComparison.Ordinal)
+                + "\"enabled\" = false # disabled in Codex\n");
+            Check(WorkspaceConnections.ProfileCounts(WorkspaceConnections.AgentApp.Codex) == (0, 1)
+                && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex)
+                && WorkspaceConnections.HasEntry(WorkspaceConnections.AgentApp.Codex)
+                && !WorkspaceConnections.Missing(WorkspaceConnections.AgentApp.Codex),
+                "A disabled Codex entry is disconnected and retained, not scheduled for automatic repair");
+            File.WriteAllText(codexFile, enabledCodex + "enabled = true\n[mcp_servers.deskweave.env]\nenabled = 'false'\n"
+                + "[mcp_servers.another]\nenabled = false\ncommand = 'another.exe'\n");
+            Check(WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex),
+                "An enabled Codex entry ignores another server's disabled flag and an environment value named enabled");
+            File.WriteAllText(codexFile, enabledCodex);
+
+            string secondClaude = Path.Combine(root, "claude-two"), secondCodex = Path.Combine(root, "codex-two");
+            Directory.CreateDirectory(secondClaude);
+            Directory.CreateDirectory(secondCodex);
+            string secondClaudeFile = Path.Combine(secondClaude, ".claude.json"), secondCodexFile = Path.Combine(secondCodex, "config.toml");
+            WriteStale(secondClaudeFile, secondCodexFile, root);
+            WorkspaceConnections.Profiles = app => [.. SingleProfiles(app), new(app, "Second fixture",
+                app == WorkspaceConnections.AgentApp.ClaudeCode ? secondClaude : secondCodex,
+                app == WorkspaceConnections.AgentApp.ClaudeCode ? secondClaudeFile : secondCodexFile)];
+            Check(WorkspaceConnections.Supported.All(app => WorkspaceConnections.ProfileCounts(app) == (1, 2)
+                    && !WorkspaceConnections.IsConnected(app)),
+                "One connected profile never hides a second profile's missing or stale connection");
+            Check(Connect().Count == 0 && WorkspaceConnections.Supported.All(app => WorkspaceConnections.ProfileCounts(app) == (2, 2))
+                && Pointed(secondClaudeFile) && Pointed(secondCodexFile)
+                && Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") == claudeHome
+                && Environment.GetEnvironmentVariable("CODEX_HOME") == codexHome,
+                "One provider action connects both intended roots with scoped child environments and no parent-environment changes");
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, false) is null
+                && Entries(claudeFile) == 0 && Entries(secondClaudeFile) == 0
+                && WorkspaceConnections.ProfileCounts(WorkspaceConnections.AgentApp.Codex) == (2, 2)
+                && File.ReadAllText(secondClaudeFile).Contains("another.exe", StringComparison.Ordinal),
+                "Turning Claude off removes both profile entries while preserving Codex and unrelated provider entries");
+            Check(Set(WorkspaceConnections.AgentApp.Codex, false) is null && Entries(codexFile) == 0 && Entries(secondCodexFile) == 0
+                && File.ReadAllText(secondCodexFile).Contains("[mcp_servers.another]", StringComparison.Ordinal),
+                "Turning Codex off removes both profile entries and preserves its unrelated server");
+            WorkspaceConnections.Profiles = SingleProfiles;
+            Check(Connect().Count == 0, "The original fixture profiles reconnect after the multiple-profile check");
+
+            string held = Path.Combine(root, "connection-race");
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB", "hold-add");
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB_GATE", held);
+            Task<string?> adding = WorkspaceConnections.SetConnected(WorkspaceConnections.AgentApp.Codex, true, default);
+            try
+            {
+                Check(Until(() => File.Exists(held + ".entered")), "The controlled provider write begins within its bound");
+                WorkspaceConnections.Remember(WorkspaceConnections.AgentApp.Codex, false);
+                Task<string?> removing = WorkspaceConnections.SetConnected(WorkspaceConnections.AgentApp.Codex, false, default);
+                Thread.Sleep(150);
+                Check(!removing.IsCompleted, "An overlapping Settings removal waits for the same provider's in-flight configuration write");
+                File.WriteAllText(held + ".continue", "continue");
+                Task.WhenAll(adding, removing).GetAwaiter().GetResult();
+                Check(removing.Result is null && Entries(codexFile) == 0 && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex),
+                    "A Settings off request wins an overlapping connection write and leaves no restored entry");
+            }
+            finally
+            {
+                File.WriteAllText(held + ".continue", "continue");
+                Environment.SetEnvironmentVariable("DESKWEAVE_STUB", null);
+                Environment.SetEnvironmentVariable("DESKWEAVE_STUB_GATE", null);
+                WorkspaceConnections.Remember(WorkspaceConnections.AgentApp.Codex, true);
+            }
+            Set(WorkspaceConnections.AgentApp.Codex, true);
+
+            string discovery = Path.Combine(root, "profile-discovery");
+            foreach (var (folder, file) in new[] { (".claude2", ".claude.json"), (".claude10", ".claude.json"),
+                (".codex2", "config.toml"), (".codex10", "config.toml") })
+            {
+                Directory.CreateDirectory(Path.Combine(discovery, folder));
+                File.WriteAllText(Path.Combine(discovery, folder, file), "");
+            }
+            Directory.CreateDirectory(Path.Combine(discovery, ".claude3")); // no configuration yet
+            var discoveredClaude = WorkspaceConnections.FindProfiles(WorkspaceConnections.AgentApp.ClaudeCode, discovery, Path.Combine(discovery, ".claude2"));
+            var discoveredCodex = WorkspaceConnections.FindProfiles(WorkspaceConnections.AgentApp.Codex, discovery, Path.Combine(discovery, "custom-codex"));
+            Check(discoveredClaude.Count == 2 && discoveredClaude.Count(p => p.Configuration.EndsWith(".claude2\\.claude.json", StringComparison.OrdinalIgnoreCase)) == 1
+                && discoveredClaude.All(p => !p.Configuration.Contains(".claude3", StringComparison.Ordinal) && !p.Configuration.Contains(".claude10", StringComparison.Ordinal))
+                && discoveredCodex.Count == 3 && discoveredCodex.Any(p => p.Root == Path.Combine(discovery, "custom-codex")),
+                "Profile discovery deduplicates the effective root, includes explicit custom roots, and stays within existing numbered configurations 1 through 9");
 
             // An agent installed after consent is connected on its own, without a second prompt.
             File.Delete(codexFile);
@@ -139,6 +226,50 @@ internal static class FirstRunConnections
                 && Entries(claudeFile) == 1 && Entries(codexFile) == 1 && Pointed(claudeFile) && Pointed(codexFile),
                 "After Start, the keep-up loop replaces stale entries by itself, once each");
             WorkspaceConnections.StopKeepingUp();
+
+            // Both providers were already connected. A new profile and a transient launcher
+            // failure must not kill the inexpensive loop or require another Settings visit.
+            WorkspaceConnections.Locate = _ => Environment.ProcessPath;
+            Connect();
+            WorkspaceConnections.KeepUp();
+            Thread.Sleep(1200);
+            string lateHome = Path.Combine(root, "late-codex");
+            Directory.CreateDirectory(lateHome);
+            WorkspaceConnections.Profiles = app => app == WorkspaceConnections.AgentApp.Codex
+                ? [.. SingleProfiles(app), new(app, "Added later", lateHome, Path.Combine(lateHome, "config.toml"))]
+                : SingleProfiles(app);
+            WorkspaceConnections.Locate = app => app == WorkspaceConnections.AgentApp.Codex
+                ? Path.Combine(root, "temporarily-missing.exe") : Environment.ProcessPath;
+            Check(Until(() => WorkspaceConnections.LastFailure(WorkspaceConnections.AgentApp.Codex) is not null),
+                "A transient provider launch failure is recorded instead of silently ending profile discovery");
+            WorkspaceConnections.Locate = _ => Environment.ProcessPath;
+            Check(Until(() => WorkspaceConnections.ProfileCounts(WorkspaceConnections.AgentApp.Codex) == (2, 2)),
+                "A profile added after every provider was connected is picked up when its launcher recovers");
+            WorkspaceConnections.StopKeepingUp();
+            WorkspaceConnections.Profiles = SingleProfiles;
+
+            // The provider's own off switch must survive repair of a different profile. It also
+            // must not become a perpetual automatic repair failure once all other profiles work.
+            File.AppendAllText(codexFile, "enabled = false # owner's Codex setting\n");
+            string disabledCodex = File.ReadAllText(codexFile);
+            WorkspaceConnections.Profiles = app => app == WorkspaceConnections.AgentApp.Codex
+                ? [.. SingleProfiles(app), new(app, "Second fixture", secondCodex, secondCodexFile)]
+                : SingleProfiles(app);
+            WorkspaceConnections.KeepUp();
+            Check(Until(() => WorkspaceConnections.ProfileCounts(WorkspaceConnections.AgentApp.Codex) == (1, 2))
+                && Pointed(secondCodexFile) && File.ReadAllText(codexFile) == disabledCodex,
+                "Automatic repair connects a missing second Codex profile without reenabling its disabled first profile");
+            Thread.Sleep(1500);
+            Check(!WorkspaceConnections.Missing(WorkspaceConnections.AgentApp.Codex)
+                && WorkspaceConnections.LastFailure(WorkspaceConnections.AgentApp.Codex) is null
+                && File.ReadAllText(codexFile) == disabledCodex,
+                "Only current or intentionally disabled profiles leave no repeated keep-up repair or false failure");
+            WorkspaceConnections.StopKeepingUp();
+            Check(Set(WorkspaceConnections.AgentApp.Codex, true) is null
+                && WorkspaceConnections.ProfileCounts(WorkspaceConnections.AgentApp.Codex) == (2, 2)
+                && File.ReadAllText(secondCodexFile).Contains("[mcp_servers.another]", StringComparison.Ordinal),
+                "An explicit Connect reenables Deskweave while preserving unrelated entries across both profiles");
+            WorkspaceConnections.Profiles = SingleProfiles;
 
             // Turned off in Settings, with the loop still running because the other agent has left
             // this PC and is still worth waiting for. It has to leave the one the owner took out.
@@ -168,12 +299,15 @@ internal static class FirstRunConnections
 
             // The scoped instruction that comes with connecting, in both directions.
             Check(WorkspaceMcp.RouterInstructions.Contains(WorkspaceMcp.Scope, StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("Use Deskweave automatically for agent-operated browser and GUI work", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("use your normal approved desktop-opening tools", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("Do not silently divert a user-requested desktop action into a workspace", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("Do not use Deskweave for anything else", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("builds, unit tests", StringComparison.Ordinal),
-                "A connected agent is told to use Deskweave for windows by itself, and not for code, builds, tests or file work");
+                && WorkspaceMcp.Scope.Contains("Decide by who uses a window next", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("never your own shell", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("start it from your own shell as usual", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("Headless servers, builds, tests, code and files stay in your own tools", StringComparison.Ordinal),
+                "A connected agent is told to use Deskweave for windows it will use, its own shell for ones the user will, and not for code, builds, tests or file work");
+            // Claude Code keeps only the first 2,048 characters of a server's instructions; everything
+            // past that never reaches the model.
+            Check(WorkspaceMcp.RouterInstructions.Length < 2000,
+                $"The whole instruction reaches the agent: {WorkspaceMcp.RouterInstructions.Length} characters, under Claude Code's 2,048 cut");
 
             Check(OwnEntry(realClaude) == claudeEntry && OwnEntry(Path.Combine(realCodex, "config.toml")) == codexEntry,
                 "Deskweave's entry in the owner's own Claude Code and Codex configuration is exactly as it was");
@@ -182,7 +316,9 @@ internal static class FirstRunConnections
         {
             WorkspaceConnections.StopKeepingUp();
             Environment.SetEnvironmentVariable("DESKWEAVE_STUB", null);
+            Environment.SetEnvironmentVariable("DESKWEAVE_STUB_GATE", null);
             WorkspaceConnections.Locate = wasLocate;
+            WorkspaceConnections.Profiles = wasProfiles;
             WorkspaceConnections.KeepUpEvery = TimeSpan.FromMinutes(10);
             Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", wasClaude);
             Environment.SetEnvironmentVariable("CODEX_HOME", wasCodex);
@@ -196,6 +332,10 @@ internal static class FirstRunConnections
             WorkspaceConnections.SetConnected(app, on, default).GetAwaiter().GetResult();
 
         static bool Same(string a, string b) => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+
+        IReadOnlyList<WorkspaceConnections.AgentProfile> SingleProfiles(WorkspaceConnections.AgentApp app) =>
+            [new(app, "Fixture", app == WorkspaceConnections.AgentApp.ClaudeCode ? claudeHome : codexHome,
+                app == WorkspaceConnections.AgentApp.ClaudeCode ? claudeFile : codexFile)];
     }
 
     /// <summary>
@@ -290,6 +430,7 @@ internal static class FirstRunConnections
         if (!args.Contains(WorkspaceConnections.AppName)) return 2;
         if (args[1] == "remove")
         {
+            if (Environment.GetEnvironmentVariable("DESKWEAVE_STUB") == "remove-silent") return 0;
             if (!File.Exists(path)) return 0;
             if (claude) Save(path, Without(Read(path)));
             else File.WriteAllLines(path, Table(File.ReadAllLines(path), ours: false));
@@ -300,6 +441,13 @@ internal static class FirstRunConnections
         // nothing. The probe asks for it in the environment; without it every add is a real write.
         string? how = Environment.GetEnvironmentVariable("DESKWEAVE_STUB");
         if (how is "refuse" or "silent") return how == "refuse" ? 3 : 0;
+        if (how == "hold-add" && Environment.GetEnvironmentVariable("DESKWEAVE_STUB_GATE") is { Length: > 0 } gate)
+        {
+            File.WriteAllText(gate + ".entered", "entered");
+            var until = Stopwatch.StartNew();
+            while (!File.Exists(gate + ".continue") && until.Elapsed < TimeSpan.FromSeconds(20)) Thread.Sleep(20);
+            if (!File.Exists(gate + ".continue")) return 4;
+        }
         string[] command = [.. args.SkipWhile(a => a != "--").Skip(1)];
         if (command.Length == 0) return 2;
         if (claude)

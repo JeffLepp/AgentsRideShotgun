@@ -8,7 +8,10 @@ using HiveMind.AgentWorkspaces;
 /// How fast and how expensive the corner view's own capture loop (<see cref="WorkspacePeekCapture"/>)
 /// really is, paced at the same rate <see cref="WorkspacePeekHost"/> uses for Balanced and Battery saver,
 /// idle and in use, against one real workspace with real windows on its desktop
-/// (design/WAVE1B.md, Corner window item 6). Three 15-second samples per case.
+/// (design/WAVE1B.md, Corner window item 6). Three 15-second samples per case. Then the hub's
+/// hands-on pace (<see cref="WorkspacePeekHost.HandsOnIntervalFor"/>): the whole screen, as the hub
+/// takes it, with the windows side by side and again with one filling the screen in front of the
+/// other, which the capture no longer prints.
 /// Run: Deskweave.Probe.exe --corner-rate "C:\absolute\output"
 /// </summary>
 internal static class CornerRate
@@ -19,9 +22,9 @@ internal static class CornerRate
         string fixture = Path.Combine(Path.GetDirectoryName(output)!, "r-" + Guid.NewGuid().ToString("N")[..8]);
         using var watchdog = new System.Threading.Timer(_ =>
         {
-            File.WriteAllText(Path.Combine(output, "timeout.txt"), "Corner rate probe exceeded its 450-second bound.");
+            File.WriteAllText(Path.Combine(output, "timeout.txt"), "Corner rate probe exceeded its 600-second bound.");
             Environment.Exit(2);
-        }, null, TimeSpan.FromSeconds(450), Timeout.InfiniteTimeSpan);
+        }, null, TimeSpan.FromSeconds(600), Timeout.InfiniteTimeSpan);
         using var scope = WorkspaceStore.UseRootForTests(Path.Combine(fixture, "w"));
         StoredWorkspace workspace = WorkspaceStore.Create("Rate");
         WorkspaceAccessStore.Write(workspace.Id, new WorkspaceAccessPolicy(true, false) { PrewarmBrowser = false });
@@ -53,6 +56,27 @@ internal static class CornerRate
                     };
                 }
             }
+
+            foreach (bool filled in new[] { false, true })
+            {
+                if (filled && !desktop.Fill(desktop.Windows()[0].Handle)) throw new InvalidOperationException("Could not fill the front window.");
+                if (filled)
+                {
+                    Thread.Sleep(500);
+                    result["hiddenWhenFilled"] = AgentDesktop.HiddenBehind(desktop.Windows()).Count(front => front >= 0);
+                }
+                foreach (PreviewSmoothness smoothness in new[] { PreviewSmoothness.Balanced, PreviewSmoothness.BatterySaver })
+                {
+                    double fps = 1.0 / WorkspacePeekHost.HandsOnIntervalFor(smoothness).TotalSeconds;
+                    RateSample[] runs = Enumerable.Range(0, 3)
+                        .Select(_ => Measure(desktop, fps, () => desktop.CaptureScreen() is not null)).ToArray();
+                    result[smoothness + "HandsOn" + (filled ? "Filled" : "")] = new
+                    {
+                        median = runs.OrderBy(r => r.Fps).ElementAt(1),
+                        runs,
+                    };
+                }
+            }
         }
         catch (Exception failure) { result["failure"] = failure.ToString(); }
         finally { runtime.Dispose(); }
@@ -71,8 +95,18 @@ internal static class CornerRate
     static RateSample Measure(AgentDesktop desktop, PreviewSmoothness smoothness, bool inUse)
     {
         TimeSpan interval = inUse ? WorkspacePeekHost.InUseIntervalFor(smoothness) : WorkspacePeekHost.IdleIntervalFor(smoothness);
-        double targetFps = 1.0 / interval.TotalSeconds;
         WorkspacePeekCapture.Cached? background = null;
+        return Measure(desktop, 1.0 / interval.TotalSeconds, () =>
+        {
+            WorkspacePeekCapture.Frame frame = WorkspacePeekCapture.Take(desktop, desktop.Name, background, inUse);
+            background = frame.Cache;
+            return frame.Background is not null;
+        });
+    }
+
+    /// <summary>Fifteen seconds of <paramref name="take"/>, one at a time, paced to <paramref name="targetFps"/>.</summary>
+    static RateSample Measure(AgentDesktop desktop, double targetFps, Func<bool> take)
+    {
         Dictionary<int, TimeSpan> before = Owned(desktop);
         TimeSpan self = Process.GetCurrentProcess().TotalProcessorTime;
         var times = new List<double>();
@@ -82,10 +116,9 @@ internal static class CornerRate
         while (clock.Elapsed < span)
         {
             long start = Stopwatch.GetTimestamp();
-            WorkspacePeekCapture.Frame frame = WorkspacePeekCapture.Take(desktop, desktop.Name, background, inUse);
-            background = frame.Cache;
+            bool took = take();
             double ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-            if (frame.Background is not null) { frames++; times.Add(ms); } else empty++;
+            if (took) { frames++; times.Add(ms); } else empty++;
             double wait = 1000 / targetFps - ms;
             if (wait > 0) Thread.Sleep(TimeSpan.FromMilliseconds(wait));
         }

@@ -5,7 +5,7 @@ namespace HiveMind.AgentWorkspaces;
 internal sealed record ComputerPoint(int X, int Y);
 internal sealed record ComputerAction(string Type, int X = 0, int Y = 0, string Button = "left",
     string Text = "", string[]? Keys = null, int ScrollX = 0, int ScrollY = 0,
-    int Milliseconds = 0, ComputerPoint[]? Path = null);
+    int Milliseconds = 0, ComputerPoint[]? Path = null, int Control = 0);
 internal sealed record ComputerRequest(string Target, bool Screenshot, IReadOnlyList<ComputerAction> Actions,
     bool Marks = false);
 internal sealed record ComputerReceipt(string Status, int Next, string Reason, IReadOnlyList<string> Completed);
@@ -46,19 +46,19 @@ internal static class WorkspaceComputer
                 switch (type)
                 {
                     case "click": case "double_click":
-                        Fields(step, "type", "x", "y", "button");
+                        Fields(step, "type", "x", "y", "button", "control");
                         string button = String(step, "button", "left");
                         if (button is not ("left" or "right")) throw new ArgumentException("button must be left or right.");
-                        action = new(type, Integer(step, "x"), Integer(step, "y"), button);
+                        action = Placed(step, target, new(type, Button: button));
                         break;
                     case "move":
-                        Fields(step, "type", "x", "y");
-                        action = new(type, Integer(step, "x"), Integer(step, "y"));
+                        Fields(step, "type", "x", "y", "control");
+                        action = Placed(step, target, new(type));
                         break;
                     case "scroll":
-                        Fields(step, "type", "x", "y", "scroll_x", "scroll_y");
-                        action = new(type, Integer(step, "x"), Integer(step, "y"),
-                            ScrollX: Integer(step, "scroll_x", 0), ScrollY: Integer(step, "scroll_y", 0));
+                        Fields(step, "type", "x", "y", "scroll_x", "scroll_y", "control");
+                        action = Placed(step, target, new(type,
+                            ScrollX: Integer(step, "scroll_x", 0), ScrollY: Integer(step, "scroll_y", 0)));
                         if (Math.Abs((long)action.ScrollX) > 10000 || Math.Abs((long)action.ScrollY) > 10000)
                             throw new ArgumentException("Scroll amounts must be between -10000 and 10000.");
                         break;
@@ -116,8 +116,27 @@ internal static class WorkspaceComputer
         return new(target, screenshot, result, marks);
     }
 
+    /// <summary>
+    /// Where a pointer action goes: x and y in the latest picture, or a control by the number marks
+    /// and controls gave it. A number is exact where a pixel read off a scaled-down picture is not -
+    /// on a tight row of buttons, a pixel is the difference between two of them.
+    /// </summary>
+    static ComputerAction Placed(JsonElement step, string target, ComputerAction action)
+    {
+        if (!step.TryGetProperty("control", out JsonElement control))
+            return action with { X = Integer(step, "x"), Y = Integer(step, "y") };
+        if (step.TryGetProperty("x", out _) || step.TryGetProperty("y", out _))
+            throw new ArgumentException("Give a control or x and y, not both.");
+        if (target == "browser")
+            throw new ArgumentException("Control numbers are for desktop windows. In the browser use page, or x and y.");
+        int id = Integer(step, "control");
+        if (id < 1) throw new ArgumentException("control must be a number from marks or controls.");
+        return action with { Control = id };
+    }
+
     internal static string? Bounds(ComputerAction action, int width, int height)
     {
+        if (action.Control > 0) return null;
         IEnumerable<ComputerPoint> points = action.Type == "drag" ? action.Path!
             : action.Type is "click" or "double_click" or "move" or "scroll" ? [new(action.X, action.Y)] : [];
         return points.Any(point => point.X < 0 || point.Y < 0 || point.X >= width || point.Y >= height)

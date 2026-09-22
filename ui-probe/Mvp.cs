@@ -82,6 +82,9 @@ static class Mvp
             .ToArray();
         if (scenes.Length == 0) throw new InvalidOperationException("No scene is named " + (only ?? "anything") + ".");
         var rows = new List<object>();
+        // DESKWEAVE_SCENE_SCALE=2 photographs every scene at twice the pixels, for crisp pictures.
+        double scale = double.TryParse(Environment.GetEnvironmentVariable("DESKWEAVE_SCENE_SCALE"),
+            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double asked) && asked > 0 ? asked : 1;
         foreach (ThemeChoice theme in Themes)
         {
             // Through the store too: the theme follows the store, so a scene that saves any setting
@@ -96,9 +99,10 @@ static class Mvp
                 using var context = new SceneContext(references);
                 var element = await (Task<FrameworkElement>)method.Invoke(null, [context])!;
                 await context.Settle();
-                BitmapSource shot = Photograph(element);
+                BitmapSource shot = Photograph(element, scale);
                 Save(shot, Path.Combine(folder, scene!.Name + ".png"));
-                rows.Add(scene.Reference.Length == 0
+                // A scaled shot is for sharp README pictures, not for comparing with a 1x reference.
+                rows.Add(scene.Reference.Length == 0 || scale != 1
                     ? new { scene = scene.Name, theme = name, captured = new { width = shot.PixelWidth, height = shot.PixelHeight } }
                     : Compare(scene, name, shot, Path.Combine(references, name, scene.Reference + ".png"),
                         Path.Combine(folder, scene.Name + ".compare.png")));

@@ -63,7 +63,7 @@ public partial class SettingsView
 
         var licenseBody = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, Margin = new Thickness(14, 0, 14, 12) };
         licenseBody.SetResourceReference(StyleProperty, "RowHint");
-        var licenses = new Button { Content = "Licenses" };
+        var licenses = new Button { Content = RowAction("Licenses", "Icon.Down") };
         licenses.SetResourceReference(StyleProperty, "RowButton");
         AutomationProperties.SetName(licenses, "Licenses");
         licenses.Click += (_, _) =>
@@ -76,7 +76,7 @@ public partial class SettingsView
         licenseStack.Children.Add(licenses);
         licenseStack.Children.Add(licenseBody);
 
-        var openData = new Button { Content = "Open Deskweave data" };
+        var openData = new Button { Content = RowAction("Open Deskweave data", "Icon.Folder") };
         openData.SetResourceReference(StyleProperty, "RowButton");
         AutomationProperties.SetName(openData, "Open Deskweave data");
         openData.Click += (_, _) => SettingsActions.OpenFolder(ProductContext.LocalRoot);
@@ -93,6 +93,28 @@ public partial class SettingsView
                 Section(null, Group(versionRow, licenseStack, openData)),
             },
         };
+    }
+
+    /// <summary>
+    /// A row that does something rather than holds a setting: its label, and on the right a small
+    /// glyph saying what a click does - opens below, or opens a folder - so it does not read as a
+    /// plain label or as a way into another page.
+    /// </summary>
+    static FrameworkElement RowAction(string label, string icon)
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var text = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center };
+        // The app's one stroke family (Icons.xaml), at the 13 DIP size the rows' other icons use.
+        var mark = new System.Windows.Shapes.Path { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+        mark.SetResourceReference(StyleProperty, "Icon13");
+        mark.SetResourceReference(System.Windows.Shapes.Path.DataProperty, icon);
+        mark.SetResourceReference(TextElement.ForegroundProperty, "MutedInkBrush");
+        Grid.SetColumn(mark, 1);
+        grid.Children.Add(text);
+        grid.Children.Add(mark);
+        return grid;
     }
 
     FrameworkElement Agents()
@@ -133,6 +155,7 @@ public partial class SettingsView
         var tile = new ContentControl { Content = letter, Background = new SolidColorBrush(tileColor) };
         tile.SetResourceReference(StyleProperty, "LetterTile");
         var status = Styled("", "RowHint");
+        status.TextWrapping = TextWrapping.Wrap;
         var error = Styled("", "RowError");
         error.Visibility = Visibility.Collapsed;
         error.TextWrapping = TextWrapping.Wrap;
@@ -145,32 +168,44 @@ public partial class SettingsView
         AutomationProperties.SetName(toggle, name + " connected");
 
         bool settingProgrammatically = false;
+        bool connecting = false;
+        string? requestFailure = null;
         void Refresh()
         {
             AgentState state = SettingsActions.ReadAgent(app);
+            var profiles = SettingsActions.ReadProfileCounts(app);
             status.Text = state switch
             {
                 AgentState.NotInstalled => "Not installed",
+                _ when profiles.Total > 1 && profiles.Connected == profiles.Total => $"Connected \u00b7 {profiles.Total} profiles",
+                _ when profiles.Total > 1 => $"{profiles.Connected} of {profiles.Total} profiles connected",
                 AgentState.Found => "Found on this PC",
                 _ => "Connected",
             };
+            toggle.ToolTip = profiles.Total > 1
+                ? $"Connects Deskweave to all {profiles.Total} detected configuration profiles." : null;
+            string? failure = requestFailure ?? SettingsActions.ReadConnectionFailure(app);
+            error.Text = failure ?? "";
+            error.Visibility = failure is null ? Visibility.Collapsed : Visibility.Visible;
             settingProgrammatically = true;
             toggle.IsChecked = state == AgentState.Connected;
             settingProgrammatically = false;
-            toggle.IsEnabled = state != AgentState.NotInstalled;
+            toggle.IsEnabled = state != AgentState.NotInstalled && !connecting;
         }
         async void Changed(object sender, RoutedEventArgs e)
         {
-            if (settingProgrammatically) return;
+            if (settingProgrammatically || connecting) return;
             bool on = toggle.IsChecked == true;
+            connecting = true;
             toggle.IsEnabled = false;
+            requestFailure = null;
             error.Visibility = Visibility.Collapsed;
-            string? failure = await SettingsActions.Connect(app, on);
-            if (failure is not null) { error.Text = failure; error.Visibility = Visibility.Visible; }
-            Refresh();
+            try { requestFailure = await SettingsActions.Connect(app, on); }
+            finally { connecting = false; Refresh(); }
         }
         toggle.Checked += Changed;
         toggle.Unchecked += Changed;
+        _followers.Add(_ => Refresh());
         Refresh();
         return Row(text, toggle, tile);
     }

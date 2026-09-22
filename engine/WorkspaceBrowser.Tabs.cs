@@ -151,6 +151,21 @@ public sealed partial class WorkspaceBrowser
         return true;
     }
 
+    /// <summary>
+    /// Closes every tab but the one the page tools are on. Run once, as the browser starts: one
+    /// workspace's browser came back with the tabs of its earlier runs - ten on 2026-09-22, four of
+    /// them blank - which the owner then saw in the corner and an agent had to read past in every
+    /// tab list. What an agent signed into stays; that lives in the profile, not in the tabs.
+    /// </summary>
+    internal async Task CloseLeftovers(CancellationToken cancel)
+    {
+        await Follow(cancel).ConfigureAwait(false);
+        if (SelectedTab.Length == 0) return;
+        foreach (string target in await Pages(cancel).ConfigureAwait(false))
+            if (target != SelectedTab)
+                await Call("Target.closeTarget", new JsonObject { ["targetId"] = target }, cancel).ConfigureAwait(false);
+    }
+
     readonly List<string> _order = [];
 
     /// <summary>

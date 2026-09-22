@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using HiveMind.AgentWorkspaces;
@@ -18,9 +19,11 @@ public partial class MainWindow : Window, IDisposable
     readonly HubViewModel _hub = new();
     readonly ObservableCollection<HubEntry> _stackWorking = [];
     readonly ObservableCollection<HubEntry> _stackAsleep = [];
+    readonly ObservableCollection<HubEntry> _sidebarAsleep = [];
     readonly DispatcherTimer _cardPreviews;
     readonly DispatcherTimer _savePreferences;
     WorkspaceFullView? _workspaceView;
+    SettingsView? _cardSettings;
     ShellPlacement? _stackPlacement;
     ShellPlacement? _widePlacement;
     bool _wasMaximized;
@@ -42,9 +45,10 @@ public partial class MainWindow : Window, IDisposable
         StackWorkingList.ItemsSource = _stackWorking;
         StackAsleepList.ItemsSource = _stackAsleep;
         SidebarWorkingList.ItemsSource = _hub.Working;
-        SidebarAsleepList.ItemsSource = _hub.Asleep;
+        SidebarAsleepList.ItemsSource = _sidebarAsleep;
         _hub.Working.CollectionChanged += HubChanged;
         _hub.Asleep.CollectionChanged += HubChanged;
+        _hub.ActivityChanged += ShowToday;
         _cardPreviews = new DispatcherTimer(DispatcherPriority.Background) { Interval = HubPreview.Interval() };
         _cardPreviews.Tick += CardPreviews_Tick;
         _savePreferences = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(600) };
@@ -52,6 +56,9 @@ public partial class MainWindow : Window, IDisposable
         ModuleEntry.DashboardOpenRequested += EngineRequestedWorkspace;
         LocationChanged += (_, _) => QueuePreferenceSave();
         Loaded += Window_Loaded;
+        ThemeIcon.Dark = AppearanceManager.Dark;
+        ThemeButton.ToolTip = ThemeTip();
+        AppearanceManager.Changed += ThemeRepainted;
     }
 
     void Window_Loaded(object sender, RoutedEventArgs e)
@@ -65,15 +72,39 @@ public partial class MainWindow : Window, IDisposable
 
     void HubChanged(object? sender, NotifyCollectionChangedEventArgs e) => RebuildStackLists();
 
+    /// <summary>The Today strip's three numbers and their words, singular when there is one.</summary>
+    void ShowToday()
+    {
+        var (actions, workspaces, commands) = _hub.Today;
+        static string Count(int n) => n.ToString("N0", System.Globalization.CultureInfo.CurrentCulture);
+        TodayActions.Text = Count(actions);
+        TodayActionsLabel.Text = actions == 1 ? "action today" : "actions today";
+        TodayWorkspaces.Text = Count(workspaces);
+        TodayWorkspacesLabel.Text = workspaces == 1 ? "workspace" : "workspaces";
+        TodayCommands.Text = Count(commands);
+        TodayCommandsLabel.Text = commands == 1 ? "command" : "commands";
+    }
+
     void RebuildStackLists()
     {
         IEnumerable<HubEntry> Filtered(IEnumerable<HubEntry> source) =>
             _filter.Length == 0 ? source : source.Where(entry => entry.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase));
         Sync(_stackWorking, Filtered(_hub.Working).ToList());
-        Sync(_stackAsleep, Filtered(_hub.Asleep).ToList());
+        Sync(_stackAsleep, (_filter.Length > 0 ? Filtered(_hub.Asleep) : Recent()).ToList());
+        Sync(_sidebarAsleep, Recent().ToList());
         FilterEmptyText.Visibility = _filter.Length > 0 && _stackWorking.Count + _stackAsleep.Count == 0
             ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    /// <summary>
+    /// Recent keeps the last few. Every project folder an agent works in gets a workspace, so the
+    /// list grew without end - the owner's had over a dozen on 2026-09-22, most untouched for days.
+    /// An older one is still one search away, and stays listed while it is the one open.
+    /// </summary>
+    IEnumerable<HubEntry> Recent() =>
+        _hub.Asleep.Where((entry, index) => index < RecentShown || entry.Id == _selectedId);
+
+    const int RecentShown = 8;
 
     static void Sync(ObservableCollection<HubEntry> target, List<HubEntry> wanted)
     {
@@ -108,12 +139,14 @@ public partial class MainWindow : Window, IDisposable
 
     internal void ShowStack()
     {
+        CloseCardSettings(animate: false);
         RememberPlacement();
         _mode = "stack";
         SettingsSlot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Collapsed;
         StackRoot.Visibility = Visibility.Visible;
         FilterButton.Visibility = Visibility.Visible;
+        BackButton.Visibility = Visibility.Collapsed;
         if (!(_stackPlacement ?? (ShellPlacement.DefaultStack() with { Height = 560 })).Restore(this, 320, 480)) { MinWidth = 320; MinHeight = 480; }
         QueuePreferenceSave();
         UpdateVisibleWork();
@@ -121,12 +154,14 @@ public partial class MainWindow : Window, IDisposable
 
     internal void ShowWide(string? select)
     {
+        CloseCardSettings(animate: false);
         RememberPlacement();
         _mode = "wide";
         StackRoot.Visibility = Visibility.Collapsed;
         SettingsSlot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Visible;
         FilterButton.Visibility = Visibility.Collapsed;
+        BackButton.Visibility = Visibility.Visible;
         if (!(_widePlacement ?? ShellPlacement.DefaultWide()).Restore(this, 960, 600)) { MinWidth = 960; MinHeight = 600; }
         string? id = select ?? _selectedId ?? _hub.Working.Concat(_hub.Asleep).Select(entry => entry.Id).FirstOrDefault();
         if (id is not null) SelectWorkspace(id);
@@ -138,6 +173,7 @@ public partial class MainWindow : Window, IDisposable
     {
         _selectedId = id;
         _hub.Select(id);
+        RebuildStackLists();
         EnsureWorkspaceView();
         _workspaceView!.SetWorkspace(id);
         QueuePreferenceSave();
@@ -154,6 +190,7 @@ public partial class MainWindow : Window, IDisposable
 
     internal void ShowSettings()
     {
+        CloseCardSettings(animate: false);
         RememberPlacement();
         if (_mode != "settings") _priorMode = _mode;
         bool first = SettingsSlot.Content is not SettingsView;
@@ -168,6 +205,7 @@ public partial class MainWindow : Window, IDisposable
         WideRoot.Visibility = Visibility.Collapsed;
         SettingsSlot.Visibility = Visibility.Visible;
         FilterButton.Visibility = Visibility.Collapsed;
+        BackButton.Visibility = Visibility.Visible;
         if (!(_widePlacement ?? ShellPlacement.DefaultWide()).Restore(this, 960, 600)) { MinWidth = 960; MinHeight = 600; }
         var view = (SettingsView)SettingsSlot.Content;
         if (first) view.Show("general");
@@ -182,10 +220,122 @@ public partial class MainWindow : Window, IDisposable
         if (_priorMode == "wide") ShowWide(_selectedId); else ShowStack();
     }
 
+    /// <summary>Settings from the tray or the gear: inside the card when the stack is showing
+    /// (owner's pick, 2026-09-22), the wide page when a workspace is open.</summary>
+    internal void OpenSettings()
+    {
+        if (_mode is "stack" or "cardsettings") ShowCardSettings(); else ShowSettings();
+    }
+
+    // --- settings inside the card: slides in over the stack, the window keeps its size ----------
+
+    internal SettingsView? CardSettings => _cardSettings;
+
+    internal void ShowCardSettings()
+    {
+        if (_mode is not ("stack" or "cardsettings")) ShowStack();
+        if (_mode == "cardsettings") { _cardSettings!.Focus(); return; }
+        if (FilterHost.Visibility == Visibility.Visible) ClearFilter();
+        if (_cardSettings is null)
+        {
+            _cardSettings = new SettingsView(card: true);
+            _cardSettings.BackRequested += () => CloseCardSettings(animate: true);
+            _cardSettings.CardTitleChanged += CardTitleChanged;
+            CardSettingsSlot.Content = _cardSettings;
+        }
+        else if (!_cardSettings.AtCardHome) _cardSettings.ShowCardHome(animate: false);
+        _mode = "cardsettings";
+        CardSettingsSlot.Visibility = Visibility.Visible;
+        StackRoot.IsHitTestVisible = false;
+        FilterButton.Visibility = Visibility.Collapsed;
+        // The Night tile does its job here, and a page name needs the room.
+        ThemeButton.Visibility = Visibility.Collapsed;
+        TitleMark.Visibility = Visibility.Hidden;
+        CardBackButton.Visibility = Visibility.Visible;
+        CardTitleChanged();
+        double width = StackRoot.ActualWidth > 0 ? StackRoot.ActualWidth : ActualWidth;
+        SlideX(CardSettingsSlot, width, 0, null);
+        SlideX(StackRoot, 0, -0.3 * width, null);
+        _cardSettings.Focus();
+        UpdateVisibleWork();
+    }
+
+    void CloseCardSettings(bool animate)
+    {
+        if (_mode != "cardsettings") return;
+        _mode = "stack";
+        StackRoot.IsHitTestVisible = true;
+        FilterButton.Visibility = Visibility.Visible;
+        ThemeButton.Visibility = Visibility.Visible;
+        TitleMark.Visibility = Visibility.Visible;
+        CardBackButton.Visibility = Visibility.Collapsed;
+        TitleText.Text = "Deskweave";
+        double width = StackRoot.ActualWidth > 0 ? StackRoot.ActualWidth : ActualWidth;
+        if (animate)
+        {
+            SlideX(StackRoot, -0.3 * width, 0, null);
+            SlideX(CardSettingsSlot, 0, width, () => { if (_mode != "cardsettings") CardSettingsSlot.Visibility = Visibility.Collapsed; });
+        }
+        else
+        {
+            SlideX(StackRoot, 0, 0, null, instant: true);
+            CardSettingsSlot.Visibility = Visibility.Collapsed;
+        }
+        if (IsKeyboardFocusWithin) SettingsButton.Focus();
+        UpdateVisibleWork();
+    }
+
+    void CardTitleChanged()
+    {
+        if (_mode == "cardsettings" && _cardSettings is not null) TitleText.Text = _cardSettings.CardTitle;
+    }
+
+    void CardBack_Click(object sender, RoutedEventArgs e) => _cardSettings?.GoBack();
+
+    void SlideX(FrameworkElement element, double from, double to, Action? done, bool instant = false)
+    {
+        var shift = (TranslateTransform)element.RenderTransform;
+        if (instant || !IsLoaded || !SystemParameters.ClientAreaAnimation)
+        {
+            shift.BeginAnimation(TranslateTransform.XProperty, null);
+            shift.X = to;
+            done?.Invoke();
+            return;
+        }
+        var slide = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(260)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        if (done is not null) slide.Completed += (_, _) => done();
+        shift.BeginAnimation(TranslateTransform.XProperty, slide);
+    }
+
+    // --- day and night: one tap picks the other; Settings, General, Theme follows Windows again --
+
+    void Theme_Click(object sender, RoutedEventArgs e)
+    {
+        ThemeChoice next = AppearanceManager.Dark ? ThemeChoice.Light : ThemeChoice.Dark;
+        AppSettingsStore.Update(s => s with { Theme = next });
+    }
+
+    void ThemeRepainted()
+    {
+        ThemeIcon.Dark = AppearanceManager.Dark;
+        ThemeButton.ToolTip = ThemeTip();
+    }
+
+    static string ThemeTip() => AppearanceManager.Dark ? "Switch to day" : "Switch to night";
+
     // --- filter, clicks --------------------------------------------------------------------------
 
-    void WorkingCard_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) ShowWide(id); }
-    void AsleepRow_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) ShowWide(id); }
+    void WorkingCard_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) TogglePreview(id); }
+    void AsleepRow_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) TogglePreview(id); }
+    internal void TogglePreview(string id)
+    {
+        bool expand = _hub.Find(id)?.Expanded == false;
+        foreach (HubEntry entry in _hub.Working.Concat(_hub.Asleep)) entry.Expanded = expand && entry.Id == id;
+    }
+    void Inline_ShowMore(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: HubEntry entry }) ShowWide(entry.Id);
+    }
     void SidebarItem_Checked(object sender, RoutedEventArgs e) { if (sender is RadioButton { DataContext: HubEntry entry }) SelectWorkspace(entry.Id); }
 
     /// <summary>Sleeps one workspace right from its card or sidebar row, in one click (fix list item
@@ -230,8 +380,9 @@ public partial class MainWindow : Window, IDisposable
     {
         // Settings covers the whole window: none of the working cards or the sidebar's thumbnails
         // are on screen while it shows, so there is nothing to capture.
-        bool shown = IsLoaded && IsVisible && WindowState != WindowState.Minimized && _mode != "settings";
-        ModuleEntry.HubShowing = shown;
+        bool windowShown = IsLoaded && IsVisible && WindowState != WindowState.Minimized;
+        bool shown = windowShown && _mode is not ("settings" or "cardsettings");
+        ModuleEntry.HubShowing = windowShown;
         if (shown)
         {
             if (!_cardPreviews.IsEnabled)
@@ -271,7 +422,11 @@ public partial class MainWindow : Window, IDisposable
                     catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or System.ComponentModel.Win32Exception) { return null; }
                 });
                 if (_disposed || generation != _previewGeneration) break;
-                if (frame is not null) entry.Preview = frame;
+                if (frame is not null && ReferenceEquals(WorkspaceRuntime.Of(entry.Id)?.Plane, plane))
+                {
+                    entry.Preview = frame;
+                    entry.PreviewPlane = plane;
+                }
             }
         }
         finally { _capturing = false; }
@@ -370,7 +525,7 @@ public partial class MainWindow : Window, IDisposable
     void RememberPlacement()
     {
         if (_restoringPreferences || !IsLoaded || WindowState != WindowState.Normal) return;
-        if (_mode == "stack") _stackPlacement = ShellPlacement.Capture(this);
+        if (_mode is "stack" or "cardsettings") _stackPlacement = ShellPlacement.Capture(this);
         else _widePlacement = ShellPlacement.Capture(this);
     }
 
@@ -382,13 +537,19 @@ public partial class MainWindow : Window, IDisposable
         _ = new ShellPreferences
         {
             Stack = _stackPlacement, Wide = _widePlacement, Maximized = _wasMaximized,
-            Mode = _mode == "settings" ? _priorMode : _mode, SelectedWorkspace = _selectedId
+            Mode = _mode switch { "settings" => _priorMode, "cardsettings" => "stack", _ => _mode }, SelectedWorkspace = _selectedId
         }.Save();
     }
 
     // --- title bar -------------------------------------------------------------------------------
 
-    void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings();
+    void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        if (_mode == "settings") BackFromSettings();
+        else if (_mode == "cardsettings") CloseCardSettings(animate: true);
+        else OpenSettings();
+    }
+    void Back_Click(object sender, RoutedEventArgs e) => ShowStack();
     void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     void Maximize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
     // The close button always hides to the tray (brief A.5); Quit lives only on the tray menu.
@@ -415,19 +576,21 @@ public partial class MainWindow : Window, IDisposable
     // Settings has already handled the key.
     void Window_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Escape || _mode != "settings") return;
-        e.Handled = true;
-        BackFromSettings();
+        if (e.Key != Key.Escape) return;
+        if (_mode == "settings") { e.Handled = true; BackFromSettings(); }
+        else if (_mode == "cardsettings") { e.Handled = true; _cardSettings?.GoBack(); }
     }
 
     void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         // Settings handles its own Escape and raises BackRequested; this window
         // only reacts to Escape outside it, so the two never race for the same key press.
-        if (e.Key == Key.Escape && _mode != "settings")
+        if (e.Key == Key.Escape && _mode is not ("settings" or "cardsettings"))
         {
             if (FilterHost.Visibility == Visibility.Visible) { ClearFilter(); e.Handled = true; }
             else if (_mode == "wide") { ShowStack(); e.Handled = true; }
+            else if (_hub.Working.Concat(_hub.Asleep).FirstOrDefault(entry => entry.Expanded) is { } expanded)
+            { TogglePreview(expanded.Id); e.Handled = true; }
             return;
         }
         if (Keyboard.Modifiers == ModifierKeys.Control)
@@ -465,12 +628,16 @@ public partial class MainWindow : Window, IDisposable
         _cardPreviews.Tick -= CardPreviews_Tick;
         _savePreferences.Stop();
         ModuleEntry.DashboardOpenRequested -= EngineRequestedWorkspace;
+        AppearanceManager.Changed -= ThemeRepainted;
         _hub.Working.CollectionChanged -= HubChanged;
         _hub.Asleep.CollectionChanged -= HubChanged;
+        _hub.ActivityChanged -= ShowToday;
         _hub.Dispose();
         _workspaceView?.Dispose();
         MainSlot.Content = null;
         if (SettingsSlot.Content is SettingsView view) view.BackRequested -= BackFromSettings;
+        if (_cardSettings is not null) _cardSettings.CardTitleChanged -= CardTitleChanged;
+        CardSettingsSlot.Content = null;
         SettingsSlot.Content = null;
     }
 }

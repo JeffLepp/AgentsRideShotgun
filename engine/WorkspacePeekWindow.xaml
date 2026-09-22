@@ -76,6 +76,7 @@
 
     <!-- Hover is the whole thing the owner can point at - card and tabs - so reaching up for another
          workspace does not let the corner fade out from under the pointer on its way there. -->
+    <Grid x:Name="DockViewport">
     <Grid x:Name="Root" MouseEnter="Root_MouseEnter" MouseLeave="Root_MouseLeave">
         <!-- The tab strip, shown only once a second workspace is running: one tab each, in the order
              they started, above the card rather than on it so it never covers the picture. It takes
@@ -85,14 +86,29 @@
                     HorizontalAlignment="Left" VerticalAlignment="Top" Background="Transparent"
                     KeyboardNavigation.DirectionalNavigation="Cycle"/>
 
+        <!-- Keep the broad shadow on an unchanged silhouette. Preview frames and the activity
+             sweep can then redraw without invalidating the blurred card-sized surface. -->
+        <!-- Cache the finished child effect, rather than the effect's unblurred input. -->
+        <Grid IsHitTestVisible="False" CacheMode="BitmapCache">
+            <Border x:Name="CardShadow" HorizontalAlignment="Left" VerticalAlignment="Top"
+                    IsHitTestVisible="False" Width="{Binding Width, ElementName=FrontCard}"
+                    Height="{Binding Height, ElementName=FrontCard}" Margin="{Binding Margin, ElementName=FrontCard}"
+                    CornerRadius="{Binding CornerRadius, ElementName=FrontCard}"
+                    Background="{Binding Background, ElementName=FrontCard}"
+                    BorderBrush="{Binding BorderBrush, ElementName=FrontCard}"
+                    BorderThickness="{Binding BorderThickness, ElementName=FrontCard}"
+                    Opacity="{Binding Opacity, ElementName=FrontCard}" Visibility="{Binding Visibility, ElementName=FrontCard}">
+                <Border.Effect>
+                    <DropShadowEffect Color="Black" Opacity="{DynamicResource CornerShadowOpacity}" BlurRadius="60" ShadowDepth="24" Direction="270"/>
+                </Border.Effect>
+            </Border>
+        </Grid>
+
         <!-- The card itself. Photographed without its shadow margin, so the shadow lives outside
              the card's own Width/Height rather than inside it. -->
         <Border x:Name="FrontCard" HorizontalAlignment="Left" VerticalAlignment="Top"
                 Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource GlassEdgeBrush}"
                 BorderThickness="1" CornerRadius="{DynamicResource CornerWindowRadius}">
-            <Border.Effect>
-                <DropShadowEffect Color="Black" Opacity="{DynamicResource CornerShadowOpacity}" BlurRadius="60" ShadowDepth="24" Direction="270"/>
-            </Border.Effect>
             <Grid x:Name="CardBody" ClipToBounds="True">
                 <!-- Owner input lands on the workspace through the shared screen-input path. -->
                 <Image x:Name="LiveScreen" Stretch="UniformToFill" Cursor="Hand"
@@ -120,12 +136,39 @@
                 <Grid x:Name="DropOverlay" Visibility="Collapsed" Margin="6" IsHitTestVisible="False">
                     <Rectangle RadiusX="9" RadiusY="9" Fill="{DynamicResource AccentSoftBrush}"
                                Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeDashArray="4,3"/>
-                    <TextBlock x:Name="DropText" HorizontalAlignment="Center" VerticalAlignment="Center"
-                               FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource InkBrush}"/>
+                    <!-- On its own accent pill: the overlay is see-through, and the page under it is the
+                         agent's, light or dark whatever the app's theme - dark ink on a white page was
+                         fine and white ink on it all but vanished (2026-09-22). -->
+                    <Border HorizontalAlignment="Center" VerticalAlignment="Center" CornerRadius="8" Padding="12,6"
+                            Background="{DynamicResource AccentBrush}">
+                        <TextBlock x:Name="DropText" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource OnAccentBrush}"/>
+                    </Border>
                 </Grid>
 
+                <!-- The top bar: the band the pill and the actions sit on, and the card's title bar.
+                     Dragging anywhere along it moves the window; a click that does not move is a
+                     click on the picture under it, so the top of the workspace's screen stays reachable. -->
+                <Border x:Name="MoveBar" Height="36" VerticalAlignment="Top" Background="Transparent" Cursor="SizeAll"
+                        MouseLeftButtonDown="MoveBar_MouseLeftButtonDown" MouseMove="MoveBar_MouseMove"
+                        MouseLeftButtonUp="MoveBar_MouseLeftButtonUp" MouseRightButtonUp="MoveBar_MouseRightButtonUp"
+                        MouseWheel="MoveBar_MouseWheel" MouseEnter="MoveBar_MouseEnter"
+                        LostMouseCapture="MoveBar_LostMouseCapture"/>
+
+                <!-- Open on my desktop: over the workspace window under the pointer, when Deskweave can
+                     start that window again on the owner's own desktop. Dragging the window's title
+                     bar off the card does the same. -->
+                <Button x:Name="PopOutButton" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Style="{StaticResource PrimaryButton}" Padding="8,3,9,4" Click="PopOutButton_Click"
+                        automation:AutomationProperties.Name="Open this window on my desktop">
+                    <StackPanel Orientation="Horizontal">
+                        <Path Style="{StaticResource Icon13}" Data="{StaticResource Icon.PopOut}" Margin="0,0,5,0"
+                              VerticalAlignment="Center"/>
+                        <TextBlock Text="Open on my desktop" FontSize="11.5" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+
                 <!-- The glass pill: status dot, workspace name, agent. Shifts right on hover to clear
-                     the resize grip. Dragging it moves the whole window. -->
+                     the resize grip. Dragging it moves the whole window, as the bar under it does. -->
                 <Border x:Name="Pill" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,8,0,0"
                         Background="{DynamicResource GlassBrush}" BorderBrush="{DynamicResource GlassEdgeBrush}"
                         BorderThickness="1" CornerRadius="{DynamicResource PillRadius}" Padding="9,4"
@@ -261,10 +304,13 @@
                 <Rectangle Style="{StaticResource ResizeEdge}" Width="10" Height="10" HorizontalAlignment="Right"
                            VerticalAlignment="Top" Cursor="SizeNESW"
                            PreviewMouseLeftButtonDown="ResizeTopRight_MouseLeftButtonDown"/>
-                <Rectangle Style="{StaticResource ResizeEdge}" Width="10" Height="10" HorizontalAlignment="Left"
+                <!-- The grip's corner: as big as the grip itself, so grabbing the grip resizes rather
+                     than landing on the top bar beside it and moving the card. -->
+                <Rectangle Style="{StaticResource ResizeEdge}" Width="22" Height="22" HorizontalAlignment="Left"
                            VerticalAlignment="Top" Cursor="SizeNWSE"
                            PreviewMouseLeftButtonDown="ResizeTopLeft_MouseLeftButtonDown"/>
             </Grid>
         </Border>
+    </Grid>
     </Grid>
 </Window>

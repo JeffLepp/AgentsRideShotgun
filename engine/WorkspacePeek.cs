@@ -47,6 +47,16 @@ internal static class WorkspacePeekPlacement
     /// <summary>Small, the size it starts at. A card at this width or under is not grown.</summary>
     internal const double SmallWidth = 344;
 
+    /// <summary>The handle stays wholly inside this monitor's work area, above any taskbar.
+    /// Its vertical position tracks the tucked card; an equal distance favors the right edge.</summary>
+    internal static Rect EdgeTab(Rect work, Rect card)
+    {
+        const double width = 28, height = 64;
+        bool right = card.Left + card.Width / 2 >= work.Left + work.Width / 2;
+        return Fit(work, new Rect(right ? work.Right - width : work.Left,
+            card.Top + (card.Height - height) / 2, width, height));
+    }
+
     /// <summary>The card at a width, 16:10, the width kept inside what a card may be.</summary>
     internal static Size Card(double width)
     {
@@ -80,7 +90,7 @@ internal static class WorkspacePeekPlacement
 
     /// <summary>
     /// A resize by dragging edges, keeping 16:10. The edges not dragged stay put; an edge the drag
-    /// says nothing about (the sides, when only the top moves) keeps the side nearer the middle of
+    /// says nothing about (the sides, when only the top moves) keeps the side nearer the edge of
     /// the work area fixed, so a card in the bottom right grows up and left, into the screen.
     /// </summary>
     internal static Rect Resize(Rect start, PeekEdges edges, Vector delta, Rect work)
@@ -95,14 +105,25 @@ internal static class WorkspacePeekPlacement
         if (double.IsNaN(wanted)) return start;
         Size size = Card(Math.Min(wanted, Math.Min(work.Width, work.Height * 16 / 10)));
 
-        bool keepRight = edges.HasFlag(PeekEdges.Left)
-            || !edges.HasFlag(PeekEdges.Right) && start.Left + start.Width / 2 > work.Left + work.Width / 2;
-        bool keepBottom = edges.HasFlag(PeekEdges.Top)
-            || !edges.HasFlag(PeekEdges.Bottom) && start.Top + start.Height / 2 > work.Top + work.Height / 2;
-        double left = keepRight ? start.Right - size.Width : start.Left;
-        double top = keepBottom ? start.Bottom - size.Height : start.Top;
-        return Fit(work, new Rect(left, top, size.Width, size.Height));
+        bool keepRight = edges.HasFlag(PeekEdges.Left) || !edges.HasFlag(PeekEdges.Right) && RightHalf(start, work);
+        bool keepBottom = edges.HasFlag(PeekEdges.Top) || !edges.HasFlag(PeekEdges.Bottom) && BottomHalf(start, work);
+        return Hold(start, size, keepRight, keepBottom, work);
     }
+
+    /// <summary>
+    /// The card at another size by the shrink/grow button, holding the corner of the screen it is
+    /// nearest, as a drag holds it: a card in the bottom right shrinks down into that corner and
+    /// grows back up and left out of it, rather than from its own top left out into the screen.
+    /// </summary>
+    internal static Rect Regrow(Rect start, Size size, Rect work) =>
+        Hold(start, size, RightHalf(start, work), BottomHalf(start, work), work);
+
+    static bool RightHalf(Rect card, Rect work) => card.Left + card.Width / 2 > work.Left + work.Width / 2;
+    static bool BottomHalf(Rect card, Rect work) => card.Top + card.Height / 2 > work.Top + work.Height / 2;
+
+    static Rect Hold(Rect start, Size size, bool keepRight, bool keepBottom, Rect work) =>
+        Fit(work, new Rect(keepRight ? start.Right - size.Width : start.Left,
+            keepBottom ? start.Bottom - size.Height : start.Top, size.Width, size.Height));
 
     /// <summary>Whether a card at this width counts as grown - the shrink button only means
     /// something once dragging or Settings has made it bigger than Small.</summary>

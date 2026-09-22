@@ -154,11 +154,11 @@ static class SettingsScenes
 
         var view = new SettingsView();
         Point at = SceneContext.OffScreen;
-        var window = new Window
+        var window = ProbeWindow.OffScreen(new Window
         {
             Content = view, Width = 1198, Height = 784, WindowStyle = WindowStyle.None,
             ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Left = at.X, Top = at.Y,
-        };
+        });
         window.Show();
         try
         {
@@ -209,6 +209,25 @@ static class SettingsScenes
             ShowSettled(view, "agents");
             Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "Claude Code")
                 && Descendants<TextBlock>(view).Any(x => TextOf(x) == "Codex"), "Installed agents appear");
+            var profileCounts = SettingsActions.ReadProfileCounts;
+            SettingsActions.ReadProfileCounts = _ => (1, 3);
+            Program.Agents(_ => AgentState.Found);
+            ShowSettled(view, "agents");
+            Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "1 of 3 profiles connected"),
+                "Settings distinguishes a partially connected set of configuration profiles");
+            SettingsActions.ReadConnectionFailure = _ => "Profile 2 could not be connected. Try again.";
+            view.Visibility = Visibility.Collapsed;
+            view.Visibility = Visibility.Visible;
+            SettleVisual(view);
+            Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "Profile 2 could not be connected. Try again." && x.IsVisible),
+                "Reopening cached Settings surfaces a background profile connection failure");
+            SettingsActions.ReadConnectionFailure = _ => null;
+            SettingsActions.ReadProfileCounts = _ => (3, 3);
+            Program.Agents(_ => AgentState.Connected);
+            ShowSettled(view, "agents");
+            Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "Connected \u00b7 3 profiles"),
+                "Settings names all connected configuration profiles without implying signed-in accounts");
+            SettingsActions.ReadProfileCounts = profileCounts;
             Program.Agents(app => app == WorkspaceConnections.AgentApp.ClaudeCode ? AgentState.Found : AgentState.NotInstalled);
             ShowSettled(view, "agents");
             Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "Found on this PC")
@@ -347,6 +366,78 @@ static class SettingsScenes
             AppSettingsStore.Update(s => s with { Theme = themeBefore });
             window.Close();
         }
+        await HostReopen();
+    }
+
+    static async Task HostReopen()
+    {
+        ShellPreferences saved = ShellPreferences.Read();
+        var shell = ProbeWindow.OffScreen(new MainWindow());
+        try
+        {
+            shell.Show();
+            shell.ShowStack();
+            shell.Width = 340;
+            shell.Height = 560;
+            shell.UpdateLayout();
+            // Settings opens inside the card (owner's pick, 2026-09-22): its home, then a page that
+            // slides in, then back twice, the window never changing size.
+            SettingsView? cached = null;
+            var cardBack = (Button)shell.FindName("CardBackButton");
+            foreach (string category in new[] { "general", "agents", "history", "general" })
+            {
+                shell.SettingsButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Task.Delay(350);
+                var settings = shell.CardSettings!;
+                bool sameView = cached is null || ReferenceEquals(cached, settings);
+                cached = settings;
+                Program.Check(settings.AtCardHome && cardBack.IsVisible && shell.ThemeButton.Visibility != Visibility.Visible,
+                    "Settings opens on the card's home with a back arrow in the title bar");
+                settings.Show(category);
+                await Task.Delay(350);
+                shell.UpdateLayout();
+                var page = (ContentControl)settings.FindName("Page");
+                var body = (FrameworkElement)page.Content;
+                Program.Check(sameView && shell.DisplayMode == "cardsettings" && settings.IsVisible && !settings.AtCardHome
+                    && settings.ActualWidth >= 300 && settings.ActualHeight >= 300
+                    && body.ActualWidth >= 200 && body.ActualHeight >= 40
+                    && body.TranslatePoint(new Point(0, 0), settings).X is >= 0 and < 40
+                    && Descendants<Control>(body).Any(c => c.IsVisible && c.IsEnabled && c.ActualWidth > 20 && c.ActualHeight > 10),
+                    "Settings in the card slides in visible, usable " + category + " content in its cached view");
+                cardBack.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Task.Delay(350);
+                Program.Check(shell.DisplayMode == "cardsettings" && settings.AtCardHome,
+                    "Back from " + category + " returns to the card's settings home");
+                cardBack.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Task.Delay(350);
+                Program.Check(shell.DisplayMode == "stack" && Math.Abs(shell.ActualWidth - 340) < 2
+                    && Math.Abs(shell.ActualHeight - 560) < 2 && shell.ThemeButton.Visibility == Visibility.Visible,
+                    "Back again leaves Settings on the same compact strip");
+                shell.Hide();
+                shell.RestoreWorkspaceWindow();
+                await Task.Delay(100);
+            }
+
+            // The sun and moon: one click picks the other theme and the glyph follows.
+            bool wasDark = AppearanceManager.Dark;
+            ThemeChoice chosen = AppSettingsStore.Current.Theme;
+            shell.ThemeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(300);
+            Program.Check(AppearanceManager.Dark != wasDark && shell.ThemeIcon.Dark == AppearanceManager.Dark
+                && AppSettingsStore.Current.Theme == (wasDark ? ThemeChoice.Light : ThemeChoice.Dark),
+                "The title bar's sun and moon switches day and night in one click");
+            shell.ThemeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(300);
+            Program.Check(AppearanceManager.Dark == wasDark && shell.ThemeIcon.Dark == wasDark,
+                "Clicking it again switches back");
+            AppSettingsStore.Update(s => s with { Theme = chosen });
+        }
+        finally
+        {
+            shell.Dispose();
+            shell.Close();
+            saved.Save();
+        }
     }
 
     static Border FindRow(DependencyObject root, string label)
@@ -358,7 +449,8 @@ static class SettingsScenes
     }
 
     static Button FindButton(DependencyObject root, string label) =>
-        Descendants<Button>(root).First(button => Equals(button.Content, label));
+        Descendants<Button>(root).First(button => Equals(button.Content, label)
+            || button.Content is not string && System.Windows.Automation.AutomationProperties.GetName(button) == label);
 
     // Row labels are authored as Run inlines so TextBlock.Text is empty even while the words are
     // visibly rendered. Read the document range the same way a text automation client does.

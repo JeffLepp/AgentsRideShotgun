@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <clipPath id="fc"><rect x="92" y="108" width="136" height="104" rx="18"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="#111827"/>
+  <rect x="8.5" y="8.5" width="239" height="239" rx="57.5" fill="none" stroke="#ffffff" stroke-opacity=".10"/>
+  <!-- your screen: behind, outlined -->
+  <rect x="38" y="52" width="136" height="104" rx="18" fill="none" stroke="#8fb0ff" stroke-width="13"/>
+  <!-- the agent's screen: in front, filled -->
+  <g clip-path="url(#fc)">
+    <rect x="92" y="108" width="136" height="104" fill="#2e6bf6"/>
+    <rect x="92" y="108" width="136" height="24" fill="#6f98ff"/>
+  </g>
+  <!-- the agent's own cursor -->
+  <path d="M146 144 v50 l12 -12 9 20 10 -4.5 -9 -19.5 h17 z" fill="#ffffff" stroke="#0b1a3a" stroke-width="4" stroke-linejoin="round"/>
+</svg>

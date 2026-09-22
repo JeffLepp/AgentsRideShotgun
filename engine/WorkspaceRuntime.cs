@@ -69,10 +69,10 @@ public sealed class WorkspaceRuntime : IDisposable
         _computer = AgentDesktop.Create(AgentDesktop.NameFor(workspace.Id), workspace.Power, workspace.Mode);
         try
         {
-            // Give the first visible app a head start while the control plane and local MCP listener
-            // are being built. The runtime is not published until all of them are ready, so this
-            // changes only time-to-first-window, not what callers can observe or control.
-            _computer.Launch(TerminalPath(), TerminalArguments(_computer.Folder!));
+            // No terminal of its own any more. Every workspace used to open a PowerShell window as it
+            // started, a head start from before agents had `run`; nothing used it, and the owner saw
+            // a stray console in the corner and an agent had one more window to read past
+            // (2026-09-22). A workspace now starts empty until an agent opens something.
             // The control plane owns the lease, so who is driving is one answer rather than a
             // boolean here and a different boolean wherever an agent ends up living.
             _plane = new WorkspaceControl(_computer);
@@ -216,11 +216,14 @@ public sealed class WorkspaceRuntime : IDisposable
     /// <summary>
     /// Puts the workspace nobody has used for longest to sleep, to make room for another one. False
     /// when every running workspace is in use. Its files stay, and the next agent call wakes it.
+    /// The one a pinned corner shows goes last rather than never: moving or resizing the corner pins
+    /// it, and that must not leave a full machine or a new agent with nowhere to go.
     /// </summary>
     internal static bool SleepQuietest()
     {
-        foreach (WorkspaceRuntime runtime in Running.Where(r => r.Quiet is not null && r.Id != WorkspacePeekHost.PinnedOn)
-            .OrderByDescending(r => r.Quiet))
+        string? pinned = WorkspacePeekHost.PinnedOn;
+        foreach (WorkspaceRuntime runtime in Running.Where(r => r.Quiet is not null)
+            .OrderBy(r => r.Id == pinned).ThenByDescending(r => r.Quiet))
             if (runtime.TrySleep()) return true;
         return false;
     }
@@ -370,20 +373,4 @@ public sealed class WorkspaceRuntime : IDisposable
         }
     }
 
-    /// <summary>Windows PowerShell, which every Windows has. Nothing is installed to get one.</summary>
-    internal static string TerminalArguments(string folder)
-    {
-        // Known-folder APIs ignore APPDATA redirection. Explicitly scope PSReadLine history and
-        // skip the owner's profile (which may start conda, write owner files, or run other hooks).
-        string history = Path.Combine(folder, "terminal-history.txt").Replace("'", "''");
-        string setup = "Import-Module PSReadLine -ErrorAction SilentlyContinue; "
-            + "if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) { "
-            + "Set-PSReadLineOption -HistorySavePath '" + history + "' }";
-        return "-NoLogo -NoProfile -NoExit -EncodedCommand "
-            + Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(setup));
-    }
-
-    static string TerminalPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.System),
-        "WindowsPowerShell", "v1.0", "powershell.exe");
 }

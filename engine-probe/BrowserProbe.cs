@@ -16,6 +16,17 @@ internal static class BrowserProbe
         WorkspaceControl control = runtime.Plane!;
         AgentDesktop desktop = runtime.Computer!;
         string folder = desktop.Folder!;
+        const string privateDetail = "file:///C:/Users/private-person/token-secret.html";
+        string protocolReceipt = WorkspaceBrowser.NavigationFailureReceipt(
+            "{\"code\":-32000,\"message\":\"Failed at " + privateDetail + "\",\"data\":\"password-secret\"}");
+        check(protocolReceipt.Contains("code -32000", StringComparison.Ordinal)
+            && !protocolReceipt.Contains("private-person", StringComparison.Ordinal)
+            && !protocolReceipt.Contains("secret", StringComparison.Ordinal),
+            "Browser diagnostics preserve numeric protocol codes without echoing message or data secrets");
+        check(WorkspaceBrowser.ProtocolFailureSummary("net::ERR_FILE_NOT_FOUND") == "net::ERR_FILE_NOT_FOUND"
+            && !WorkspaceBrowser.ProtocolFailureSummary("net::ERR_FAILED " + privateDetail).Contains(privateDetail, StringComparison.Ordinal)
+            && !WorkspaceBrowser.ProtocolFailureSummary("script failed at " + privateDetail).Contains(privateDetail, StringComparison.Ordinal),
+            "Browser diagnostics retain valid Chromium errors and omit arbitrary page text and paths");
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
         CancellationToken cancel = deadline.Token;
         string first = Path.Combine(folder, "browser-one.html");
@@ -33,11 +44,18 @@ internal static class BrowserProbe
             <body><h1>Deskweave second local page</h1><p>The second tab has its own content.</p></body></html>
             """, System.Text.Encoding.UTF8);
         check(File.Exists(WorkspaceBrowser.ChromePath), "A supported installed Chromium browser is available without a download");
+        PipeOnly(check, output, observedProcesses);
         string missing = new Uri(Path.Combine(folder, "missing-page.html")).AbsoluteUri;
         JsonElement firstNavigation = client.Tool("browse", new { url = missing });
         File.WriteAllText(Path.Combine(output, "first-browse-response.json"), firstNavigation.GetRawText());
         check(Program.Client.Failed(firstNavigation),
             "First browser navigation to a missing local file reports unconfirmed navigation");
+        string failureReceipt = Program.Client.Text(firstNavigation);
+        check(failureReceipt.Contains("[navigation]", StringComparison.Ordinal)
+            && failureReceipt.Contains("net::ERR_FILE_NOT_FOUND", StringComparison.Ordinal)
+            && !failureReceipt.Contains(folder, StringComparison.OrdinalIgnoreCase)
+            && !failureReceipt.Contains(missing, StringComparison.Ordinal),
+            "Actual failed navigation returns its stage and native Chromium error without the local path");
         WorkspaceBrowser retained = control.Browser ?? throw new InvalidOperationException("Failed navigation discarded the attached browser.");
         bool retainedExited;
         try { using var process = Process.GetProcessById(retained.ProcessId); retainedExited = process.HasExited; }
@@ -52,6 +70,8 @@ internal static class BrowserProbe
         check(!Program.Client.Failed(client.Tool("browse", new { url = new Uri(first).AbsoluteUri })),
             "Packaged MCP browse opens the actual browser on a local fixture page");
         WorkspaceBrowser browser = control.Browser ?? throw new InvalidOperationException("Browser is missing after successful browse.");
+        check(browser.LastProtocolError is null,
+            "Successful navigation clears the previous failed navigation diagnostic");
         int browserPid = browser.ProcessId;
         check(ReferenceEquals(retained, browser) && retained.ProcessId == browserPid,
             "Valid navigation after a failed attempt reuses the attached browser instead of duplicating it");
@@ -60,8 +80,8 @@ internal static class BrowserProbe
         Settled(() => Shows(control, 0, 90, 200, Path.Combine(output, "browser-one.png")),
             "Independent native desktop capture agrees with the first browser page", check, cancel);
         const string typed = "Deskweave caf\u00e9 \u03bb";
-        check(!Program.Client.Failed(client.Tool("page_type", new { selector = "#entry", text = typed }))
-            && !Program.Client.Failed(client.Tool("page_click", new { selector = "#apply" })),
+        check(!Program.Client.Failed(client.Tool("page", new { action = "type", selector = "#entry", text = typed }))
+            && !Program.Client.Failed(client.Tool("page", new { action = "click", selector = "#apply" })),
             "Real browser input accepts Unicode text and activates the page control");
         check(Program.Client.Text(client.Tool("page")).Contains(typed, StringComparison.Ordinal)
             && browser.Evaluate("document.querySelector('#result').textContent", cancel).GetAwaiter().GetResult() == typed,
@@ -100,7 +120,7 @@ internal static class BrowserProbe
                 && p.Integrity >= 0 && p.Integrity < broker.Integrity && p.Restricted),
             "An actual renderer has a restricted token and lower integrity than its browser broker");
 
-        check(!Program.Client.Failed(client.Tool("page_click", new { selector = "#next" })),
+        check(!Program.Client.Failed(client.Tool("page", new { action = "click", selector = "#next" })),
             "An actual link requests a new browser tab");
         Settled(() => control.Tabs(cancel).GetAwaiter().GetResult().Count >= 2,
             "The browser exposes both real local tabs", check, cancel);
@@ -124,6 +144,86 @@ internal static class BrowserProbe
             && Program.Client.Text(client.Tool("page")).Contains("Outside-page", StringComparison.Ordinal)
             && !Program.Client.Failed(client.Tool("run", new { command = "echo still-runs", seconds = 20 })),
             "After reading an outside page the agent can still run its app in the workspace");
+    }
+
+    static void PipeOnly(Action<bool, string> check, string output, List<int> observedProcesses)
+    {
+        // A distinct, non-record desktop keeps this profile fresh without changing the two saved
+        // workspace identities that the surrounding lifecycle gate verifies. The existing browser
+        // override selects Edge for this same gate on a host that also has Chrome installed.
+        string name = "PipeProbe-" + Guid.NewGuid().ToString("N")[..8];
+        using AgentDesktop desktop = AgentDesktop.Create(name);
+        string folder = desktop.Folder!;
+        string profile = Path.Combine(folder, "chrome-profile");
+        string page = Path.Combine(folder, "pipe-only.html");
+        File.WriteAllText(page, """
+            <!doctype html><title>Deskweave pipe-only fixture</title>
+            <h1>Fresh inherited pipe page</h1><script>window.pipeClicks=0</script>
+            <button id="add" onclick="document.querySelector('#result').textContent='pipe-click-'+(++window.pipeClicks)">Add</button>
+            <p id="result">No clicks</p>
+            """, System.Text.Encoding.UTF8);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var elapsed = Stopwatch.StartNew();
+        WorkspaceBrowser? browser = null;
+        Process? process = null;
+        BrowserProcess? broker = null;
+        string? failure = null;
+        string readback = "", clickCount = "";
+        bool exited = false, portFile = false;
+        try
+        {
+            check(!Directory.Exists(profile), "Pipe-only regression starts with a fresh browser profile");
+            browser = WorkspaceBrowser.Start(desktop, new Uri(page).AbsoluteUri,
+                allowPort: false, cancel: deadline.Token).GetAwaiter().GetResult();
+            check(browser is { Transport: "pipe", InitialNavigationConfirmed: true },
+                "Windows Chromium attaches and navigates over inherited pipes with port fallback disabled");
+            if (browser is null) throw new InvalidOperationException(WorkspaceBrowser.StartFailureReason(name));
+            process = Process.GetProcessById(browser.ProcessId);
+            _ = process.Handle;
+            check(desktop.OwnsProcess(browser.ProcessId)
+                && string.Equals(process.MainModule?.FileName, WorkspaceBrowser.ChromePath, StringComparison.OrdinalIgnoreCase),
+                "Pipe-only browser has the exact installed executable path and belongs to its workspace job");
+            observedProcesses.Add(browser.ProcessId);
+            broker = Inspect(process);
+            check(broker.CommandLine.Contains("--remote-debugging-pipe ", StringComparison.Ordinal)
+                && broker.CommandLine.Contains("--remote-debugging-io-pipes=", StringComparison.Ordinal)
+                && broker.CommandLine.Contains("--user-data-dir=\"" + profile + "\"", StringComparison.OrdinalIgnoreCase)
+                && !broker.CommandLine.Contains("--remote-debugging-port", StringComparison.Ordinal)
+                && !broker.CommandLine.Contains("--no-sandbox", StringComparison.Ordinal),
+                "Actual pipe-only launch names its Windows CDP handles and fresh profile without disabling the sandbox or opening a port");
+            check(browser.Read(cancel: deadline.Token).GetAwaiter().GetResult()
+                    .Contains("Fresh inherited pipe page", StringComparison.Ordinal),
+                "Pipe-only page readback contains the requested local content");
+            check(browser.Click("#add", deadline.Token).GetAwaiter().GetResult(),
+                "Pipe-only browser accepts one trusted page click");
+            readback = browser.Read(cancel: deadline.Token).GetAwaiter().GetResult();
+            clickCount = browser.Evaluate("window.pipeClicks", deadline.Token).GetAwaiter().GetResult();
+            check(readback.Contains("pipe-click-1", StringComparison.Ordinal) && clickCount == "1",
+                "Pipe-only page text and DOM independently confirm exactly one click");
+            portFile = File.Exists(Path.Combine(profile, "DevToolsActivePort"));
+            check(!portFile, "Fresh pipe-only profile has no DevTools port stamp");
+        }
+        catch (Exception ex) { failure = ex.ToString(); }
+        finally
+        {
+            try { browser?.Abandon(); }
+            catch (Exception ex) { failure ??= "Pipe cleanup: " + ex; }
+            try { exited = process is not null && process.WaitForExit(5000); }
+            catch (Exception ex) { failure ??= "Process cleanup: " + ex; }
+            File.WriteAllText(Path.Combine(output, "browser-pipe-only.json"), JsonSerializer.Serialize(new
+            {
+                executable = WorkspaceBrowser.ChromePath,
+                version = FileVersionInfo.GetVersionInfo(WorkspaceBrowser.ChromePath).ProductVersion,
+                desktop = name, profile, allowPort = false, transport = browser?.Transport,
+                initialNavigationConfirmed = browser?.InitialNavigationConfirmed,
+                elapsedSeconds = elapsed.Elapsed.TotalSeconds, processId = browser?.ProcessId,
+                broker, readback, clickCount, portFile, exited, failure,
+                startFailure = WorkspaceBrowser.StartFailureReason(name),
+            }, new JsonSerializerOptions { WriteIndented = true }));
+            process?.Dispose();
+        }
+        if (failure is not null) throw new InvalidOperationException("Pipe-only browser regression: " + failure);
+        check(exited, "Pipe-only regression closes its exact owned browser after collecting evidence");
     }
 
     static void Settled(Func<bool> condition, string claim, Action<bool, string> check, CancellationToken cancel)

@@ -74,6 +74,7 @@ internal static class WorkspacePeekHost
         ModuleEntry.HubShowingChanged += HubChanged;
         ModuleEntry.ShowCornerRequested += ShowCornerNow;
         ModuleEntry.PauseAllRequested += TogglePauseAll;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
         if (Application.Current is { } app && !_hooked) { _hooked = true; app.Exit += (_, _) => Stop(); }
         HoldHotkeys();
         Sync();
@@ -88,6 +89,7 @@ internal static class WorkspacePeekHost
         ModuleEntry.HubShowingChanged -= HubChanged;
         ModuleEntry.ShowCornerRequested -= ShowCornerNow;
         ModuleEntry.PauseAllRequested -= TogglePauseAll;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged;
         _pausedAll = false;
         foreach (WorkspaceRuntime runtime in WorkspaceRuntime.Running)
             if (_pausedByUs.Contains(runtime.Id) && runtime.Plane is { Driving: Driver.Owner } plane)
@@ -129,6 +131,16 @@ internal static class WorkspacePeekHost
         if (_owner is not { } owner) return;
         if (!owner.CheckAccess()) { owner.BeginInvoke(HubChanged); return; }
         Rethink();
+    }
+
+    static void DisplayChanged(object? sender, EventArgs e)
+    {
+        _owner?.BeginInvoke(() =>
+        {
+            // A detached monitor must not strand the only way back to a quiet workspace.
+            _window?.HideImmediately();
+            Rethink();
+        });
     }
 
     static void Attention()
@@ -290,12 +302,19 @@ internal static class WorkspacePeekHost
         if (front is null || !wanted)
         {
             _window?.HandBackInput();
-            _window?.Leave();
+            bool dock = front is not null && _settings.CornerShow != CornerShow.Off
+                && (!ModuleEntry.HubShowing || asking);
+            if (dock && _window is { } tucked)
+            {
+                Layout(tucked, front!, all);
+                tucked.Dock(WorkspaceName(front!));
+            }
+            else _window?.Leave();
             StopBeat();
             SetFront(front?.Id);
-            // A pick lasts as long as the look does: the next time the corner comes up it leads with
-            // whatever is working, which is why it comes up at all.
-            _chosenId = null;
+            // Tucking keeps the owner's chosen workspace available from the tab. A full hide ends
+            // that choice, so the next new glance can lead with whichever workspace is working.
+            if (!dock) _chosenId = null;
             StartDropHookIfIdle();
             return;
         }
@@ -304,21 +323,7 @@ internal static class WorkspacePeekHost
         SetFront(front.Id);
 
         WorkspacePeekWindow window = _window ??= Build();
-        Size card = WorkspacePeekPlacement.Card(_settings);
-        bool grown = card.Width > WorkspacePeekPlacement.SmallWidth + 0.5;
-        if (grown) _lastGrownWidth = card.Width;
-        if (!window.Manipulating)
-        {
-            window.SetTabs([.. all.Select(r => new PeekTab(r.Id, WorkspaceName(r), Status(r).Tone, r.Id == front.Id))]);
-            window.Configure(card, grown, !grown && _lastGrownWidth is not null);
-            // Saved positions describe the front card, not the union with the tab strip above it -
-            // so the box that has to fit on the monitor is the one the strip is part of, or a card
-            // saved at the top of the screen would draw its tabs off the top edge.
-            Rect frontRect = PlaceRect(card);
-            double extra = window.VisibleSize.Height - card.Height;
-            Rect visible = new(frontRect.Left, frontRect.Top - extra, card.Width, window.VisibleSize.Height);
-            window.Place(WorkspacePeekPlacement.Fit(WorkspacePeekPlacement.MonitorFor(visible).WorkArea, visible));
-        }
+        Layout(window, front, all);
         window.SetPinned(_settings.CornerPinned);
 
         (string message, PeekTone tone) = Status(front);
@@ -334,6 +339,25 @@ internal static class WorkspacePeekHost
         Draw();
     }
 
+    static void Layout(WorkspacePeekWindow window, WorkspaceRuntime front, IReadOnlyList<WorkspaceRuntime> all)
+    {
+        Size card = WorkspacePeekPlacement.Card(_settings);
+        bool grown = card.Width > WorkspacePeekPlacement.SmallWidth + 0.5;
+        if (grown) _lastGrownWidth = card.Width;
+        if (!window.Manipulating && !window.Sliding)
+        {
+            window.SetTabs([.. all.Select(r => new PeekTab(r.Id, WorkspaceName(r), Status(r).Tone, r.Id == front.Id))]);
+            window.Configure(card, grown, !grown && _lastGrownWidth is not null);
+            // Saved positions describe the front card, not the union with the tab strip above it -
+            // so the box that has to fit on the monitor is the one the strip is part of, or a card
+            // saved at the top of the screen would draw its tabs off the top edge.
+            Rect frontRect = PlaceRect(card);
+            double extra = window.VisibleSize.Height - card.Height;
+            Rect visible = new(frontRect.Left, frontRect.Top - extra, card.Width, window.VisibleSize.Height);
+            window.Place(WorkspacePeekPlacement.Fit(WorkspacePeekPlacement.MonitorFor(visible).WorkArea, visible));
+        }
+    }
+
     static WorkspacePeekWindow Build()
     {
         var window = new WorkspacePeekWindow();
@@ -343,17 +367,41 @@ internal static class WorkspacePeekHost
         window.PinClicked += () => AppSettingsStore.Update(s => s with { CornerPinned = !s.CornerPinned });
         window.ShrinkClicked += () =>
         {
-            if (WorkspacePeekPlacement.Grown(_settings))
-                AppSettingsStore.Update(s => s with { CornerWidth = null });
-            else if (_lastGrownWidth is { } width)
-                AppSettingsStore.Update(s => s with { CornerWidth = width });
+            bool grown = WorkspacePeekPlacement.Grown(_settings);
+            if (!grown && _lastGrownWidth is null) return;
+            double? width = grown ? null : _lastGrownWidth;
+            Rect from = window.FrontRect;
+            Rect to = WorkspacePeekPlacement.Regrow(from, WorkspacePeekPlacement.Card(width ?? WorkspacePeekPlacement.SmallWidth),
+                WorkspacePeekPlacement.MonitorFor(from).WorkArea);
+            // A card never placed by hand keeps following the home corner; one placed by hand keeps
+            // the corner of the screen it sits nearest.
+            AppSettingsStore.Update(s => s with
+            {
+                CornerWidth = width,
+                CornerLeft = s.CornerLeft is null ? null : to.Left,
+                CornerTop = s.CornerTop is null ? null : to.Top,
+            });
         };
         window.HideRequested += () => { _dismissed = true; AppSettingsStore.Update(s => s with { CornerPinned = false }); };
-        window.HoverChanged += Rethink;
+        window.HoverChanged += () =>
+        {
+            if (window.Watching) _stirred = DateTimeOffset.Now;
+            Rethink();
+        };
+        window.EdgeRevealRequested += () =>
+        {
+            _chosenId = _frontId;
+            _dismissed = false;
+            _stirred = DateTimeOffset.Now;
+            Rethink();
+        };
         window.ShowRequested += id => { _chosenId = id; Touch(id); Rethink(); };
-        window.Moved += rect => AppSettingsStore.Update(s => s with { CornerLeft = rect.Left, CornerTop = rect.Top });
+        // Putting the card somewhere, or making it a size, is choosing to keep it: either pins it, so
+        // it stays that size in that place rather than fading or tucking itself away at the edge.
+        window.Moved += rect => AppSettingsStore.Update(s => s with
+            { CornerLeft = rect.Left, CornerTop = rect.Top, CornerPinned = true });
         window.Resized += rect => AppSettingsStore.Update(s => s with
-            { CornerWidth = rect.Width, CornerLeft = rect.Left, CornerTop = rect.Top });
+            { CornerWidth = rect.Width, CornerLeft = rect.Left, CornerTop = rect.Top, CornerPinned = true });
         window.FilesDropped += DropFiles;
         window.SheetOpenClicked += () => Decide(true);
         window.SheetKeepClicked += () => Decide(false);
@@ -548,6 +596,17 @@ internal static class WorkspacePeekHost
         PreviewSmoothness.BatterySaver => TimeSpan.FromSeconds(1 / 8.0),
         _ => TimeSpan.FromSeconds(1 / 12.0),
     };
+
+    /// <summary>The hub's pace for a screen the owner has a hand on (the app's HubPreview.HandsOnInterval),
+    /// kept here beside the corner's so the engine probe measures the rate the hub really asks for.</summary>
+    internal static TimeSpan HandsOnIntervalFor(PreviewSmoothness smoothness) => smoothness switch
+    {
+        PreviewSmoothness.BatterySaver => TimeSpan.FromSeconds(1 / 10.0),
+        _ => TimeSpan.FromSeconds(1 / 20.0),
+    };
+
+    /// <summary>Plugged in or not, read fresh: the hub's hands-on pace right now.</summary>
+    public static TimeSpan HandsOnInterval => HandsOnIntervalFor(Rate);
 
     static void StartBeat()
     {

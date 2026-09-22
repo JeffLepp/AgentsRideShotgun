@@ -28,8 +28,8 @@ internal readonly record struct PeekTab(string Id, string Name, PeekTone Tone, b
 /// dropped where) belongs to <see cref="WorkspacePeekHost"/>.
 ///
 /// It never takes focus when it merely appears. <see cref="Window.ShowActivated"/> is false, so it
-/// can fade in over a full-screen game or an editor without stealing the keystroke the owner was in
-/// the middle of; a deliberate click still activates it normally, so keys typed afterward land.
+    /// can appear over an editor without stealing the keystroke the owner was in the middle of;
+    /// a deliberate click still activates it normally. The host suppresses automatic fullscreen overlays.
 /// </summary>
 public partial class WorkspacePeekWindow : Window
 {
@@ -40,6 +40,7 @@ public partial class WorkspacePeekWindow : Window
 
     bool _leaving;
     bool _moving;
+    bool _activityRequested;
     bool _activityAnimated;
     bool _hovered;
     double _stackExtra;
@@ -61,6 +62,9 @@ public partial class WorkspacePeekWindow : Window
         // The hover actions are also how a keyboard user reaches pin/shrink/open/hide: show them
         // whenever focus is anywhere inside the window, not only under the mouse.
         IsKeyboardFocusWithinChanged += (_, _) => UpdateChrome();
+        IsVisibleChanged += (_, _) => UpdateActivityAnimation();
+        StateChanged += (_, _) => UpdateActivityAnimation();
+        Closed += (_, _) => { SetActive(false); CloseEdgeTab(); };
     }
 
     internal event Action? OpenRequested;
@@ -95,6 +99,9 @@ public partial class WorkspacePeekWindow : Window
         _input?.Dispose();
         _input = new WorkspaceScreenInput(LiveScreen, runtime);
         _input.OwnerActed += () => OwnerActed?.Invoke();
+        _input.PoppedOut += ShowPoppedOut;
+        LiveScreen.MouseMove -= LiveScreen_PopOutHover;
+        LiveScreen.MouseMove += LiveScreen_PopOutHover;
         if (_taskbar is not null) CardBody.Children.Remove(_taskbar);
         _runtime = runtime;
         _taskbar = new WorkspaceTaskbar(runtime, () => _input?.Touch(), 30) { Visibility = Visibility.Collapsed };
@@ -296,16 +303,25 @@ public partial class WorkspacePeekWindow : Window
     /// animations are off.</summary>
     internal void SetActive(bool active)
     {
+        _activityRequested = active;
         ActivityLine.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        bool animate = active && SystemParameters.ClientAreaAnimation;
+        UpdateActivityAnimation();
+    }
+
+    void UpdateActivityAnimation()
+    {
+        bool animate = _activityRequested && Watching && WindowState != WindowState.Minimized
+            && SystemParameters.ClientAreaAnimation;
         if (animate == _activityAnimated) return;
         _activityAnimated = animate;
         if (animate)
         {
             var transform = new TranslateTransform();
             ActivityBrush.RelativeTransform = transform;
-            transform.BeginAnimation(TranslateTransform.XProperty,
-                new DoubleAnimation(-1, 1, new Duration(TimeSpan.FromSeconds(3))) { RepeatBehavior = RepeatBehavior.Forever });
+            var animation = new DoubleAnimation(-1, 1, new Duration(TimeSpan.FromSeconds(3)))
+                { RepeatBehavior = RepeatBehavior.Forever };
+            Timeline.SetDesiredFrameRate(animation, 20);
+            transform.BeginAnimation(TranslateTransform.XProperty, animation);
         }
         else if (ActivityBrush.RelativeTransform is TranslateTransform sweep)
             sweep.BeginAnimation(TranslateTransform.XProperty, null);
@@ -442,11 +458,13 @@ public partial class WorkspacePeekWindow : Window
     /// at all with Windows' own animations off.</summary>
     internal void Arrive()
     {
+        if (ReturnFromEdge()) return;
         // The host calls this on every preview tick. Only a visibility transition gets motion.
         if (Watching) return;
         bool wasHidden = !IsVisible;
         _leaving = false;
         if (wasHidden) { Opacity = 0; Show(); }
+        UpdateActivityAnimation();
         // Another program may have gone topmost since this last appeared - a game, an installer.
         Topmost = true;
         bool animate = SystemParameters.ClientAreaAnimation;
@@ -462,8 +480,11 @@ public partial class WorkspacePeekWindow : Window
     /// <summary>Fades out and hides. Hidden rather than closed: the next activity is seconds away.</summary>
     internal void Leave()
     {
+        if (Docked || Sliding) { HideImmediately(); return; }
+        _edgeTab?.Hide();
         if (!IsVisible || _leaving) return;
         _leaving = true;
+        UpdateActivityAnimation();
         bool animate = SystemParameters.ClientAreaAnimation;
         var fade = new DoubleAnimation(0, animate ? Leaving : new Duration(TimeSpan.Zero));
         fade.Completed += (_, _) =>
@@ -483,6 +504,7 @@ public partial class WorkspacePeekWindow : Window
     /// <summary>A game or presentation takes the screen: remove this surface without an exit animation.</summary>
     internal void HideImmediately()
     {
+        CancelDock();
         _leaving = false;
         BeginAnimation(OpacityProperty, null);
         Opacity = 0;
@@ -510,6 +532,14 @@ public partial class WorkspacePeekWindow : Window
         long raw = lParam.ToInt64();
         var screen = new Point(unchecked((short)(raw & 0xFFFF)), unchecked((short)((raw >> 16) & 0xFFFF)));
         Point local = PointFromScreen(screen);
+        // During a slide, the painted card moves inside a larger, clipped viewport.
+        // Keep hit testing attached to the picture, including at adjoining monitors.
+        if (DockViewport.Clip is { } clip && !clip.FillContains(local))
+        {
+            handled = true;
+            return HtTransparent;
+        }
+        local = DockViewport.TranslatePoint(local, Root);
         if (!Within(local, FrontCard) && !(TabStrip.Visibility == Visibility.Visible && Within(local, TabStrip)))
         {
             handled = true;
@@ -552,15 +582,179 @@ public partial class WorkspacePeekWindow : Window
         e.Handled = true;
     }
 
-    void Root_MouseEnter(object sender, MouseEventArgs e) { SetHover(true); HoverChanged?.Invoke(); }
-    void Root_MouseLeave(object sender, MouseEventArgs e) { SetHover(false); HoverChanged?.Invoke(); }
-
-    void Pill_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    void Root_MouseEnter(object sender, MouseEventArgs e) { if (!Sliding && !Docked) { SetHover(true); HoverChanged?.Invoke(); } }
+    void Root_MouseLeave(object sender, MouseEventArgs e)
     {
+        HidePopOut();
+        if (!Sliding && !Docked) { SetHover(false); HoverChanged?.Invoke(); }
+    }
+
+    // --- Open on my desktop -------------------------------------------------------------------
+
+    nint _popOutWindow;
+    long _popOutAsked;
+
+    /// <summary>
+    /// Hovering the picture puts Open on my desktop on the window under the pointer, at that
+    /// window's top right, when Deskweave can start it again on the owner's desktop. Asked at most
+    /// a few times a second, and never while a button is held: a drag is its own way out.
+    /// </summary>
+    async void LiveScreen_PopOutHover(object sender, MouseEventArgs e)
+    {
+        if (_input is null || e.LeftButton == MouseButtonState.Pressed || DropOverlay.Visibility == Visibility.Visible
+            || Sheet.Visibility == Visibility.Visible) { HidePopOut(); return; }
+        long now = Environment.TickCount64;
+        if (now - _popOutAsked < 150) return;
+        _popOutAsked = now;
+        (nint Window, Rect Area)? found = await _input.PoppableAt(e.GetPosition(LiveScreen));
+        if (found is not { } hit || !Root.IsMouseOver || Mouse.LeftButton == MouseButtonState.Pressed) { HidePopOut(); return; }
+        PlacePopOut(hit.Window, hit.Area);
+    }
+
+    /// <summary>The button inside the top right of a window at this place on the picture.</summary>
+    void PlacePopOut(nint window, Rect area)
+    {
+        _popOutWindow = window;
+        PopOutButton.Visibility = Visibility.Visible;
+        PopOutButton.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Size size = PopOutButton.DesiredSize;
+        Point corner = LiveScreen.TranslatePoint(new Point(area.Right, area.Top), CardBody);
+        // Inside the window's top right, kept on the card and clear of the pill and the actions row.
+        double left = Math.Clamp(corner.X - size.Width - 6, 6, Math.Max(6, CardBody.ActualWidth - size.Width - 6));
+        double top = Math.Clamp(corner.Y + 6, 40, Math.Max(40, CardBody.ActualHeight - size.Height - 8));
+        PopOutButton.Margin = new Thickness(left, top, 0, 0);
+    }
+
+    void HidePopOut()
+    {
+        PopOutButton.Visibility = Visibility.Collapsed;
+        _popOutWindow = 0;
+    }
+
+    async void PopOutButton_Click(object sender, RoutedEventArgs e)
+    {
+        nint window = _popOutWindow;
+        HidePopOut();
+        if (window != 0 && _input is not null) await _input.PopOut(window);
+    }
+
+    System.Windows.Threading.DispatcherTimer? _poppedTimer;
+
+    /// <summary>What taking a window out did, for a few seconds, in the card's own toast.</summary>
+    void ShowPoppedOut(string said)
+    {
+        Toast.Visibility = Visibility.Visible;
+        ToastText.Text = said;
+        ToastLink.Visibility = Visibility.Collapsed;
+        _poppedTimer?.Stop();
+        _poppedTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        _poppedTimer.Tick += (_, _) =>
+        {
+            _poppedTimer?.Stop();
+            if (ToastText.Text == said) HideToast();
+        };
+        _poppedTimer.Start();
+    }
+
+    internal bool PopOutButtonVisible => PopOutButton.Visibility == Visibility.Visible;
+
+    /// <summary>The button as hovering a window at this place on the picture shows it, for the gate.</summary>
+    internal void ShowPopOutForTests(Rect area)
+    {
+        UpdateLayout();
+        PlacePopOut(1, area);
+    }
+
+    void Pill_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => MoveWindow();
+
+    /// <summary>Moves the window with the pointer until the button comes up. Only a real move is
+    /// reported: a click that went nowhere is not choosing where the card lives.</summary>
+    void MoveWindow()
+    {
+        // Mid-slide the window's bounds are the slide's, and the slide's end puts back the bounds it
+        // started from - a drag begun now would be undone under the pointer.
+        if (Sliding) return;
+        Rect before = FrontRect;
         _moving = true;
         try { DragMove(); }
         catch (InvalidOperationException) { }
-        finally { _moving = false; Moved?.Invoke(FrontRect); }
+        finally
+        {
+            _moving = false;
+            if (Differs(FrontRect, before)) Moved?.Invoke(FrontRect);
+        }
+    }
+
+    /// <summary>Whether a gesture really moved or resized the card. Read back after Windows moved
+    /// the window, a DIP rect can come back a fraction off at 125% or 150% without anything moving.</summary>
+    static bool Differs(Rect a, Rect b) =>
+        Math.Abs(a.Left - b.Left) >= 1 || Math.Abs(a.Top - b.Top) >= 1
+        || Math.Abs(a.Width - b.Width) >= 1 || Math.Abs(a.Height - b.Height) >= 1;
+
+    // --- The top bar --------------------------------------------------------------------------
+
+    bool _barPressed, _barSecondClick;
+    Point _barStart;
+
+    /// <summary>
+    /// A press on the bar is not yet a move or a click. Past the system's drag distance it becomes
+    /// a move, the way a title bar does; let go before that and it is a click on the picture under
+    /// the bar, handed to the same input path the rest of the picture uses.
+    /// </summary>
+    void MoveBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Sliding) return;
+        _barPressed = true;
+        // A double-click reaches the workspace as one: the top of its screen is where title bars
+        // are, and a double-click there is how a window is maximized.
+        _barSecondClick = e.ClickCount > 1;
+        _barStart = e.GetPosition(MoveBar);
+        MoveBar.CaptureMouse();
+        e.Handled = true;
+    }
+
+    void MoveBar_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_barPressed) return;
+        if (e.LeftButton != MouseButtonState.Pressed) { EndBarPress(); return; }
+        Point now = e.GetPosition(MoveBar);
+        if (Math.Abs(now.X - _barStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(now.Y - _barStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        EndBarPress();
+        MoveWindow();
+        e.Handled = true;
+    }
+
+    void MoveBar_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_barPressed) return;
+        EndBarPress();
+        // Keys follow the click into the workspace, as they do after a click anywhere else on it.
+        if (_input?.Press(e.GetPosition(LiveScreen), rightButton: false, _barSecondClick) == true) Keyboard.Focus(LiveScreen);
+        e.Handled = true;
+    }
+
+    void MoveBar_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        _input?.Press(e.GetPosition(LiveScreen), rightButton: true);
+        e.Handled = true;
+    }
+
+    /// <summary>The wheel scrolls the picture under the bar, as it does everywhere else on it.</summary>
+    void MoveBar_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        var wheel = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta) { RoutedEvent = MouseWheelEvent };
+        LiveScreen.RaiseEvent(wheel);
+        e.Handled = true;
+    }
+
+    void MoveBar_MouseEnter(object sender, MouseEventArgs e) => HidePopOut();
+    void MoveBar_LostMouseCapture(object sender, MouseEventArgs e) => _barPressed = false;
+
+    void EndBarPress()
+    {
+        _barPressed = false;
+        if (MoveBar.IsMouseCaptured) MoveBar.ReleaseMouseCapture();
     }
 
     void PinButton_Click(object sender, RoutedEventArgs e) => PinClicked?.Invoke();
@@ -637,6 +831,7 @@ public partial class WorkspacePeekWindow : Window
 
     void BeginResize(object sender, MouseButtonEventArgs e, PeekEdges edges)
     {
+        if (Sliding) return;
         var zone = (UIElement)sender;
         zone.CaptureMouse();
         _dragEdges = edges;
@@ -678,7 +873,7 @@ public partial class WorkspacePeekWindow : Window
         zone.LostMouseCapture -= ResizeZone_LostMouseCapture;
         _dragEdges = PeekEdges.None;
         if (zone.IsMouseCaptured) zone.ReleaseMouseCapture();
-        Resized?.Invoke(FrontRect);
+        if (Differs(FrontRect, _dragStart)) Resized?.Invoke(FrontRect);
     }
 
     /// <summary>The cursor, in DIPs, wherever it is on the virtual desktop - independent of this

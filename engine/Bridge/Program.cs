@@ -34,6 +34,10 @@ string context = "{\"jsonrpc\":\"2.0\",\"method\":\"deskweave/context\",\"params
 var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
 var output = new Lock();
 string? hello = null;
+// These pipes belong to this MCP session. Process.Start otherwise copies their inheritable
+// handles into the long-lived app, keeping the provider's readers open after this bridge exits.
+// Change only this process's inheritance bits; the streams themselves remain open and usable.
+bool mayLaunchApp = PreventStandardPipeInheritance();
 
 // A Deskweave that is starting (at sign-in, or for another agent a moment ago) gets as long as one
 // this bridge starts itself; one not running at all is started in the background. Both stay under
@@ -142,7 +146,7 @@ async Task<(Link?, string)> Reach(TimeSpan patience)
     if (App() is not { } app) return await Open(TimeSpan.FromSeconds(Math.Min(patience.TotalSeconds, 2)));
     bool running = Running();
     (Link? found, string reason) = await Open(running ? patience : TimeSpan.Zero);
-    if (found is null && reason == NotOpen && !running && Launch(app)) (found, reason) = await Open(TimeSpan.FromSeconds(9));
+    if (found is null && reason == NotOpen && !running && Launch(app, mayLaunchApp)) (found, reason) = await Open(TimeSpan.FromSeconds(9));
     return (found, reason);
 }
 
@@ -159,8 +163,12 @@ string? App()
 // Starts it in the tray the way Start with Windows does, so nothing opens on the owner's screen.
 // Provider variables from the agent's session are put back to what the owner's account has, so
 // the app sees the same config homes as when Windows starts it.
-static bool Launch(string app)
+static bool Launch(string app, bool standardPipesIsolated)
 {
+    // A failed native isolation check must not leak the session into a new app process.
+    // Joining an already running app remains available, and the existing NotOpen response
+    // can direct the owner to start Deskweave themselves.
+    if (!standardPipesIsolated) return false;
     var start = new ProcessStartInfo(app, "--background") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(app)! };
     foreach (string name in start.Environment.Keys.Where(k => k.StartsWith("CLAUDE", StringComparison.OrdinalIgnoreCase)
         || k.StartsWith("CODEX", StringComparison.OrdinalIgnoreCase) || k.StartsWith("DESKWEAVE_", StringComparison.OrdinalIgnoreCase)).ToList())
@@ -171,6 +179,17 @@ static bool Launch(string app)
     }
     try { Process.Start(start)?.Dispose(); return true; }
     catch (Win32Exception) { return false; }
+}
+
+static bool PreventStandardPipeInheritance()
+{
+    foreach (int standard in new[] { -10, -11, -12 })
+    {
+        nint handle = GetStdHandle(standard);
+        if (handle == 0 || handle == -1 || GetFileType(handle) != 3) continue; // FILE_TYPE_PIPE only.
+        if (!SetHandleInformation(handle, 1, 0)) return false; // HANDLE_FLAG_INHERIT.
+    }
+    return true;
 }
 
 // Whether a Deskweave holds its one-per-account lock, starting or running. Must match App.xaml.cs.
@@ -255,6 +274,14 @@ static async Task<int> Say(string line, int code)
 
 [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "WaitNamedPipeW")]
 static extern bool WaitNamedPipe(string name, uint timeoutMs);
+
+[DllImport("kernel32.dll")]
+static extern nint GetStdHandle(int standard);
+[DllImport("kernel32.dll", SetLastError = true)]
+static extern uint GetFileType(nint handle);
+[DllImport("kernel32.dll", SetLastError = true)]
+[return: MarshalAs(UnmanagedType.Bool)]
+static extern bool SetHandleInformation(nint handle, uint mask, uint flags);
 
 /// <summary>What the agent is waiting for from one request: its id as written, and whether anyone reads the reply.</summary>
 sealed record Expect(string? Id, string Method, bool Discard);

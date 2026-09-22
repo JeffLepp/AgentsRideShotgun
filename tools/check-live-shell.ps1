@@ -35,6 +35,16 @@ public static class ShellCheckWindow {
             if (pid == process && IsWindowVisible(hwnd)) count++; return true; }, IntPtr.Zero);
         return count;
     }
+    public static bool OpenFromTray(int process) {
+        bool sent = false;
+        EnumWindows((hwnd, _) => { uint pid; GetWindowThreadProcessId(hwnd, out pid);
+            if (pid != process) return true;
+            var title = new System.Text.StringBuilder(256); GetWindowText(hwnd, title, title.Capacity);
+            if (title.ToString() != "Deskweave tray") return true;
+            sent = PostMessage(hwnd, 0x8001, IntPtr.Zero, new IntPtr(0x00010400)); return false;
+        }, IntPtr.Zero);
+        return sent;
+    }
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
@@ -57,6 +67,12 @@ function Control([string]$name) {
     return $found
 }
 function Invoke([string]$name) { (Control $name).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 200 }
+function Wait-ShellVisibility([IntPtr]$handle, [bool]$visible) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([ShellCheckWindow]::IsWindowVisible($handle) -ne $visible -and [DateTime]::UtcNow -lt $deadline -and -not $app.HasExited) {
+        Start-Sleep -Milliseconds 50
+    }
+}
 try {
     $engine = $app.Modules | Where-Object ModuleName -eq 'HiveMind.AgentWorkspaces.dll' | Select-Object -First 1
     Check ($engine.FileName -eq (Join-Path $root 'out\HiveMind.AgentWorkspaces.dll')) 'The live app loaded this checkout''s published engine'
@@ -110,11 +126,41 @@ try {
     Invoke 'Find a workspace'
     Invoke 'Settings'
     $null = Control 'General'
+    Invoke 'Settings'
+    [void][ShellCheckWindow]::GetWindowRect($window, [ref]$bounds)
+    Check ([Math]::Abs(($bounds.Right - $bounds.Left) - $beforeWidth) -le 2) 'Clicking Settings again returns to the compact strip'
+    Invoke 'Settings'
     Invoke 'Workspaces'
     [void][ShellCheckWindow]::GetWindowRect($window, [ref]$bounds)
     Check ([Math]::Abs(($bounds.Right - $bounds.Left) - $beforeWidth) -le 2) 'Returning from Settings preserves the strip width'
+    $buttons = $surface.FindAll([Windows.Automation.TreeScope]::Descendants,
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button))
+    $row = @($buttons | Where-Object { $_.Current.Name.StartsWith('Show preview for ') -and -not $_.Current.IsOffscreen }) | Select-Object -First 1
+    Check ($null -ne $row) 'The published strip exposes expandable workspace rows'
+    $workspaceName = $row.Current.Name.Substring('Show preview for '.Length)
+    $row.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 500
+    Check (-not (Control ('Show more for ' + $workspaceName)).Current.IsOffscreen) 'A row expands its screen and Show more action inline'
+    [void][ShellCheckWindow]::GetWindowRect($window, [ref]$bounds)
+    Check ([Math]::Abs(($bounds.Right - $bounds.Left) - $beforeWidth) -le 2) 'Expanding a workspace preserves the strip width'
+    $bitmap = [Drawing.Bitmap]::new($beforeWidth, $bounds.Bottom - $bounds.Top)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $dc = $graphics.GetHdc()
+    try { $captured = [ShellCheckWindow]::PrintWindow($window, $dc, 2) }
+    finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+    try { Check $captured 'Windows captured the published inline preview'; $bitmap.Save((Join-Path $output 'live-inline.png'), [Drawing.Imaging.ImageFormat]::Png) }
+    finally { $bitmap.Dispose() }
+    Invoke ('Show more for ' + $workspaceName)
+    Invoke 'Back to workspaces'
+    Check (-not (Control ('Show more for ' + $workspaceName)).Current.IsOffscreen) 'Show more and Back preserve the expanded workspace'
+    Invoke ('Collapse preview for ' + $workspaceName)
     Invoke 'Close Deskweave'
+    Wait-ShellVisibility $window $false
     Check (-not [ShellCheckWindow]::IsWindowVisible($window) -and -not $app.HasExited) 'Closing the strip leaves Deskweave running in the background'
+    Check ([ShellCheckWindow]::OpenFromTray($app.Id)) 'The published tray accepts its normal selection callback'
+    Wait-ShellVisibility $window $true
+    Check ([ShellCheckWindow]::IsWindowVisible($window)) 'A tray selection reopens the published strip'
+    Invoke 'Close Deskweave'
     }
     foreach ($file in @('Deskweave.exe', 'Deskweave.dll', 'HiveMind.AgentWorkspaces.dll')) {
         $report[$file + 'Sha256'] = (Get-FileHash -LiteralPath (Join-Path $root ('out\' + $file))).Hash

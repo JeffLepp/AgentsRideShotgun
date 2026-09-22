@@ -60,8 +60,17 @@ public sealed partial class AgentDesktop
     {
         if (!OwnsWindow(window)) return false;
         if (Native.IsZoomed(window)) Native.ShowWindow(window, Native.SwRestore);
-        return Native.SetWindowPos(window, 0, 0, 0, ScreenWidth, ScreenHeight - TaskbarBand,
-            Native.SwpNoZOrder | Native.SwpNoActivate | Native.SwpNoOwnerZOrder);
+        const uint quietly = Native.SwpNoZOrder | Native.SwpNoActivate | Native.SwpNoOwnerZOrder;
+        int width = ScreenWidth, height = ScreenHeight - TaskbarBand;
+        if (!Native.SetWindowPos(window, 0, 0, 0, width, height, quietly)) return false;
+        // What shows of the window is its visible frame, which sits inside its invisible resize
+        // border (see Drawn). Pushing that border just past the screen's edges puts the frame on
+        // them, the way a maximized window sits, rather than 7 px of background down three sides.
+        AgentWindow placed = Drawn(new AgentWindow(window, "", "", 0, 0, width, height));
+        int left = placed.X, top = placed.Y;
+        int right = width - placed.X - placed.Width, bottom = height - placed.Y - placed.Height;
+        if (left == 0 && top == 0 && right == 0 && bottom == 0) return true;
+        return Native.SetWindowPos(window, 0, -left, -top, width + left + right, height + top + bottom, quietly);
     });
 
     /// <summary>

@@ -154,36 +154,116 @@ public sealed partial class AgentDesktop
         finally { EndGesture(); }
     });
 
+    /// <summary>
+    /// The owner took hold of a window's frame in the band a view found around it. Windows' own
+    /// resize border is 7 px wide and sits outside what the picture shows of the window; drawn a
+    /// few hundred pixels wide, that is under one pixel with no cursor to say it is there. So the
+    /// view finds the edge itself (<see cref="FrameTargets"/>) and the drag starts here, without
+    /// asking the window where it was pressed.
+    /// </summary>
+    internal bool GrabFrame(nint window, FrameGrip grip, int x, int y, long lease = 0) => Run(() =>
+    {
+        EndGesture();
+        if (Revoked(lease) || grip == FrameGrip.None || !OwnsWindow(window)
+            || !Native.GetWindowRect(window, out Native.Rect rect)) return false;
+        ClipboardBroker.Shared.Touch(Name);
+        _gestureWindow = _gestureRoot = window;
+        _gestureArea = Native.HtBorder;
+        _grip = grip;
+        _grabX = x;
+        _grabY = y;
+        _grabbed = new WorkspaceScreen.Box(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        // Taking hold of a window's frame brings it forward, the way it does anywhere else.
+        Arrange(window, WindowArrangement.Front, lease: lease);
+        return true;
+    });
+
+    /// <summary>A window as a view can take it by its frame: where it shows on the screen, and
+    /// whether it can be made another size at all.</summary>
+    internal readonly record struct FrameTarget(nint Handle, WorkspaceScreen.Box Shows, bool Sizable, bool Zoomed);
+
+    /// <summary>Every window a view could take by its frame, front first.</summary>
+    internal IReadOnlyList<FrameTarget> FrameTargets() => Run(() =>
+    {
+        var targets = new List<FrameTarget>();
+        foreach (AgentWindow window in WindowsOnScreen())
+        {
+            AgentWindow shows = Drawn(window);
+            bool zoomed = Native.IsZoomed(window.Handle);
+            bool sizable = window.Responding && !zoomed
+                && (Native.GetWindowLongPtrW(window.Handle, Native.GwlStyle) & (nint)Native.WsThickFrame) != 0;
+            targets.Add(new FrameTarget(window.Handle,
+                new WorkspaceScreen.Box(shows.X, shows.Y, shows.Width, shows.Height), sizable, zoomed));
+        }
+        return (IReadOnlyList<FrameTarget>)targets;
+    }) ?? [];
+
     /// <summary>True while a press is still being held on this desktop.</summary>
     internal bool PointerHeld => _gestureDown || _grip != FrameGrip.None || _gestureCommand != 0;
+
+    /// <summary>True while the owner is dragging a window by its title bar or an edge. Read by the
+    /// view to fold a backlog of moves into the newest one: only where the frame ends up matters.</summary>
+    internal bool FrameHeld => _grip != FrameGrip.None;
+
+    /// <summary>The window the owner is dragging by its title bar right now, or 0. Read by the view
+    /// while a drag is under way, to tell when he has pulled it off the picture altogether.</summary>
+    internal nint MovingWindow => _grip == FrameGrip.Move ? _gestureRoot : 0;
+
+    /// <summary>Where that window was, and where on the screen the owner took hold of it.</summary>
+    internal (WorkspaceScreen.Box Box, int X, int Y) MoveGrab => (_grabbed, _grabX, _grabY);
+
+    /// <summary>A title-bar drag that turned into taking the window out: it goes back where it was
+    /// before the drag began, and the gesture ends.</summary>
+    internal bool CancelMove() => Run(() =>
+    {
+        // Queued behind the drag's own moves, which are queued too: sent, it would overtake them.
+        if (_grip == FrameGrip.Move && _gestureRoot != 0)
+            Native.SetWindowPos(_gestureRoot, 0, _grabbed.Left, _grabbed.Top, _grabbed.Width, _grabbed.Height,
+                FrameMove);
+        EndGesture();
+        return true;
+    });
 
     /// <summary>The owner moved a window by its title bar, or took an edge and resized it.</summary>
     bool DragFrame(int x, int y)
     {
-        int dx = x - _grabX, dy = y - _grabY;
-        WorkspaceScreen.Box was = _grabbed;
-        WorkspaceScreen.Box want = _grip switch
-        {
-            FrameGrip.Move => was with { Left = was.Left + dx, Top = was.Top + dy },
-            _ => Resized(was, dx, dy),
-        };
-        if (want.Width < 120 || want.Height < 80) return false;
         // A maximized window being dragged by its title bar comes down first, as it does anywhere.
         if (_grip == FrameGrip.Move && Native.IsZoomed(_gestureRoot)) Native.ShowWindow(_gestureRoot, Native.SwRestore);
-        WorkspaceScreen.Box to = WorkspaceScreen.Fit(want, ScreenWidth, ScreenHeight);
-        return Native.SetWindowPos(_gestureRoot, 0, to.Left, to.Top, to.Width, to.Height,
-            Native.SwpNoZOrder | Native.SwpNoActivate | Native.SwpNoOwnerZOrder);
+        WorkspaceScreen.Box to = Dragged(_grip, _grabbed, x - _grabX, y - _grabY, ScreenWidth, ScreenHeight);
+        return Native.SetWindowPos(_gestureRoot, 0, to.Left, to.Top, to.Width, to.Height, FrameMove);
     }
 
-    WorkspaceScreen.Box Resized(WorkspaceScreen.Box was, int dx, int dy)
+    // Posted rather than sent: the pump never waits on the application's own thread mid-drag, so a
+    // busy window lags behind the pointer instead of holding up the next move and the picture.
+    const uint FrameMove = Native.SwpNoZOrder | Native.SwpNoActivate | Native.SwpNoOwnerZOrder | Native.SwpAsyncWindowPos;
+
+    internal const int MinFrameWidth = 120, MinFrameHeight = 80;
+
+    /// <summary>
+    /// Where a frame drag puts a window: moved whole by its title bar, or with the edges it was taken
+    /// by following the pointer and the others staying put. An edge stops at the smallest size and at
+    /// the side of the screen rather than the drag stopping dead, so the frame always keeps up. The
+    /// view draws its outline with the same numbers, a frame ahead of the window itself.
+    /// </summary>
+    internal static WorkspaceScreen.Box Dragged(FrameGrip grip, WorkspaceScreen.Box was, int dx, int dy,
+        int screenWidth, int screenHeight)
     {
-        int left = was.Left, top = was.Top, width = was.Width, height = was.Height;
-        if (_grip is FrameGrip.Left or FrameGrip.TopLeft or FrameGrip.BottomLeft) { left += dx; width -= dx; }
-        if (_grip is FrameGrip.Right or FrameGrip.TopRight or FrameGrip.BottomRight) width += dx;
-        if (_grip is FrameGrip.Top or FrameGrip.TopLeft or FrameGrip.TopRight) { top += dy; height -= dy; }
-        if (_grip is FrameGrip.Bottom or FrameGrip.BottomLeft or FrameGrip.BottomRight) height += dy;
-        return new WorkspaceScreen.Box(left, top, width, height);
+        if (grip == FrameGrip.Move)
+            return WorkspaceScreen.Fit(was with { Left = was.Left + dx, Top = was.Top + dy }, screenWidth, screenHeight);
+        int left = was.Left, top = was.Top, right = was.Right, bottom = was.Bottom;
+        if (grip is FrameGrip.Left or FrameGrip.TopLeft or FrameGrip.BottomLeft)
+            left = Between(left + dx, Math.Min(0, left), right - MinFrameWidth);
+        if (grip is FrameGrip.Right or FrameGrip.TopRight or FrameGrip.BottomRight)
+            right = Between(right + dx, left + MinFrameWidth, Math.Max(screenWidth, right));
+        if (grip is FrameGrip.Top or FrameGrip.TopLeft or FrameGrip.TopRight)
+            top = Between(top + dy, Math.Min(0, top), bottom - MinFrameHeight);
+        if (grip is FrameGrip.Bottom or FrameGrip.BottomLeft or FrameGrip.BottomRight)
+            bottom = Between(bottom + dy, top + MinFrameHeight, Math.Max(screenHeight, bottom));
+        return new WorkspaceScreen.Box(left, top, right - left, bottom - top);
     }
+
+    // Math.Clamp throws when a window already smaller than the smallest size makes the bounds cross.
+    static int Between(int value, int low, int high) => Math.Min(Math.Max(value, low), high);
 
     static FrameGrip Grip(int area) => area switch
     {

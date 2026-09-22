@@ -51,6 +51,9 @@
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="Normal"/>
             <Setter Property="Padding" Value="14,9"/>
+            <!-- The same height as every other row in its card (SettingRow), so a card mixing plain
+                 rows and these does not change rhythm halfway down. -->
+            <Setter Property="MinHeight" Value="50"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource RowFocus}"/>
@@ -93,15 +96,43 @@
                 </ControlTemplate>
             </Setter.Value></Setter>
         </Style>
+        <!-- A quick tile on the card's home (owner's pick, 2026-09-22): a card-coloured square that
+             fills with accent while on, like Windows' quick settings. -->
+        <Style x:Key="QuickTile" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="MinHeight" Value="68"/>
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Surface" CornerRadius="10" BorderThickness="1" Padding="10,11,5,9"
+                            Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource HairlineBrush}">
+                        <Grid>
+                            <Border x:Name="Tint" Margin="-10,-11,-5,-9" CornerRadius="9" Background="Transparent"/>
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Background" Value="{DynamicResource PressedBrush}"/></Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Surface" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
+        </Style>
     </UserControl.Resources>
 
-    <Grid>
+    <Grid ClipToBounds="True">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="264"/>
+            <ColumnDefinition x:Name="SidebarColumn" Width="264"/>
             <ColumnDefinition/>
         </Grid.ColumnDefinitions>
 
-        <Border Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,1,0" Padding="10,8">
+        <Border x:Name="Sidebar" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,1,0" Padding="10,8">
             <StackPanel>
                 <Button x:Name="BackButton" Style="{StaticResource BackRow}" Margin="0,0,0,8" AutomationProperties.Name="Workspaces" Click="Back_Click">
                     <StackPanel Orientation="Horizontal">
@@ -133,14 +164,23 @@
             </StackPanel>
         </Border>
 
-        <Grid Grid.Column="1">
+        <!-- Card mode (the hub's own 340 DIP stack, owner's pick 2026-09-22): no category list; this
+             home page of quick tiles and one row per category instead, and the page slides in over it. -->
+        <ScrollViewer x:Name="CardHome" Grid.Column="1" Visibility="Collapsed" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      Background="{DynamicResource WindowBrush}">
+            <ScrollViewer.RenderTransform><TranslateTransform/></ScrollViewer.RenderTransform>
+            <StackPanel x:Name="CardHomeContent" Margin="16,4,16,16"/>
+        </ScrollViewer>
+
+        <Grid x:Name="PagePanel" Grid.Column="1" Background="{DynamicResource WindowBrush}">
+            <Grid.RenderTransform><TranslateTransform/></Grid.RenderTransform>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition/>
             </Grid.RowDefinitions>
             <TextBlock x:Name="PageTitle" Margin="28,22,28,0" FontSize="21" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
             <ScrollViewer x:Name="Scroller" Grid.Row="1" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <Grid Margin="28,20,28,22">
+                <Grid x:Name="PageFrame" Margin="28,20,28,22">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" MaxWidth="720"/>
                         <ColumnDefinition Width="Auto"/>

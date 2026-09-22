@@ -314,16 +314,26 @@ internal sealed class WorkspaceRouter : IDisposable
         _server.Dispose();
     }
 
-    static bool InsideAWorkspace(int processId)
+    internal static readonly TimeSpan AdmissionUiWait = TimeSpan.FromMilliseconds(500);
+
+    internal static bool InsideAWorkspace(int processId)
     {
         bool Owned() => WorkspaceRuntime.Running.Any(runtime => runtime.Plane?.OwnsProcess(processId) == true);
         try
         {
+            // The router is published before the hidden hub finishes constructing. Its handshake
+            // must not wait for that UI work when no workspace can own a client. This is a locked
+            // registry check: Start holds the same lifetime lock through construction and insertion,
+            // so a partially created workspace cannot be mistaken for an empty registry here.
+            if (!WorkspaceRuntime.AnyRunning) return false;
             Dispatcher? ui = Application.Current?.Dispatcher;
-            return ui is null || ui.CheckAccess() ? Owned() : ui.Invoke(Owned);
+            return ui is null || ui.CheckAccess() ? Owned()
+                : ui.Invoke(Owned, DispatcherPriority.Send, CancellationToken.None, AdmissionUiWait);
         }
-        // Closing down: refuse rather than guess.
-        catch (Exception ex) when (ex is TaskCanceledException or InvalidOperationException) { return true; }
+        // Busy or closing: refuse rather than skipping the ownership check. The bridge may retry
+        // its handshake within its existing startup bound; provider policy/timeouts stay unchanged.
+        catch (Exception ex) when (ex is TaskCanceledException or InvalidOperationException or TimeoutException)
+        { return true; }
     }
 
     /// <summary>

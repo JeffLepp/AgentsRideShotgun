@@ -13,6 +13,7 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
     const long MaxFileBytes = 25 * 1024 * 1024;
     static readonly HashSet<string> Documents = new(StringComparer.OrdinalIgnoreCase)
         { ".txt", ".md", ".csv", ".json", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".docx", ".xlsx", ".pptx" };
+    internal static bool IsDocument(string path) => Documents.Contains(Path.GetExtension(path));
     readonly Lock _gate = new();
     readonly List<WorkspaceHandoff> _requests = [];
     internal event Action? Changed;

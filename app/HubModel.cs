@@ -13,9 +13,9 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
 {
     public string Id { get; } = id;
     string _name = "";
-    public string Name { get => _name; set { Set(ref _name, value); Changed(nameof(OpenLabel)); Changed(nameof(SleepLabel)); } }
+    public string Name { get => _name; set { Set(ref _name, value); Changed(nameof(OpenLabel)); Changed(nameof(SleepLabel)); Changed(nameof(PreviewLabel)); } }
     bool _working;
-    public bool Working { get => _working; set { Set(ref _working, value); Changed(nameof(OpenLabel)); } }
+    public bool Working { get => _working; set { if (_working != value) PreviewPlane = null; Set(ref _working, value); Changed(nameof(OpenLabel)); } }
     bool _needsYou;
     public bool NeedsYou { get => _needsYou; set { Set(ref _needsYou, value); Changed(nameof(OpenLabel)); } }
     /// <summary>Working, but nobody is driving it right now (WorkspaceRuntime.IsIdle): the stack's
@@ -39,8 +39,27 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
     public string SidebarAge { get => _sidebarAge; set => Set(ref _sidebarAge, value); }
     BitmapSource? _preview;
     public BitmapSource? Preview { get => _preview; set => Set(ref _preview, value); }
+    // Only a frame captured from this exact runtime may accept input. A last picture may remain
+    // visible while a new runtime starts, but must never target its different screen.
+    WorkspaceControl? _previewPlane;
+    internal WorkspaceControl? PreviewPlane { get => _previewPlane; set => Set(ref _previewPlane, value); }
+    bool _expanded;
+    public bool Expanded { get => _expanded; set { Set(ref _expanded, value); Changed(nameof(PreviewLabel)); } }
+    public string PreviewLabel => (Expanded ? "Collapse preview for " : "Show preview for ") + Name;
     bool _selected;
     public bool Selected { get => _selected; set => Set(ref _selected, value); }
+    /// <summary>The week's activity bars, oldest first, each 0 to 1 of this row's busiest day; empty
+    /// when nothing happened all week, so a quiet row shows no bars at all.</summary>
+    IReadOnlyList<double> _week = [];
+    public IReadOnlyList<double> Week { get => _week; set => Set(ref _week, value); }
+    /// <summary>What the agent is doing this moment ("Clicking"), from the action log, or null.</summary>
+    internal string? Doing { get; set; }
+    /// <summary>True while the card says what the agent is doing; the dot breathes.</summary>
+    bool _live;
+    public bool Live { get => _live; set => Set(ref _live, value); }
+    /// <summary>Who drives it, and the line Refresh would show without <see cref="Doing"/>.</summary>
+    internal string Who { get; set; } = "";
+    internal string RestText { get; set; } = "";
 
     public event PropertyChangedEventHandler? PropertyChanged;
     void Changed(string property) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
@@ -99,6 +118,8 @@ internal sealed class HubViewModel : IDisposable
     public ObservableCollection<HubEntry> Asleep { get; } = [];
     readonly Dictionary<string, HubEntry> _byId = new(StringComparer.OrdinalIgnoreCase);
     DispatcherTimer? _agingTimer;
+    DispatcherTimer? _liveTimer;
+    bool _scanning;
     bool _fixture;
     bool _disposed;
 
@@ -123,6 +144,12 @@ internal sealed class HubViewModel : IDisposable
         _agingTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(10) };
         _agingTimer.Tick += (_, _) => Refresh();
         _agingTimer.Start();
+        // The live line: a working card says what its agent is doing within a couple of seconds.
+        // Only new log lines are read, and only while something is working.
+        _liveTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(2) };
+        _liveTimer.Tick += (_, _) => { if (Working.Count > 0) ScanActivity(); };
+        _liveTimer.Start();
+        ScanActivity();
     }
 
     /// <summary>Stops the relative-age refresh; nothing ticks while the hub is hidden.</summary>
@@ -130,6 +157,60 @@ internal sealed class HubViewModel : IDisposable
     {
         _agingTimer?.Stop();
         _agingTimer = null;
+        _liveTimer?.Stop();
+        _liveTimer = null;
+    }
+
+    /// <summary>Everything done today across every workspace, for the stack's Today strip.</summary>
+    internal (int Actions, int Workspaces, int Commands) Today { get; private set; }
+
+    /// <summary>Raised on the UI thread after <see cref="Today"/> and the rows' activity change.</summary>
+    internal event Action? ActivityChanged;
+
+    /// <summary>How long after its last action a working card still says what the agent is doing.</summary>
+    static readonly TimeSpan DoingFor = TimeSpan.FromSeconds(45);
+
+    void ScanActivity()
+    {
+        if (_fixture || _disposed || _scanning) return;
+        _scanning = true;
+        string[] ids = _byId.Keys.ToArray();
+        Task.Run(() => HubActivity.Scan(ids)).ContinueWith(done =>
+        {
+            _scanning = false;
+            if (_disposed || done.IsFaulted) return;
+            ApplyActivity(done.Result);
+        }, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    /// <summary>Puts scanned activity on the rows; a scene calls it with made-up numbers.</summary>
+    internal void ApplyActivity(IReadOnlyDictionary<string, WorkspaceActivity> activity)
+    {
+        DateTime now = DateTime.Now;
+        int actions = 0, workspaces = 0, commands = 0;
+        foreach (HubEntry entry in _byId.Values)
+        {
+            WorkspaceActivity found = activity.GetValueOrDefault(entry.Id) ?? WorkspaceActivity.None;
+            int most = found.Week.Max();
+            entry.Week = most == 0 ? [] : found.Week.Select(n => (double)n / most).ToArray();
+            entry.Doing = entry.Working && found.LastAt is { } at && now - at < DoingFor ? found.LastDoing : null;
+            Compose(entry);
+            actions += found.Today;
+            commands += found.Commands;
+            if (found.Today > 0) workspaces++;
+        }
+        Today = (actions, workspaces, commands);
+        ActivityChanged?.Invoke();
+    }
+
+    /// <summary>The card's one line: what the agent is doing right now when the log says so,
+    /// otherwise what Refresh worked out (a question waiting, a sleep countdown, or who drives it).</summary>
+    static void Compose(HubEntry entry)
+    {
+        entry.Live = entry.Doing is not null && !entry.NeedsYou && !entry.Idle;
+        entry.AgentText = entry.Live
+            ? (entry.Who.Length > 0 ? entry.Who + " \u00b7 " + entry.Doing : entry.Doing!)
+            : entry.RestText;
     }
 
     /// <summary>True while the once-a-minute age refresh is running (the gate drives this through
@@ -175,8 +256,11 @@ internal sealed class HubViewModel : IDisposable
             string who = driver.Length > 0 ? WorkspaceHome.DisplayName(driver)
                 : kept.Equals(workspace.Name, StringComparison.OrdinalIgnoreCase) ? string.Empty : kept;
             string sleepsIn = entry.Idle ? HubFormat.SleepsInLabel(runtime!.SleepsIn) : "";
-            entry.AgentText = needsYou ? (who.Length > 0 ? who + " wants you" : "Needs you")
+            entry.Who = who;
+            entry.RestText = needsYou ? (who.Length > 0 ? who + " wants you" : "Needs you")
                 : sleepsIn.Length > 0 ? (who.Length > 0 ? who + " · " + sleepsIn : sleepsIn) : who;
+            if (!isWorking) entry.Doing = null;
+            Compose(entry);
             entry.Age = isWorking ? "" : HubFormat.StackAge(workspace.LastUsed, now);
             entry.SidebarAge = isWorking ? "" : HubFormat.SidebarAge(workspace.LastUsed, now);
             // A workspace with no computer running shows the last look it had rather than an empty
@@ -186,6 +270,7 @@ internal sealed class HubViewModel : IDisposable
         }
         Sync(Working, working);
         Sync(Asleep, asleep);
+        if (_agingTimer is not null) ScanActivity();
     }
 
     static void Sync(ObservableCollection<HubEntry> target, List<HubEntry> wanted)
@@ -233,4 +318,11 @@ internal static class HubPreview
     /// drift apart on what unplugged means.</summary>
     internal static TimeSpan Interval() =>
         TimeSpan.FromSeconds(WorkspacePeekCapture.OnBattery() ? 2.5 : 1);
+
+    /// <summary>How often a screen the owner has a hand on redraws: the pointer over it, or control
+    /// taken on it. Once a second is a picture to glance at and far too slow to drive, so this is
+    /// up to 20 a second (10 on battery). Each view keeps one capture in flight, so a busy screen
+    /// that takes longer to photograph slows itself down rather than piling up. It only costs the
+    /// owner's processor while the owner's hand is there, and nothing here reaches an agent.</summary>
+    internal static TimeSpan HandsOnInterval() => WorkspacePeekHost.HandsOnInterval;
 }

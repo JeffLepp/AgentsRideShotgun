@@ -165,7 +165,7 @@ public partial class App : Application
     void ShowSettings()
     {
         ShowWorkspace();
-        if (!_quitting && MainWindow is MainWindow window) window.ShowSettings();
+        if (!_quitting && MainWindow is MainWindow window) window.OpenSettings();
     }
 
     public void RequestQuit()
@@ -225,6 +225,7 @@ internal static class TrayMenu
         menu.Items.Add("Settings", null, (_, _) => settings());
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Quit Deskweave", null, (_, _) => quit());
+        TrayMenuStyle.Apply(menu);
         return menu;
     }
 
@@ -240,12 +241,27 @@ internal static class QuitQuestion
     internal const string CancelLabel = "Cancel";
     internal static Func<bool>? ConfirmForTests;
 
-    internal static bool Ask(Window? owner)
+    internal static bool Ask(Window? owner) =>
+        ConfirmForTests is { } confirm ? confirm() : Question.Ask(owner, Title, Body, QuitLabel, CancelLabel);
+}
+
+/// <summary>
+/// The app's one way to ask before something that cannot be taken back: the app's own font, colours
+/// and buttons, in its theme down to the title bar. Deleting a workspace used the Windows message
+/// box instead - grey system chrome, Yes/No and a warning sign - in the middle of an app that
+/// otherwise never shows one (2026-09-22).
+/// </summary>
+internal static class Question
+{
+    internal static bool Ask(Window? owner, string title, string body, string yes, string no = "Cancel", bool danger = false) =>
+        Build(owner, title, body, yes, no, danger).ShowDialog() == true;
+
+    /// <summary>The dialog, not yet shown - also what the scene harness photographs.</summary>
+    internal static Window Build(Window? owner, string title, string body, string yes, string no = "Cancel", bool danger = false)
     {
-        if (ConfirmForTests is { } confirm) return confirm();
         var dialog = new Window
         {
-            Title = Title,
+            Title = title,
             Width = 380,
             SizeToContent = SizeToContent.Height,
             ResizeMode = ResizeMode.NoResize,
@@ -257,23 +273,46 @@ internal static class QuitQuestion
             Foreground = (System.Windows.Media.Brush)Application.Current.FindResource("InkBrush"),
         };
         if (owner?.IsVisible == true) dialog.Owner = owner;
-        var content = new Grid { Margin = new Thickness(24) };
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var body = new TextBlock { Text = Body, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) };
-        content.Children.Add(body);
+        // A dark app with a white Windows title bar on its dialog looks pasted in.
+        dialog.SourceInitialized += (_, _) =>
+        {
+            int dark = AppearanceManager.Dark ? 1 : 0;
+            try { DwmSetWindowAttribute(new System.Windows.Interop.WindowInteropHelper(dialog).Handle, 20, ref dark, sizeof(int)); }
+            catch (DllNotFoundException) { }
+            catch (EntryPointNotFoundException) { }
+        };
+        // The question leads, in the dialog itself, not only in its title bar - the way Windows' own
+        // dialogs put their main instruction first - and the consequences follow in plain text.
+        var content = new Grid();
+        content.SetResourceReference(Panel.BackgroundProperty, "WindowBrush");
+        var inner = new Grid { Margin = new Thickness(24, 20, 24, 24) };
+        content.Children.Add(inner);
+        for (int row = 0; row < 3; row++) inner.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var heading = new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+        inner.Children.Add(heading);
+        var text = new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) };
+        text.SetResourceReference(TextBlock.ForegroundProperty, "MutedInkBrush");
+        Grid.SetRow(text, 1);
+        inner.Children.Add(text);
         var actions = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancel = new Button { Content = CancelLabel, MinWidth = 76, Height = 30, IsCancel = true,
+        var cancel = new Button { Content = no, MinWidth = 76, Height = 30, IsCancel = true, IsDefault = danger,
             Style = (Style)Application.Current.FindResource("QuietButton"), Margin = new Thickness(0, 0, 8, 0) };
-        var quit = new Button { Content = QuitLabel, MinWidth = 76, Height = 30,
-            Style = (Style)Application.Current.FindResource("PrimaryButton") };
+        // Something that cannot be undone looks like Settings' own Delete - an outlined button in
+        // red ink - and Enter does not do it.
+        var accept = new Button { Content = yes, MinWidth = 76, Height = 30, IsDefault = !danger,
+            Style = (Style)Application.Current.FindResource(danger ? "DeskButton" : "PrimaryButton") };
+        if (danger) accept.SetResourceReference(Control.ForegroundProperty, "DangerInkBrush");
         cancel.Click += (_, _) => dialog.DialogResult = false;
-        quit.Click += (_, _) => dialog.DialogResult = true;
+        accept.Click += (_, _) => dialog.DialogResult = true;
         actions.Children.Add(cancel);
-        actions.Children.Add(quit);
-        Grid.SetRow(actions, 1);
-        content.Children.Add(actions);
+        actions.Children.Add(accept);
+        Grid.SetRow(actions, 2);
+        inner.Children.Add(actions);
         dialog.Content = content;
-        return dialog.ShowDialog() == true;
+        return dialog;
     }
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
 }

@@ -163,11 +163,11 @@ static class FirstRunScenes
                 Program.Check(Labels(open.Window).Contains("Claude Code") && !Labels(open.Window).Contains("Codex"),
                     "An agent that is not on this PC has no row on first launch");
 
-            Program.Check(WorkspaceMcp.Scope.Contains("Use Deskweave automatically for agent-operated browser and GUI work", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("use your normal approved desktop-opening tools", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("Do not silently divert a user-requested desktop action into a workspace", StringComparison.Ordinal)
-                && WorkspaceMcp.Scope.Contains("Do not use Deskweave for anything else", StringComparison.Ordinal)
-                && WorkspaceMcp.RouterInstructions.Contains(WorkspaceMcp.Scope, StringComparison.Ordinal),
+            Program.Check(WorkspaceMcp.Scope.Contains("Decide by who uses a window next", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("start it from your own shell as usual", StringComparison.Ordinal)
+                && WorkspaceMcp.Scope.Contains("stay in your own tools", StringComparison.Ordinal)
+                && WorkspaceMcp.RouterInstructions.Contains(WorkspaceMcp.Scope, StringComparison.Ordinal)
+                && WorkspaceMcp.RouterInstructions.Length < 2000,
                 "Connecting scopes agent GUI testing to Deskweave, preserves explicit owner desktop requests, and excludes code and builds");
             await Task.Delay(50);
         }
