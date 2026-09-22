@@ -20,6 +20,32 @@
 
 <br>
 
+<table>
+<tr>
+<th width="50%">Without Deskweave</th>
+<th width="50%">With Deskweave</th>
+</tr>
+<tr>
+<td><img src="assets/demo-without.gif" alt="Without Deskweave: the agent's test windows land on top of your game and take your mouse, so you pause and wait" width="100%"></td>
+<td><img src="assets/demo-with.gif" alt="With Deskweave: the agent tests the app in a small corner window while your game keeps running" width="100%"></td>
+</tr>
+<tr>
+<td align="center"><sub>Its windows land on top and take your mouse. You pause and wait.</sub></td>
+<td align="center"><sub>It works in the corner. You keep playing.</sub></td>
+</tr>
+</table>
+
+<table>
+<tr>
+<th width="50%">Without Deskweave</th>
+<th width="50%">With Deskweave</th>
+</tr>
+<tr>
+<td><img src="assets/demo-without.gif" alt="Without Deskweave: the agent's test windows pop up over your game and pause it" width="100%"></td>
+<td><img src="assets/demo-with.gif" alt="With Deskweave: your game keeps running while the agent tests in a small corner window" width="100%"></td>
+</tr>
+</table>
+
 <p align="center"><i>"Co-work, without the co-mouse."</i></p>
 
 <br>
