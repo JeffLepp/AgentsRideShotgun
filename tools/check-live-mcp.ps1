@@ -256,7 +256,7 @@ try {
     $running = @(Get-Process Deskweave -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable })
     Check ($running.Count -eq 1) 'Exactly one Deskweave is running, from this publish folder'
     $report.app = [ordered]@{ pid = $running[0].Id; started = $running[0].StartTime.ToString('o'); exeSha256 = Hash $executable
-        engineSha256 = Hash (Join-Path $deskweaveRoot 'out\HiveMind.AgentWorkspaces.dll'); bridgeSha256 = Hash $bridge
+        engineSha256 = Hash (Join-Path $deskweaveRoot 'out\Deskweave.AgentWorkspaces.dll'); bridgeSha256 = Hash $bridge
         bridgeManagedSha256 = Hash ([IO.Path]::ChangeExtension($bridge, '.dll')) }
     $routerTicket = Get-Content -LiteralPath $ticket -Raw | ConvertFrom-Json
     Check ($routerTicket.schema -eq 1 -and [DeskweavePipe]::Served($routerTicket.pipe)) 'The router ticket names a pipe Deskweave is serving right now'

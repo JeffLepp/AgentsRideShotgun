@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>Explicit-click integration using the provider's configuration command, not a TOML rewrite.</summary>
 internal static class WorkspaceConnections

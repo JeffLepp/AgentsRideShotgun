@@ -1,4 +1,4 @@
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>Viewers share the actual queued capture, even after an earlier caller stops waiting.
 /// A caller's timeout never releases the flight; only completion of the capture does.</summary>

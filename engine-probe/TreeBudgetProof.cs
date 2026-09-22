@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Proves prompt 4b (design/FIX-PROMPTS-2026-09-20.md): a busy window used to make

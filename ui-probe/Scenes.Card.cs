@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Windows;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
 

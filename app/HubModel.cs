@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 namespace Deskweave;
 
@@ -97,7 +97,7 @@ internal static class HubFormat
     }
 
     /// <summary>What an idle running workspace says about when it sleeps, from
-    /// <see cref="HiveMind.AgentWorkspaces.WorkspaceRuntime.SleepsIn"/>. Minute granularity: a
+    /// <see cref="Deskweave.AgentWorkspaces.WorkspaceRuntime.SleepsIn"/>. Minute granularity: a
     /// countdown to the second would just be motion nobody asked for on a card meant to sit still.</summary>
     internal static string SleepsInLabel(TimeSpan? left) => left switch
     {

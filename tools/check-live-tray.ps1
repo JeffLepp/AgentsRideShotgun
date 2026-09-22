@@ -134,7 +134,7 @@ finally {
     $report.failure = $failure
     $report.exeSha256 = Hash $exe
     $report.appSha256 = Hash (Join-Path $root 'out/Deskweave.dll')
-    $report.engineSha256 = Hash (Join-Path $root 'out/HiveMind.AgentWorkspaces.dll')
+    $report.engineSha256 = Hash (Join-Path $root 'out/Deskweave.AgentWorkspaces.dll')
     $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $output 'live-tray-report.json') -Encoding utf8
 }
 if ($failure) { throw $failure }

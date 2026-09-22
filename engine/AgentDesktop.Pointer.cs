@@ -1,4 +1,4 @@
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>Which edge of a window a press on its frame took hold of.</summary>
 enum FrameGrip { None, Move, Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight }

@@ -3,7 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// The two things an agent reported on 2026-09-22 after driving a WPF app's nav rail, on a real

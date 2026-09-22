@@ -5,8 +5,8 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>HiveMind.AgentWorkspaces</RootNamespace>
-    <AssemblyName>HiveMind.AgentWorkspaces</AssemblyName>
+    <RootNamespace>Deskweave.AgentWorkspaces</RootNamespace>
+    <AssemblyName>Deskweave.AgentWorkspaces</AssemblyName>
     <AssemblyTitle>Deskweave workspace engine</AssemblyTitle>
     <Description>Local Windows desktops and agent control for Deskweave.</Description>
     <EnableDynamicLoading>true</EnableDynamicLoading>
@@ -17,7 +17,7 @@
          endpoint, on a polling budget, for the dashboard block and the Meter app. A subscription
          workspace shows the same percentages rather than a second reader of the same allowance.
          The Meter app references it the same way. -->
-    <ProjectReference Include="..\dependencies\HiveMind.UsageTracker\HiveMind.UsageTracker.csproj" />
+    <ProjectReference Include="..\dependencies\Deskweave.ProductContext\Deskweave.ProductContext.csproj" />
     <ProjectReference Include="Bridge\Deskweave.WorkspaceBridge.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

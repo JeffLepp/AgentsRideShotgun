@@ -3,7 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Threading;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
 

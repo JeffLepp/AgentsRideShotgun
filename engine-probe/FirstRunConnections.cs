@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// What first launch does outside its own window (design/MVP_SPEC.md, Surfaces 5 and Behavior):

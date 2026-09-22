@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Deskweave.Product</RootNamespace>
+    <AssemblyName>Deskweave.ProductContext</AssemblyName>
+    <AssemblyTitle>Deskweave product context</AssemblyTitle>
+    <Description>Process-local product data roots shared by Deskweave app engines.</Description>
+  </PropertyGroup>
+
+</Project>

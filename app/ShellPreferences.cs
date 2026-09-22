@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
-using HiveMind.Product;
+using Deskweave.Product;
 
 namespace Deskweave;
 

@@ -54,8 +54,8 @@ $controls = foreach ($name in $required) {
     $control = Get-DeskControl $name
     [pscustomobject]@{ Name = $name; Enabled = $control.Current.IsEnabled; Bounds = $control.Current.BoundingRectangle.ToString() }
 }
-$module = $process.Modules | Where-Object { $_.ModuleName -eq 'HiveMind.AgentWorkspaces.dll' } | Select-Object -First 1
-if ($null -eq $module -or $module.FileName -ne (Join-Path $deskweaveRoot 'out/HiveMind.AgentWorkspaces.dll')) {
+$module = $process.Modules | Where-Object { $_.ModuleName -eq 'Deskweave.AgentWorkspaces.dll' } | Select-Object -First 1
+if ($null -eq $module -or $module.FileName -ne (Join-Path $deskweaveRoot 'out/Deskweave.AgentWorkspaces.dll')) {
     throw 'Deskweave did not load its own published engine.'
 }
 Save-DeskSurface 'live-overview.png'

@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 public sealed partial class WorkspaceBrowser
 {

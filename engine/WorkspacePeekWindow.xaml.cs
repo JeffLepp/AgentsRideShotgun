@@ -9,7 +9,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>The dot color and the tone of the words beside it - the same three states the reference
 /// uses everywhere a workspace shows its status.</summary>

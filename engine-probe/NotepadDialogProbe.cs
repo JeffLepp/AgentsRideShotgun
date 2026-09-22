@@ -3,7 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Automation;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Notepad's "Do you want to save changes?" prompt, answered by control number the way an agent

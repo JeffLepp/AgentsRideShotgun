@@ -53,7 +53,7 @@ $previous = Join-Path $deskweaveRoot "artifacts/previous/$stamp"
 foreach ($path in @($staging, $output, $previous)) { Assert-OwnedPath $path }
 & dotnet publish $project -c Release -r win-x64 --self-contained true -o $staging -p:UseSharedCompilation=false -m:1 -nr:false --nologo
 if ($LASTEXITCODE -ne 0) { throw "Deskweave publish failed ($LASTEXITCODE)." }
-$required = @('Deskweave.exe', 'Deskweave.dll', 'Deskweave.runtimeconfig.json', 'HiveMind.AgentWorkspaces.dll', 'coreclr.dll', 'PresentationFramework.dll', 'Bridge/Deskweave.WorkspaceBridge.exe', 'Bridge/Deskweave.WorkspaceBridge.runtimeconfig.json', 'Bridge/coreclr.dll')
+$required = @('Deskweave.exe', 'Deskweave.dll', 'Deskweave.runtimeconfig.json', 'Deskweave.AgentWorkspaces.dll', 'coreclr.dll', 'PresentationFramework.dll', 'Bridge/Deskweave.WorkspaceBridge.exe', 'Bridge/Deskweave.WorkspaceBridge.runtimeconfig.json', 'Bridge/coreclr.dll')
 foreach ($file in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $staging $file))) { throw "Incomplete private build: missing $file. Existing build is unchanged." }
 }

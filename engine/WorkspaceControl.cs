@@ -2,7 +2,7 @@
 using System.IO;
 using System.Windows.Media.Imaging;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>Who is driving a workspace. Exactly one of these at a time, and the owner always wins.</summary>
 public enum Driver { Nobody, Owner, Agent }
@@ -622,7 +622,7 @@ public sealed partial class WorkspaceControl : IDisposable
     /// the owner's session: a second launch hands its command line to the copy already running and
     /// exits within milliseconds. From in here that is indistinguishable from a program that
     /// started and crashed, and an agent told only "it exited" goes looking for a bug in the
-    /// application. Measured 2026-09-07: asked to open HiveMind while the owner's was running, the
+    /// application. Measured 2026-09-07: asked to open a large WPF app while the owner's was running, the
     /// agent spent its whole mission on that theory and reported the app as broken.
     /// </summary>
     /// <summary>

@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>Reflection entry point for the full app panel and its optional compact dashboard view.</summary>
 public static class ModuleEntry

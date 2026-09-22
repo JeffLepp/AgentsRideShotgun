@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 // No Window is constructed or shown. The only console child is on an alternate workspace desktop.
 internal static class RouterStartup

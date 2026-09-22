@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Windows mixes audio per session, not per desktop, so an agent's sound would come out of the

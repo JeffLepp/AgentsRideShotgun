@@ -4,7 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
 

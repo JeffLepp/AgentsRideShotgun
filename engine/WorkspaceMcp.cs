@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows.Media.Imaging;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// The workspace, offered to a model as tools. GUI work is routed to its desktop; task files use
@@ -637,7 +637,7 @@ public sealed class WorkspaceMcp : IDisposable
     enum Started { Showing, Starting, Exited }
 
     /// <summary>
-    /// Waits for the program to put a window up. Measured 2026-09-07: HiveMind took 57 s to draw in
+    /// Waits for the program to put a window up. Measured 2026-09-07: a large WPF app took 57 s to draw in
     /// a workspace at the default power and 21 s at Fast, so the old two-second wait answered "no
     /// windows are open" for everything bigger than Notepad and the agent read that as a failure.
     /// This waits long enough for an ordinary application and returns the moment one appears.

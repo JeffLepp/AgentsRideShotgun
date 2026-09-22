@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// How fast and how expensive the corner view's own capture loop (<see cref="WorkspacePeekCapture"/>)

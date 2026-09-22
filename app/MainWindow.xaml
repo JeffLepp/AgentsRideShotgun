@@ -21,7 +21,7 @@
         <!-- "Zz", since the crescent now means night in the title bar (owner, 2026-09-22). Same as the
              workspace page's own Icon.Sleep (WorkspaceFullView.xaml): the
              card/row Sleep control (fix list item 2.2) and this window are separate resource scopes,
-             so it is defined once per file rather than pulled from HiveMind.AgentWorkspaces's sprite,
+             so it is defined once per file rather than pulled from Deskweave.AgentWorkspaces's sprite,
              which is out of scope for this fix. -->
         <Geometry x:Key="Icon.Sleep">M2.5,6.5 H7.5 L2.5,12.5 H7.5 M9.5,2.5 H13 L9.5,7 H13</Geometry>
         <!-- A toothed gear. The engine's Icon.Gear is a ring of short strokes that reads as a sun at

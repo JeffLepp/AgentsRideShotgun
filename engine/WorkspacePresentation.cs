@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>Keep automatic surfaces out of games, fullscreen video and Windows presentation mode.</summary>
 internal static class WorkspacePresentation

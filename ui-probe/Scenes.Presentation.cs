@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Windows;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
 

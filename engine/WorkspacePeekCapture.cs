@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows.Media.Imaging;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// What one tick of the corner view draws. Wave 0's spike found the whole screen far too costly to

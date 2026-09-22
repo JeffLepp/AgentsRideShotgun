@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>Two consecutive native MessageBoxes prove a press answers only the intended dialog.
 /// Run: Deskweave.Probe.exe --native-dialog-press C:\absolute\output</summary>

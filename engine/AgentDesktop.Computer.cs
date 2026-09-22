@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 public sealed partial class AgentDesktop
 {

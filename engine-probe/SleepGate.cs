@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Prompt 2 (design/FIX-PROMPTS-2026-09-20.md), the engine half: a running workspace nobody is

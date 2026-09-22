@@ -4,8 +4,8 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
-using HiveMind.Product;
+using Deskweave.AgentWorkspaces;
+using Deskweave.Product;
 
 internal static class Program
 {

@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>Provider-neutral access. Connection identity is host-issued; client labels are unverified.</summary>
 internal sealed class WorkspaceExternalAccess : IDisposable

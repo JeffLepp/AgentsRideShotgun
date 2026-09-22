@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>One page open in the workspace browser, as the owner and the agent see it.</summary>
 /// <param name="Number">What the tab tools take. Stable for as long as the tab list is.</param>

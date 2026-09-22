@@ -1,4 +1,4 @@
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>A short sequence over control IDs returned by the current workspace's UIA reader.</summary>
 public sealed record WorkspaceBatchAction(string Action, int Control, string? Text = null);

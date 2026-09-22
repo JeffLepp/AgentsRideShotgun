@@ -50,7 +50,7 @@ $manifest = [ordered]@{
     installerSha256 = (Get-FileHash -LiteralPath $setup.FullName).Hash
     signature = [string](Get-AuthenticodeSignature -LiteralPath $setup.FullName).Status
     appSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'Deskweave.dll')).Hash
-    engineSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'HiveMind.AgentWorkspaces.dll')).Hash
+    engineSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'Deskweave.AgentWorkspaces.dll')).Hash
     bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'Bridge\Deskweave.WorkspaceBridge.dll')).Hash
     frameworks = (Get-Content -Raw -LiteralPath (Join-Path $payload 'Deskweave.runtimeconfig.json') | ConvertFrom-Json).runtimeOptions.includedFrameworks
 }

@@ -2,7 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows.Data;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 namespace Deskweave;
 

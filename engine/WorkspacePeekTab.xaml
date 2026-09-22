@@ -1,4 +1,4 @@
-<Window x:Class="HiveMind.AgentWorkspaces.WorkspacePeekTab" x:ClassModifier="internal"
+<Window x:Class="Deskweave.AgentWorkspaces.WorkspacePeekTab" x:ClassModifier="internal"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"

@@ -4,7 +4,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 internal sealed record WorkspacePipePeer(Func<string, CancellationToken, Task<string?>> Handle, Action Closed);
 

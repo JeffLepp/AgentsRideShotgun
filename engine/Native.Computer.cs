@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 static partial class Native
 {

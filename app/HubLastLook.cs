@@ -1,7 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Media.Imaging;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 namespace Deskweave;
 

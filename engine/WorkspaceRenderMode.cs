@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// WPF's software renderer makes its windows capturable on an uncomposed workspace desktop.

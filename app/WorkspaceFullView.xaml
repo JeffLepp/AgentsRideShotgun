@@ -7,7 +7,7 @@
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <!-- A crescent, stroked like the rest of the icon family rather than pulled from
-             HiveMind.AgentWorkspaces's own sprite (out of scope for this fix): fix list item 2.2's
+             Deskweave.AgentWorkspaces's own sprite (out of scope for this fix): fix list item 2.2's
              "small sleep mark" and the Sleep control's own icon. -->
         <Geometry x:Key="Icon.Sleep">M2.5,6.5 H7.5 L2.5,12.5 H7.5 M9.5,2.5 H13 L9.5,7 H13</Geometry>
         <Style x:Key="HerePill" TargetType="Border">

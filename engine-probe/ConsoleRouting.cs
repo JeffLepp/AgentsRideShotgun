@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Media.Imaging;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 using Microsoft.Win32;
 
 // Run in the actual Windows 11 guest with Windows Terminal still selected as its default terminal.

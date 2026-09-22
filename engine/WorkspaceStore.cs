@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// What a workspace is allowed to be. Not a security setting: see FREE_ROAM.md.
@@ -76,7 +76,7 @@ public static class WorkspaceStore
 
     /// <summary>
     /// Everything one workspace's programs and its last mission leave lying about: the redirected
-    /// APPDATA, LOCALAPPDATA and TEMP, the workspace's own Chrome profile, HiveMind's evidence of
+    /// APPDATA, LOCALAPPDATA and TEMP, the workspace's own Chrome profile, Deskweave's evidence of
     /// the mission, and the picture of the screen it was stopped on. Nothing in here was written by
     /// the owner or by an agent, which is what makes clearing it a refresh rather than a delete.
     /// </summary>
@@ -89,7 +89,7 @@ public static class WorkspaceStore
     /// Raised when a workspace is created, deleted or cleared - a change to which workspaces exist,
     /// which nothing else on screen can find out for itself. The dashboard reads its cards from the
     /// folder tree on demand, so before this a workspace deleted in the panel stayed on the
-    /// dashboard until HiveMind was restarted.
+    /// dashboard until Deskweave was restarted.
     ///
     /// Deliberately not raised by <see cref="Save"/>: reading a folder with an unreadable record
     /// saves the recovered one while <see cref="All"/> is still enumerating, so a listener that
@@ -97,7 +97,7 @@ public static class WorkspaceStore
     /// </summary>
     public static event Action? Changed;
 
-    public static string Root => _testRoot ?? HiveMind.Product.ProductContext.Local("agent-workspaces");
+    public static string Root => _testRoot ?? Deskweave.Product.ProductContext.Local("agent-workspaces");
 
     /// <summary>
     /// Redirects workspace writes for one serialized test. Production callers never use this;

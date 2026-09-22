@@ -3,7 +3,7 @@ using System.Text;
 using System.Windows.Interop;
 using System.Windows.Threading;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Windows has exactly one clipboard per window station, and a window station needs administrator

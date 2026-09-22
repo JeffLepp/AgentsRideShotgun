@@ -4,8 +4,8 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
-using HiveMind.AgentWorkspaces;
-using HiveMind.Product;
+using Deskweave.AgentWorkspaces;
+using Deskweave.Product;
 
 namespace Deskweave;
 

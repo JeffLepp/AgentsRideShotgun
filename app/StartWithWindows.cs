@@ -1,5 +1,5 @@
 using System.IO;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 using Microsoft.Win32;
 
 namespace Deskweave;

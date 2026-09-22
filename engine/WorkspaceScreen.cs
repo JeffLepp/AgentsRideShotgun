@@ -1,10 +1,10 @@
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// The workspace screen, as a rule rather than a fact: one monitor, the primary one, from (0,0) to
 /// (width,height). The owner's PC may have three monitors, and a workspace desktop shares his
 /// monitor layout, so a program that remembers where it was last opens on whichever of them it
-/// was on. Measured 2026-09-06: HiveMind itself opened at (-1684,119), on the monitor to the left
+/// was on. Measured 2026-09-06: a large WPF app opened at (-1684,119), on the monitor to the left
 /// of the primary, where the whole-screen capture could not see it and no click could reach it.
 ///
 /// Everything here is pure arithmetic so it can be tested without a desktop.
@@ -38,7 +38,7 @@ internal static class WorkspaceScreen
 
     /// <summary>
     /// Where a lost window goes. One that is entirely off the screen comes back to the middle,
-    /// the way HiveMind's own shell treats a position saved on a monitor that is no longer there;
+    /// the way Deskweave's own shell treats a position saved on a monitor that is no longer there;
     /// one that is partly on is slid in, which keeps the part the agent was looking at where it was.
     /// Either way the result fits inside the screen.
     /// </summary>

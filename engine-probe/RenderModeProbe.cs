@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
-using Coordinator = HiveMind.AgentWorkspaces.WorkspaceRenderMode.Coordinator;
-using Setting = HiveMind.AgentWorkspaces.WorkspaceRenderMode.Setting;
+using Deskweave.AgentWorkspaces;
+using Coordinator = Deskweave.AgentWorkspaces.WorkspaceRenderMode.Coordinator;
+using Setting = Deskweave.AgentWorkspaces.WorkspaceRenderMode.Setting;
 
 /// <summary>Renderer transactions tested without reading or writing the owner's registry.
 /// Child dispatch belongs before Program's Probe.Turn mutex:

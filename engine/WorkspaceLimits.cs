@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>How much of the owner's machine one workspace may take. Two presets, one toggle.</summary>
 public enum WorkspacePower
@@ -114,7 +114,7 @@ sealed class WorkspaceLimits : IDisposable
     /// Light is a hard cap. It may not exceed its share even on a machine doing nothing else, and
     /// that is the point: the owner is working and must not be able to feel an agent.
     ///
-    /// Fast is not a cap at all. Measured 2026-09-07 on a four-core Windows 10 machine: HiveMind
+    /// Fast is not a cap at all. Measured 2026-09-07 on a four-core Windows 10 machine: a large WPF app
     /// took 57.4 s to show a window under the flat quarter and 21.5 s at 80%, against seconds on the
     /// owner's own desktop, and the hard cap was the whole of that difference - the machine was
     /// idle and the workspace was forbidden from using it. Weight-based scheduling constrains a job

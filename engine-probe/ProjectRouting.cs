@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Reflection;
 using System.Windows.Media.Imaging;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 internal static class ProjectRouting
 {

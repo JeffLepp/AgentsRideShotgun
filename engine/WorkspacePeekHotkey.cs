@@ -1,7 +1,7 @@
 using System.Windows.Input;
 using System.Windows.Interop;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// One global hotkey, on a message-only window of this module's own. Windows gives a combination to
@@ -20,7 +20,7 @@ internal sealed class WorkspacePeekHotkey : IDisposable
     internal WorkspacePeekHotkey()
     {
         // A zero-sized, styleless window, never shown. Not a message-only one: WM_HOTKEY is posted
-        // to the registering window, and this is the shape the rest of HiveMind already registers
+        // to the registering window, and this is the shape the rest of Deskweave already registers
         // its hotkeys with.
         _source = new HwndSource(new HwndSourceParameters("DeskweaveWorkspacePeekHotkey")
         {

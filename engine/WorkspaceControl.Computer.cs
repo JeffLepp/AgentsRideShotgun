@@ -1,6 +1,6 @@
 using System.Windows.Media.Imaging;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 internal sealed record ComputerResult(ComputerReceipt Receipt, string Target, int Width, int Height, BitmapSource? Frame);
 

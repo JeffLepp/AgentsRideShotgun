@@ -7,7 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>One window living on an agent's desktop.</summary>
 /// <param name="Responding">
@@ -1188,7 +1188,7 @@ public sealed partial class AgentDesktop : IDisposable
         //
         // Bounded, because "every pump operation is bounded" is a claim about our own code and not
         // about Windows: one call into a wedged application used to hold this Join forever and the
-        // workspace could not be closed, nor HiveMind shut down, until that application was killed.
+        // workspace could not be closed, nor Deskweave shut down, until that application was killed.
         // The job object below kills everything in the workspace anyway, and the pump is a
         // background thread, so going on without it is the safe direction.
         ShutdownWaitedOut = !_thread.Join(ShutdownJoin);

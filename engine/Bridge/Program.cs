@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 // stdout belongs exclusively to MCP. The host-issued capability arrives through the child
 // environment or a connection ticket, never a persisted provider configuration or an argument.

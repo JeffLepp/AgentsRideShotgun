@@ -1,7 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Which engine step, if any, takes the foreground from the owner. Found 2026-09-22: during the UI

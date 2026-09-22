@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 internal sealed record WorkspaceHandoff(string Id, string Kind, string Target, string Reason,
     string State, string Detail, DateTimeOffset Created, string? Sha256 = null);

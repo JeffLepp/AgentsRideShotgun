@@ -1,4 +1,4 @@
-﻿namespace HiveMind.AgentWorkspaces;
+﻿namespace Deskweave.AgentWorkspaces;
 
 /// <summary>What an agent may do to a window as a whole, the way a person does with its title bar.</summary>
 public enum WindowArrangement { Move, Maximize, Minimize, Restore, Front, Close }

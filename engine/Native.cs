@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// The Win32 surface behind <see cref="AgentDesktop"/>. Every entry is a plain user32, gdi32 or
@@ -15,7 +15,7 @@ static partial class Native
     /// <summary>
     /// True only when Windows trusts the file's Authenticode signature and its signing
     /// certificate has the exact expected display name. Trust and publisher identity are separate
-    /// gates: a different, validly signed executable must not become something HiveMind executes.
+    /// gates: a different, validly signed executable must not become something Deskweave executes.
     /// </summary>
     public static bool VerifyAuthenticode(string path, string expectedPublisher)
     {
@@ -532,7 +532,7 @@ static partial class Native
 
     // --- the corner view's global hotkey ------------------------------------------------------
     //
-    // One key combination, owned by HiveMind for as long as the module is loaded. NOREPEAT so
+    // One key combination, owned by Deskweave for as long as the module is loaded. NOREPEAT so
     // holding it down is one press, which is what a toggle wants.
 
     [DllImport("user32.dll", SetLastError = true)]

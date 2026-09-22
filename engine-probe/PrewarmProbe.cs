@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.IO;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Prompt 5 (design/FIX-PROMPTS-2026-09-20.md): the warmed-up browser must not cover the window the

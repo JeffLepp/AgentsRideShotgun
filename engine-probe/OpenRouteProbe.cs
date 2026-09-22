@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Prompts 3 and 6 (design/FIX-PROMPTS-2026-09-20.md). Where a thing opens follows who it is for:

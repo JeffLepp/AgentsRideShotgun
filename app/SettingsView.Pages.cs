@@ -7,8 +7,8 @@ using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Resources;
 using System.Windows.Threading;
-using HiveMind.AgentWorkspaces;
-using HiveMind.Product;
+using Deskweave.AgentWorkspaces;
+using Deskweave.Product;
 
 namespace Deskweave;
 

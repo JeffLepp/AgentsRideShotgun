@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>What a command job is doing. The four states the owner asked to be able to tell apart.</summary>
 public enum CommandState { Running, Completed, Failed, Cancelled }
@@ -115,7 +115,7 @@ public sealed class WorkspaceCommands : IDisposable
     public WorkspaceCommands(WorkspaceControl control)
     {
         _control = control;
-        // A HiveMind that stopped without closing its workspaces leaves job files behind, and a
+        // A Deskweave that stopped without closing its workspaces leaves job files behind, and a
         // workspace is meant to be reusable for months. Sweep them on the way in, when nothing can
         // still be holding them, rather than accumulating a folder of dead scripts.
         Sweep(control.Folder);

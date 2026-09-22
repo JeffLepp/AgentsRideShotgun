@@ -38,7 +38,7 @@ try {
         if ($code -ne 0) { throw "Defender scan did not pass ($code): $target. See $scanLog" }
     }
     foreach ($file in @($installerPath, (Join-Path $root 'out\Deskweave.exe'),
-        (Join-Path $root 'out\Deskweave.dll'), (Join-Path $root 'out\HiveMind.AgentWorkspaces.dll'),
+        (Join-Path $root 'out\Deskweave.dll'), (Join-Path $root 'out\Deskweave.AgentWorkspaces.dll'),
         (Join-Path $root 'out\Bridge\Deskweave.WorkspaceBridge.exe'), (Join-Path $root 'out\Bridge\Deskweave.WorkspaceBridge.dll'))) {
         $signature = Get-AuthenticodeSignature -LiteralPath $file
         $report.files += [ordered]@{ path = $file; sha256 = (Get-FileHash -LiteralPath $file).Hash; signature = [string]$signature.Status }

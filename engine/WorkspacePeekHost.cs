@@ -5,12 +5,12 @@ using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Runs the corner view for the whole module: which workspace (or two) it shows, when it is on
 /// screen, the picture it draws, and the two global hotkeys. It lives here rather than in a panel
-/// for the same reason the runtime does: a workspace works with every window of HiveMind closed,
+/// for the same reason the runtime does: a workspace works with every window of Deskweave closed,
 /// so a corner view that only existed while a panel was open would appear exactly when it was not
 /// needed. Nothing here runs while it has nothing to show: no timer, no capture, no window.
 /// </summary>

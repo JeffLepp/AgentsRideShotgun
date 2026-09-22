@@ -4,7 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>A small, non-activating way back to a tucked workspace. No preview capture or global mouse hook.</summary>
 internal partial class WorkspacePeekTab : Window

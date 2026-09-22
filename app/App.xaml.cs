@@ -5,8 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
-using HiveMind.AgentWorkspaces;
-using HiveMind.Product;
+using Deskweave.AgentWorkspaces;
+using Deskweave.Product;
 
 namespace Deskweave;
 

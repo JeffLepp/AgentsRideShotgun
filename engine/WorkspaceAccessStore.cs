@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 internal sealed record WorkspaceAccessPolicy(bool Enabled = false, bool DesktopRequests = true)
 {

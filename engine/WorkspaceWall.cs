@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// What an agent's screen shows behind its windows. Full desktop (the default): the soft wall the

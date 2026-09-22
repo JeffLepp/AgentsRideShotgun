@@ -74,8 +74,8 @@ function Wait-ShellVisibility([IntPtr]$handle, [bool]$visible) {
     }
 }
 try {
-    $engine = $app.Modules | Where-Object ModuleName -eq 'HiveMind.AgentWorkspaces.dll' | Select-Object -First 1
-    Check ($engine.FileName -eq (Join-Path $root 'out\HiveMind.AgentWorkspaces.dll')) 'The live app loaded this checkout''s published engine'
+    $engine = $app.Modules | Where-Object ModuleName -eq 'Deskweave.AgentWorkspaces.dll' | Select-Object -First 1
+    Check ($engine.FileName -eq (Join-Path $root 'out\Deskweave.AgentWorkspaces.dll')) 'The live app loaded this checkout''s published engine'
     $second = Start-Process -FilePath $exe -ArgumentList '--background' -WindowStyle Hidden -PassThru
     Check ($second.WaitForExit(10000)) 'A second background launch exits without a duplicate app'
     if ($BackgroundOnly) {
@@ -162,7 +162,7 @@ try {
     Check ([ShellCheckWindow]::IsWindowVisible($window)) 'A tray selection reopens the published strip'
     Invoke 'Close Deskweave'
     }
-    foreach ($file in @('Deskweave.exe', 'Deskweave.dll', 'HiveMind.AgentWorkspaces.dll')) {
+    foreach ($file in @('Deskweave.exe', 'Deskweave.dll', 'Deskweave.AgentWorkspaces.dll')) {
         $report[$file + 'Sha256'] = (Get-FileHash -LiteralPath (Join-Path $root ('out\' + $file))).Hash
     }
 } catch { $failure = $_.ToString() }

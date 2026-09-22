@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 internal sealed record ComputerPoint(int X, int Y);
 internal sealed record ComputerAction(string Type, int X = 0, int Y = 0, string Button = "left",

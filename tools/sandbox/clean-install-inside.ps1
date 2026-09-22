@@ -95,7 +95,7 @@ try {
     Check (Test-Path $bridge) 'The agent bridge is installed beside it'
     $report.appVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
     $report.appSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.dll')).Hash
-    $report.engineSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'HiveMind.AgentWorkspaces.dll')).Hash
+    $report.engineSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.AgentWorkspaces.dll')).Hash
     $report.bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $bridge) 'Deskweave.WorkspaceBridge.dll')).Hash
     $shortcut = @(Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*.lnk' | Where-Object { $_.Name -like 'Deskweave*' })
     Check ($shortcut.Count -ge 1) 'A Start menu shortcut is created'
@@ -151,7 +151,7 @@ try {
         $report.appVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
         Check ($report.appVersion -ne $report.previousVersion) 'The installed version changes after upgrade'
         $report.appSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.dll')).Hash
-        $report.engineSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'HiveMind.AgentWorkspaces.dll')).Hash
+        $report.engineSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.AgentWorkspaces.dll')).Hash
         $report.bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $bridge) 'Deskweave.WorkspaceBridge.dll')).Hash
         Start-Sleep -Seconds 3
         Get-Process Deskweave -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }

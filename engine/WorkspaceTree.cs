@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// One control an application published, as an agent sees it. The rectangle is always here, so
@@ -21,7 +21,7 @@ public sealed record WorkspaceElement(int Id, string Type, string Name, string A
 
 /// <summary>
 /// Layer 1 of the control plane: the controls an application publishes on the separate workspace
-/// desktop. HiveMind stays on the owner's desktop while the launched app uses the owner's normal
+/// desktop. Deskweave stays on the owner's desktop while the launched app uses the owner's normal
 /// token and file permissions. The desktop-affine UIA route was measured first on 2026-08-23; see
 /// AGENT_WORKSPACES_TECHNICAL_REPORT.md for that historical run and the current supersession.
 ///

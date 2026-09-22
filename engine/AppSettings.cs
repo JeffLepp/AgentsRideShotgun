@@ -4,7 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 public enum ThemeChoice { FollowWindows, Light, Dark }
 
@@ -115,7 +115,7 @@ public static class AppSettingsStore
     static long _version;
     static string? _testFile;
 
-    internal static string File => _testFile ?? HiveMind.Product.ProductContext.Local("settings.json");
+    internal static string File => _testFile ?? Deskweave.Product.ProductContext.Local("settings.json");
 
     /// <summary>After every change, on the thread that made it. UI listeners dispatch to their own.</summary>
     public static event Action<AppSettings>? Changed;

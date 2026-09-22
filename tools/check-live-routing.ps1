@@ -60,7 +60,7 @@ try {
     Start-Sleep -Seconds 2
     Check (-not $app.HasExited) 'The published app starts in the background'
     $report.exeSha256 = Hash (Join-Path $root 'out\Deskweave.exe')
-    $report.engineSha256 = Hash (Join-Path $root 'out\HiveMind.AgentWorkspaces.dll')
+    $report.engineSha256 = Hash (Join-Path $root 'out\Deskweave.AgentWorkspaces.dll')
     $report.bridgeSha256 = Hash (Join-Path $root 'out\Bridge\Deskweave.WorkspaceBridge.dll')
     if ($BrowserOnly) {
         $browser = Run-Session 'browser' $project $false $true

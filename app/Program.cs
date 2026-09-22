@@ -1,5 +1,5 @@
-using HiveMind.AgentWorkspaces;
-using HiveMind.Product;
+using Deskweave.AgentWorkspaces;
+using Deskweave.Product;
 using Microsoft.Win32;
 using System.IO;
 using Velopack;

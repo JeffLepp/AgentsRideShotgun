@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using HiveMind.AgentWorkspaces;
+using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Proves or disproves prompt 4a's theory (design/FIX-PROMPTS-2026-09-20.md): a workspace desktop has

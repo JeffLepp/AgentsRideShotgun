@@ -8,7 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Layer 3: the workspace's own Chrome, driven through its DevTools protocol, so an agent reads the
@@ -32,7 +32,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
     ///
     /// Edge is last on purpose and matters most: it ships with Windows, it is Chromium, and it speaks
     /// the same DevTools protocol. It is what makes the browser layer work on a PC where nothing has
-    /// been installed. Resolved once - a browser does not move while HiveMind is running.
+    /// been installed. Resolved once - a browser does not move while Deskweave is running.
     ///
     /// Finding nothing is remembered only briefly. Deskweave starts with Windows and stays in the
     /// tray, so a fresh PC with no browser installs one while we are running; a permanent miss left

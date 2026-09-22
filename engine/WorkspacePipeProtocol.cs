@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Text;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>Version 1: UTF-8 JSON in a bounded, little-endian length-prefixed local pipe frame.</summary>
 internal static class WorkspacePipeProtocol

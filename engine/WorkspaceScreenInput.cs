@@ -6,7 +6,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>The owner's mouse and keyboard on a picture of a workspace screen.</summary>
 public sealed class WorkspaceScreenInput : IDisposable

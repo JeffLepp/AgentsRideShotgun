@@ -3,13 +3,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
 
-namespace HiveMind.AgentWorkspaces;
+namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Turns what an agent calls a program into something CreateProcess can start. A person opens a
 /// program by pressing Start and typing its name; an agent given only "the plain name of an
 /// installed program" could open notepad and nothing that was not on PATH. Measured 2026-09-06:
-/// asked to open HiveMind, the agent spent its first turns hunting for the executable and settled
+/// asked to open a large WPF app, the agent spent its first turns hunting for the executable and settled
 /// on reading a Start Menu shortcut by hand.
 ///
 /// Three lookups, in the order Windows itself uses: PATH, the App Paths registry key that Win+R

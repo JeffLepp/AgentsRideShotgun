@@ -46,7 +46,7 @@ $checks = [Collections.Generic.List[string]]::new()
 $report = [ordered]@{ observedAt = [DateTimeOffset]::UtcNow; modelCalls = 0; checks = $checks
     version = (Get-Item $exe).VersionInfo.ProductVersion; pid = $app.Id
     exeSha256 = (Get-FileHash $exe).Hash
-    engineSha256 = (Get-FileHash (Join-Path $root 'out/HiveMind.AgentWorkspaces.dll')).Hash }
+    engineSha256 = (Get-FileHash (Join-Path $root 'out/Deskweave.AgentWorkspaces.dll')).Hash }
 function Check([bool]$ok, [string]$claim) { if (-not $ok) { throw $claim }; $checks.Add($claim); Write-Output "PASS $claim" }
 function Wait-Window([string]$title) {
     $until = [DateTime]::UtcNow.AddSeconds(15)
@@ -77,8 +77,8 @@ function Capture([IntPtr]$h, [string]$name) {
 $bridge = $null
 $failure = $null
 try {
-    $module = $app.Modules | Where-Object ModuleName -eq 'HiveMind.AgentWorkspaces.dll' | Select-Object -First 1
-    Check ($module.FileName -eq (Join-Path $root 'out/HiveMind.AgentWorkspaces.dll')) 'The live app uses this checkout''s published engine'
+    $module = $app.Modules | Where-Object ModuleName -eq 'Deskweave.AgentWorkspaces.dll' | Select-Object -First 1
+    Check ($module.FileName -eq (Join-Path $root 'out/Deskweave.AgentWorkspaces.dll')) 'The live app uses this checkout''s published engine'
     $ticket = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Deskweave/agent-workspaces.access/router.json'
     $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'out/Bridge/Deskweave.WorkspaceBridge.exe'))
     $start.UseShellExecute = $false; $start.CreateNoWindow = $true; $start.WorkingDirectory = $project
