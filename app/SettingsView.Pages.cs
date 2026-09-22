@@ -187,8 +187,12 @@ public partial class SettingsView
             string? failure = requestFailure ?? SettingsActions.ReadConnectionFailure(app);
             error.Text = failure ?? "";
             error.Visibility = failure is null ? Visibility.Collapsed : Visibility.Visible;
+            // On while any profile is connected, or while a failed connection is still wanted and
+            // being repaired. Off then always has something to do: disconnect what works, and stop
+            // the repair. Drawing a partial set as off left the working profile no way out.
             settingProgrammatically = true;
-            toggle.IsChecked = state == AgentState.Connected;
+            toggle.IsChecked = state == AgentState.Connected || profiles.Connected > 0
+                || failure is not null && !WorkspaceConnections.TurnedOff(app);
             settingProgrammatically = false;
             toggle.IsEnabled = state != AgentState.NotInstalled && !connecting;
         }

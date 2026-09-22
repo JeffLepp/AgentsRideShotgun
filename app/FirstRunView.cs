@@ -76,22 +76,41 @@ public sealed class FirstRunWindow : Window
             CornerRadius = new CornerRadius(0),
         });
 
-        var body = new StackPanel { Margin = new Thickness(28, 22, 28, 24) };
+        var body = new StackPanel { Margin = new Thickness(28, 22, 28, 0) };
         _illustration = Illustration();
         body.Children.Add(_illustration);
         body.Children.Add(Headline22());
         body.Children.Add(Sentence());
         body.Children.Add(AgentCard());
-        body.Children.Add(Foot(out _start));
+        // A short screen at a high scale has less room than two agent rows and an error line need.
+        // The window stops at the work area, the words scroll, and Start stays under them in reach.
+        var scroll = new ScrollViewer
+        {
+            Content = body, Focusable = false,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        FrameworkElement foot = Foot(out _start);
+        foot.Margin = new Thickness(28, 0, 28, 24);
 
         var rows = new Grid();
         rows.RowDefinitions.Add(new RowDefinition { Height = new GridLength(40) });
         rows.RowDefinitions.Add(new RowDefinition());
+        rows.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         FrameworkElement bar = TitleBar();
         Grid.SetRow(bar, 0);
         rows.Children.Add(bar);
-        Grid.SetRow(body, 1);
-        rows.Children.Add(body);
+        Grid.SetRow(scroll, 1);
+        rows.Children.Add(scroll);
+        Grid.SetRow(foot, 2);
+        rows.Children.Add(foot);
+
+        MaxHeight = SystemParameters.WorkArea.Height;
+        // Growing by an error line after Start pushes the bottom edge down; lift it back on screen.
+        SizeChanged += (_, _) =>
+        {
+            Rect area = SystemParameters.WorkArea;
+            if (Top + ActualHeight > area.Bottom) Top = Math.Max(area.Top, area.Bottom - ActualHeight);
+        };
 
         var frame = new Border { BorderThickness = new Thickness(1), Child = rows };
         frame.SetResourceReference(Border.BorderBrushProperty, "GlassEdgeBrush");

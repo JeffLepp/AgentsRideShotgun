@@ -226,6 +226,18 @@ static class SettingsScenes
             ShowSettled(view, "agents");
             Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "1 of 3 profiles connected"),
                 "Settings distinguishes a partially connected set of configuration profiles");
+            CheckBox partial = Descendants<CheckBox>(view)
+                .First(box => AutomationProperties.GetName(box) == "Claude Code connected");
+            Program.Check(partial.IsChecked == true, "A partially connected agent draws its switch on");
+            var setConnected = WorkspaceConnections.SetConnected;
+            List<(WorkspaceConnections.AgentApp, bool)> partialAsked = [];
+            WorkspaceConnections.SetConnected = (app, on, _) => { partialAsked.Add((app, on)); return Task.FromResult<string?>(null); };
+            partial.IsChecked = false;
+            Pump();
+            Program.Check(partialAsked is [(WorkspaceConnections.AgentApp.ClaudeCode, false)],
+                "Turning off a partially connected agent disconnects it");
+            WorkspaceConnections.SetConnected = setConnected;
+            WorkspaceConnections.Remember(WorkspaceConnections.AgentApp.ClaudeCode, true);
             SettingsActions.ReadConnectionFailure = _ => "Profile 2 could not be connected. Try again.";
             view.Visibility = Visibility.Collapsed;
             view.Visibility = Visibility.Visible;
