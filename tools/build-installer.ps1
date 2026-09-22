@@ -75,13 +75,19 @@ $setup = Move-Item -LiteralPath $built.FullName -Destination (Join-Path $staging
 $assets = Join-Path $staging 'assets.win.json'
 [IO.File]::WriteAllText($assets, [IO.File]::ReadAllText($assets).Replace($built.Name, $setup.Name))
 if ($Sign -and (Get-AuthenticodeSignature -LiteralPath $setup.FullName).Status -ne 'Valid') { throw 'Setup is not validly signed.' }
+function PackedHash([string]$entry) {
+    $zip = [IO.Compression.ZipFile]::OpenRead($package.FullName)
+    try { $stream = $zip.GetEntry($entry).Open(); try { (Get-FileHash -InputStream $stream).Hash } finally { $stream.Dispose() } }
+    finally { $zip.Dispose() }
+}
 $manifest = [ordered]@{
     version = $Version; runtime = $packageRuntime; velopack = $sdkVersion; builtAt = [DateTimeOffset]::UtcNow.ToString('o')
     installerSha256 = (Get-FileHash -LiteralPath $setup.FullName).Hash
     signature = [string](Get-AuthenticodeSignature -LiteralPath $setup.FullName).Status
-    appSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'Deskweave.dll')).Hash
-    engineSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'Deskweave.AgentWorkspaces.dll')).Hash
-    bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'Bridge\Deskweave.WorkspaceBridge.dll')).Hash
+    # From the package, not out/: signing changes the bytes that get installed.
+    appSha256 = PackedHash 'lib/app/Deskweave.dll'
+    engineSha256 = PackedHash 'lib/app/Deskweave.AgentWorkspaces.dll'
+    bridgeSha256 = PackedHash 'lib/app/Bridge/Deskweave.WorkspaceBridge.dll'
     frameworks = (Get-Content -Raw -LiteralPath (Join-Path $payload 'Deskweave.runtimeconfig.json') | ConvertFrom-Json).runtimeOptions.includedFrameworks
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $staging 'package-evidence.json') -Encoding UTF8

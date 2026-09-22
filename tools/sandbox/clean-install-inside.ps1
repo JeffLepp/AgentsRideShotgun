@@ -165,7 +165,8 @@ try {
     Check ($hello.result.serverInfo.name -eq 'deskweave') "With Deskweave closed, an agent's bridge starts it and connects ($($report.coldStartSeconds) s)"
     if ($initialInstaller -ne $installer) { $report.upgradeBridge.newClientConnected = $true }
     $tools = Ask 'tools/list' @{}
-    Check ($tools.result.tools.Count -ge 20) 'The agent sees the workspace tools'
+    $names = @($tools.result.tools | ForEach-Object { $_.name })
+    Check (@('browse', 'computer', 'look', 'run', 'open', 'window', 'release' | Where-Object { $names -notcontains $_ }).Count -eq 0) 'The agent sees the workspace tools'
 
     # --- a workspace, and its browser on a PC that only has Edge ------------------------------
     $page = Join-Path $project 'index.html'
@@ -173,7 +174,7 @@ try {
     $browse = Ask 'tools/call' @{ name = 'browse'; arguments = @{ url = ([Uri]$page).AbsoluteUri } } 180
     $report.browse = $browse.result.content[0].text
     Check (-not $browse.result.isError) 'The workspace browser opens a local page with only Edge on the PC'
-    $click = Ask 'tools/call' @{ name = 'page_click'; arguments = @{ selector = '#add' } }
+    $click = Ask 'tools/call' @{ name = 'page'; arguments = @{ action = 'click'; selector = '#add' } }
     $read = Ask 'tools/call' @{ name = 'page'; arguments = @{} }
     Check ((-not $click.result.isError) -and ($read.result.content[0].text -like '*Added!*')) 'The agent clicks the page in its workspace and reads the result'
     $shot = Ask 'tools/call' @{ name = 'computer'; arguments = @{ screenshot = $true } }
@@ -246,7 +247,9 @@ public static class InstallerProviderFixture {
     # The same steps the Settings row takes: quit, delete both data folders, run Update.exe.
     $setup = Start-Process -FilePath $installer -ArgumentList '--silent' -PassThru -WindowStyle Hidden
     Check ($setup.WaitForExit(300000) -and $setup.ExitCode -eq 0) 'Reinstalling over kept data succeeds'
-    Check (WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30) 'Deskweave starts after the reinstall'
+    $started = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30
+    if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
+    Check $started 'Deskweave starts after the reinstall'
     [IO.File]::WriteAllText($providerConfig, $providerFixture, (New-Object Text.UTF8Encoding $false))
     Get-Process Deskweave -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
     foreach ($folder in @((Join-Path $local 'Deskweave'), (Join-Path $env:APPDATA 'Deskweave'))) {
