@@ -130,7 +130,7 @@ static class ScalingScenes
             window.Hub.LoadFixture([new HubEntry("shop") { Name = "shop", Working = true, AgentText = "Claude Code" }], []);
             window.ShowWide("shop");
             await Task.Delay(200);
-            window.OpenWorkspaceView!.LoadFixture("shop", @"C:\Users\jeffe\Desktop\Startup\RedTeam\shop",
+            window.OpenWorkspaceView!.LoadFixture("shop", @"C:\code\shop",
                 [("Claude Code", true), ("Codex waiting", false)], site,
                 [
                     ("10:41:52", "Opened ", "localhost:5173", site),

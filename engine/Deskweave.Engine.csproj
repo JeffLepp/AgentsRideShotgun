@@ -13,10 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The usage tracker already reads this owner's plan limits from Anthropic's OAuth usage
-         endpoint, on a polling budget, for the dashboard block and the Meter app. A subscription
-         workspace shows the same percentages rather than a second reader of the same allowance.
-         The Meter app references it the same way. -->
+    <!-- Where Deskweave keeps its data (%LOCALAPPDATA%\Deskweave and %APPDATA%\Deskweave). -->
     <ProjectReference Include="..\dependencies\Deskweave.ProductContext\Deskweave.ProductContext.csproj" />
     <ProjectReference Include="Bridge\Deskweave.WorkspaceBridge.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
