@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Interop;
@@ -18,8 +19,9 @@ namespace Deskweave.AgentWorkspaces;
 /// The raw calls hold the clipboard for microseconds and work from every desktop at once.
 ///
 /// The owner's clipboard is never left holding an agent's copy, and two agents never see each
-/// other's. Known limit: two workspaces copying within the same settle window can be attributed in
-/// the wrong order, because Windows reports the change after the fact.
+/// other's. Known limits: two workspaces copying within the same settle window can be attributed in
+/// the wrong order, because Windows reports the change after the fact; and a copy made with no
+/// window to name its desktop is treated as the owner's (see Settled).
 /// </summary>
 public sealed class ClipboardBroker : IDisposable
 {
@@ -54,7 +56,6 @@ public sealed class ClipboardBroker : IDisposable
     Dictionary<uint, byte[]>? _owner;
     DispatcherTimer? _settle;
     string? _changedOn;
-    string? _lastTouched;
     // Every swap we make raises a clipboard change of our own. Counting them is what stops the
     // listener filing our own hand-back as if the owner had copied something.
     int _selfChanges;
@@ -121,7 +122,10 @@ public sealed class ClipboardBroker : IDisposable
         {
             // A pending hand-back would fire in the middle of the paste and swap the wrong text in.
             if (_settle?.IsEnabled == true) Settled();
-            Restore(_saved.GetValueOrDefault(desktop));
+            // A swap that did not happen leaves the owner's clipboard in place, and pasting that into
+            // an agent's window is exactly what the broker exists to prevent.
+            if (!Restore(_saved.GetValueOrDefault(desktop)))
+                throw new InvalidOperationException("The workspace clipboard could not be loaded, so nothing was pasted.");
         });
         try
         {
@@ -129,16 +133,20 @@ public sealed class ClipboardBroker : IDisposable
         }
         finally
         {
-            On(() => Restore(_owner));
+            On(HandBack);
         }
     }
 
-    /// <summary>
-    /// Notes that the host just did something to this workspace. It is the fallback attribution: an
-    /// application that copies with OpenClipboard(NULL) leaves no window behind to ask, and without
-    /// this its text would be filed as the owner's own copy.
-    /// </summary>
-    public void Touch(string desktop) => _lastTouched = desktop;
+    /// <summary>Puts the owner's clipboard back, retrying, and says so when it could not.</summary>
+    void HandBack()
+    {
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            if (Restore(_owner)) return;
+            Thread.Sleep(100);
+        }
+        Trace.WriteLine("Deskweave could not hand the clipboard back to the owner.");
+    }
 
     /// <summary>What this workspace last copied, as text. For proofs and for the boss chat.</summary>
     public string? TextOf(string desktop)
@@ -181,18 +189,15 @@ public sealed class ClipboardBroker : IDisposable
     {
         _settle?.Stop();
         // Nobody owns the clipboard when the copier opened it with a null window, which leaves
-        // nothing to ask. The applications the owner copies from - his browser, his editor, the
-        // shell - all name a window, so an anonymous copy while workspaces are running is almost
-        // always one of them. Guessing towards the workspace is also the safe way round: the cost
-        // is an agent losing a copy, not the owner finding an agent's text in his clipboard.
-        if (_changedOn is null && _workspaces.Count > 0)
-            _changedOn = _workspaces.Count == 1 ? _workspaces.First() : _lastTouched;
-
+        // nothing to ask. Such a copy stays the owner's. Guessing towards a workspace would take
+        // the owner's copy out of his clipboard and hand it to an agent; guessing this way the
+        // cost is an agent app that copies anonymously landing its text in the owner's clipboard,
+        // which he can see and overwrite. Leaking his data to an agent is the worse failure.
         if (_changedOn is not null && _workspaces.Contains(_changedOn))
         {
             // An agent copied something. It belongs to that workspace and to nobody else.
             _saved[_changedOn] = Snapshot();
-            Restore(_owner);
+            HandBack();
         }
         else
         {
@@ -247,26 +252,31 @@ public sealed class ClipboardBroker : IDisposable
         }
     }
 
-    void Restore(Dictionary<uint, byte[]>? blob)
+    /// <summary>
+    /// Replaces the clipboard with this copy. False when the clipboard still holds what it held
+    /// before, because it could not be opened or emptied.
+    /// </summary>
+    bool Restore(Dictionary<uint, byte[]>? blob)
     {
-        if (!Open()) return;
+        if (!Open()) return false;
         try
         {
+            if (!Native.EmptyClipboard()) return false;
             _selfChanges++;
             Swaps++;
-            Native.EmptyClipboard();
-            if (blob is null) return;
+            if (blob is null) return true;
             foreach (KeyValuePair<uint, byte[]> format in blob)
             {
                 nint block = Native.GlobalAlloc(Native.GlobalMoveable, (nuint)format.Value.Length);
                 if (block == 0) continue;
                 nint memory = Native.GlobalLock(block);
-                if (memory == 0) continue;
+                if (memory == 0) { Native.GlobalFree(block); continue; }
                 Marshal.Copy(format.Value, 0, memory, format.Value.Length);
                 Native.GlobalUnlock(block);
                 // Windows owns the block once SetClipboardData accepts it, and frees it itself.
-                Native.SetClipboardData(format.Key, block);
+                if (Native.SetClipboardData(format.Key, block) == 0) Native.GlobalFree(block);
             }
+            return true;
         }
         finally
         {

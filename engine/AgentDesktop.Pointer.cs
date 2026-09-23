@@ -33,7 +33,6 @@ public sealed partial class AgentDesktop
     {
         EndGesture();
         if (Revoked(lease)) return false;
-        ClipboardBroker.Shared.Touch(Name);
         nint target = Native.WindowFromPoint(new Native.Point { X = x, Y = y });
         if (!OwnsWindow(target)) return false;
         nint screen = Packed(x, y);
@@ -166,7 +165,6 @@ public sealed partial class AgentDesktop
         EndGesture();
         if (Revoked(lease) || grip == FrameGrip.None || !OwnsWindow(window)
             || !Native.GetWindowRect(window, out Native.Rect rect)) return false;
-        ClipboardBroker.Shared.Touch(Name);
         _gestureWindow = _gestureRoot = window;
         _gestureArea = Native.HtBorder;
         _grip = grip;

@@ -31,7 +31,7 @@ internal static class FocusProbe
         var log = new List<string>();
         void Note(string step) { log.Add($"{DateTime.Now:HH:mm:ss.fff} {step}: {Foreground()}"); }
         Note("start");
-        ClipboardBroker.Shared.Touch("none");
+        _ = ClipboardBroker.Shared;
         Thread.Sleep(700); Note("after broker created");
         using (AgentDesktop desktop = AgentDesktop.Create("focus-" + Guid.NewGuid().ToString("N")[..8]))
         {

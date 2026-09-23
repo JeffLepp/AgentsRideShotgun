@@ -496,6 +496,9 @@ static partial class Native
     public static extern nint GlobalAlloc(uint flags, nuint bytes);
 
     [DllImport("kernel32.dll")]
+    public static extern nint GlobalFree(nint memory);
+
+    [DllImport("kernel32.dll")]
     public static extern nint GlobalLock(nint memory);
 
     [DllImport("kernel32.dll")]

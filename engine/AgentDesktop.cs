@@ -327,7 +327,6 @@ public sealed partial class AgentDesktop : IDisposable
                 processHandleRetained = true;
             }
 
-            ClipboardBroker.Shared.Touch(Name);
             StartMuting();
             // The program owns the switch from here: it goes back once this one has drawn, not
             // when this method returns, because nothing has put up a window yet.
@@ -797,7 +796,6 @@ public sealed partial class AgentDesktop : IDisposable
     public bool Click(int x, int y, bool rightButton = false, long lease = 0) => Run(() =>
     {
         if (Revoked(lease)) return false;
-        ClipboardBroker.Shared.Touch(Name);
         nint target = Native.WindowFromPoint(new Native.Point { X = x, Y = y });
         if (!OwnsWindow(target)) return false;
         nint screen = (y & 0xFFFF) << 16 | (x & 0xFFFF);
@@ -959,7 +957,6 @@ public sealed partial class AgentDesktop : IDisposable
     public bool Scroll(int x, int y, int delta, long lease = 0) => Run(() =>
     {
         if (Revoked(lease)) return false;
-        ClipboardBroker.Shared.Touch(Name);
         nint target = Native.WindowFromPoint(new Native.Point { X = x, Y = y });
         if (!OwnsWindow(target) || Math.Abs((long)delta) > 10000) return false;
         // Bounded wheel messages, without cosmetic pauses between notches.
@@ -997,7 +994,6 @@ public sealed partial class AgentDesktop : IDisposable
     public TypedText Type(string text, nint window = 0, long lease = 0) => Run(() =>
     {
         if (Revoked(lease)) return TypedText.Discarded;
-        ClipboardBroker.Shared.Touch(Name);
         nint target = Focused(window);
         if (target == 0) return new TypedText(false, "", "no window on this desktop had the keyboard");
 
@@ -1110,7 +1106,6 @@ public sealed partial class AgentDesktop : IDisposable
     public bool SendKey(int virtualKey, nint window = 0, long lease = 0) => Run(() =>
     {
         if (Revoked(lease)) return false;
-        ClipboardBroker.Shared.Touch(Name);
         nint target = Focused(window);
         if (target == 0) return false;
         string kind = Text(target, Native.GetClassNameW);
@@ -1148,7 +1143,6 @@ public sealed partial class AgentDesktop : IDisposable
 
     bool Deliver(nint window, uint message)
     {
-        ClipboardBroker.Shared.Touch(Name);
         nint target = Focused(window);
         if (target == 0) return false;
         Native.SendMessageTimeoutW(target, message, 0, 0, Native.SmtoAbortIfHung, 2000, out _);

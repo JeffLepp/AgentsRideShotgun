@@ -92,7 +92,6 @@ public sealed partial class AgentDesktop
         long lease = 0) => Run(() =>
     {
         if (Revoked(lease) || !OwnsWindow(window) || Native.IsHungAppWindow(window)) return false;
-        ClipboardBroker.Shared.Touch(Name);
         switch (what)
         {
             case WindowArrangement.Move:
