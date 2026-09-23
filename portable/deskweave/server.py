@@ -90,7 +90,7 @@ class Broker:
                 "activeAction": self.active_action, "metricsAgeSeconds": round(time.monotonic() - self.last_sample, 2),
                 **container_memory()}
 
-    async def viewers_close(self):
+    async def viewers_close(self, app=None):
         await asyncio.gather(*(ws.close(code=1000, message=b"Control changed") for ws in list(self.viewers)))
 
     async def input_enabled(self, enabled):
@@ -146,6 +146,8 @@ def make_app(broker: Broker, web_root: Path | None = None):
         return response
 
     app = web.Application(middlewares=[guard], client_max_size=64 * 1024)
+    # An open viewer socket would otherwise hold the runner's graceful shutdown for its full timeout.
+    app.on_shutdown.append(broker.viewers_close)
     app.on_cleanup.append(broker.cleanup)
 
     async def payload(request):
@@ -178,6 +180,7 @@ def make_app(broker: Broker, web_root: Path | None = None):
                 raise Refused("This broker is managed by its embedding host")
             broker.control.set_enabled(False)
             broker.control.owner = False
+            await broker.viewers_close()
             asyncio.get_running_loop().call_later(0.1, broker.shutdown)
             return web.json_response({"shuttingDown": True})
         if action in ("takeover", "release", "stop", "agent"):
@@ -206,10 +209,13 @@ def make_app(broker: Broker, web_root: Path | None = None):
             elif action in ("launch", "navigate", "input", "history"):
                 if broker.control.controller != "owner":
                     raise Refused("Take control before sending input or opening an application")
-                if action == "launch":
-                    await broker.call("launch", data.get("kind"))
-                elif action == "navigate":
-                    await broker.call("navigate", data.get("url"))
+                if action in ("launch", "navigate"):
+                    # Status serves the cached sample while a long owner action holds the backend.
+                    broker.active_action = "workspace_" + action
+                    try:
+                        await broker.call(action, data.get("kind" if action == "launch" else "url"))
+                    finally:
+                        broker.active_action = None
                 elif action == "history":
                     await broker.call("history", data.get("direction"))
                 else:

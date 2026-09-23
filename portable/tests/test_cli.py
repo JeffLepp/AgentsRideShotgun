@@ -1,5 +1,6 @@
 """Private launcher ownership, malformed-state handling, and source-kit boundaries."""
 import argparse
+import asyncio
 from contextlib import redirect_stderr, redirect_stdout
 import hashlib
 import importlib.util
@@ -127,6 +128,50 @@ class LauncherCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(connection.exists())
             replacement = cli.InstanceLock(root)
             replacement.close()
+
+
+    async def test_agent_bridge_file_has_no_owner_token_and_workspace_tree_excludes_owner_file(self):
+        from deskweave.mcp import http_json
+        with tempfile.TemporaryDirectory(prefix="DeskweaveBridgeTest-") as folder:
+            root = Path(folder).resolve()
+            (root / "files").mkdir()
+            (root / "files/note.txt").write_text("kept", encoding="utf-8")
+            args = argparse.Namespace(data_dir=root, host_platform="linux", backend="browser", container_bind=False,
+                                      port=0, open=False, width=1024, height=640, fps=12, browser_path=None, scale=1)
+            created = []
+            real = cli.workspace
+
+            def capture(values):
+                created.append(real(values))
+                return Mock()
+
+            owner_file, bridge_file = root / "connection.json", root / "agent-connection.json"
+            with patch.object(cli, "workspace", side_effect=capture), redirect_stdout(io.StringIO()):
+                server = asyncio.create_task(cli.serve(args))
+                try:
+                    for _ in range(200):
+                        if owner_file.exists() and bridge_file.exists():
+                            break
+                        await asyncio.sleep(.025)
+                    owner = cli.load_connection(owner_file)
+                    bridge = json.loads(bridge_file.read_text(encoding="utf-8"))
+                    self.assertNotIn("ownerToken", bridge)
+                    self.assertNotIn(owner["ownerToken"], bridge_file.read_text(encoding="utf-8"))
+                    self.assertEqual((owner["url"], owner["agentToken"]), (bridge["url"], bridge["agentToken"]))
+                    self.assertNotIn("ownerToken", cli.load_connection(bridge_file, owner=False))
+                    with self.assertRaises(ValueError):
+                        cli.load_connection(bridge_file)
+                    workspace_root = created[0].root
+                    self.assertEqual(root / "workspace", workspace_root)
+                    self.assertFalse(owner_file.is_relative_to(workspace_root))
+                    self.assertEqual("kept", (workspace_root / "files/note.txt").read_text(encoding="utf-8"))
+                    await asyncio.to_thread(http_json, owner["url"] + "/api/shutdown", owner["ownerToken"], {})
+                    await asyncio.wait_for(server, 10)
+                finally:
+                    server.cancel()
+                    await asyncio.gather(server, return_exceptions=True)
+            self.assertFalse(owner_file.exists())
+            self.assertFalse(bridge_file.exists())
 
 
 class SourceKitTests(unittest.TestCase):

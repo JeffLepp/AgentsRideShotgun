@@ -89,6 +89,7 @@ def main():
         if result.returncode == 0:
             try:
                 connection = json.loads(result.stdout)
+                connection["agentToken"]
                 # A stale file from an unclean stop must not authenticate a new viewer.
                 request = Request(local_url + "/api/status", headers={"Authorization": "Bearer " + connection["ownerToken"]})
                 with opener.open(request, timeout=2) as response:
@@ -100,7 +101,7 @@ def main():
             raise RuntimeError("Broker did not become ready; inspect this container's logs")
         time.sleep(0.25)
     connection["url"] = local_url
-    # This file is for a host-side MCP bridge; the volume remains container-private.
+    # This file is for a host-side MCP bridge, which runs as the agent: no owner token.
     state_dir = ROOT / ".state"
     state_dir.mkdir(exist_ok=True, mode=0o700)
     if os.name != "nt":
@@ -108,7 +109,7 @@ def main():
     target = state_dir / "container-connection.json"
     fd = os.open(target, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as out:
-        json.dump(connection, out, indent=2)
+        json.dump({"url": local_url, "agentToken": connection["agentToken"]}, out, indent=2)
     if os.name != "nt":
         target.chmod(0o600)
     if not args.no_open:

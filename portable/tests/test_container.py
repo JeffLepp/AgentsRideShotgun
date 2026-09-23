@@ -119,7 +119,8 @@ class ContainerOwnershipTests(unittest.TestCase):
         self.assertEqual("http://127.0.0.1:49123/api/status", request.full_url)
         saved = json.loads((self.root / ".state/container-connection.json").read_text())
         self.assertEqual("http://127.0.0.1:49123", saved["url"])
-        self.assertEqual(connection["ownerToken"], saved["ownerToken"])
+        # The host bridge runs as the agent, so it never receives the owner token.
+        self.assertEqual({"url": "http://127.0.0.1:49123", "agentToken": connection["agentToken"]}, saved)
         open_browser.assert_not_called()
 
 

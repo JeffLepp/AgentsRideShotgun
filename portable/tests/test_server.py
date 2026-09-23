@@ -8,7 +8,7 @@ import threading
 import time
 import unittest
 
-from aiohttp import CookieJar
+from aiohttp import ClientSession, CookieJar, WSMsgType, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from deskweave.server import Broker, make_app
@@ -397,6 +397,33 @@ class ServerBoundaryTests(unittest.IsolatedAsyncioTestCase):
             self.workspace.finish.set()
             await accepted
 
+    async def test_status_serves_cached_sample_while_owner_navigation_holds_backend(self):
+        await self.post("start")
+        await self.post("takeover")
+        await self.client.get("/api/status", headers=self.owner_headers)
+        self.workspace.refuse_status_during_action = True
+
+        def slow_navigate(url):
+            self.workspace.entered.set()
+            if not self.workspace.finish.wait(8):
+                raise RuntimeError("fixture navigation was not released")
+            return {"url": url}
+
+        self.workspace.navigate = slow_navigate
+        navigation = asyncio.create_task(self.post("navigate", {"url": "https://example.test"}))
+        try:
+            await self.until(self.workspace.entered.is_set)
+            response = await asyncio.wait_for(self.client.get("/api/status", headers=self.owner_headers), 1)
+            self.assertEqual(response.status, 200)
+            state = await response.json()
+            self.assertEqual(state["activeAction"], "workspace_navigate")
+            self.assertEqual(state["controller"], "owner")
+            self.assertFalse(navigation.done())
+        finally:
+            self.workspace.finish.set()
+            await navigation
+        self.assertIsNone(self.broker.active_action)
+
     async def test_cancelled_operation_keeps_lock_until_its_thread_finishes(self):
         async def operation():
             async with self.broker.lock:
@@ -427,6 +454,62 @@ class ServerBoundaryTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.workspace.finish.set()
             await asyncio.gather(*(item for item in (action, pending) if item), return_exceptions=True)
+
+
+class DesktopWorkspace(OwnedWorkspace):
+    """A Linux-desktop shape whose RFB server accepts the relay and never speaks."""
+    display = 1
+    rfb_host = "127.0.0.1"
+    rfb_port = 0
+
+    def status(self):
+        return {**super().status(), "backend": "desktop"}
+
+
+class ViewerShutdownTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.rfb_clients = []
+        self.rfb = await asyncio.start_server(lambda reader, writer: self.rfb_clients.append(writer), "127.0.0.1", 0)
+        self.workspace = DesktopWorkspace()
+        self.workspace.rfb_port = self.rfb.sockets[0].getsockname()[1]
+        self.stopped = asyncio.Event()
+        self.broker = Broker(self.workspace, owner_token="owner-fixture-token", agent_token="agent-fixture-token",
+                             shutdown=self.stopped.set)
+        # The launcher's own timeout: an open viewer must not hold shutdown for it.
+        self.runner = web.AppRunner(make_app(self.broker), access_log=None, shutdown_timeout=65)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, "127.0.0.1", 0)
+        await site.start()
+        self.base = "http://127.0.0.1:%d" % site._server.sockets[0].getsockname()[1]
+        self.headers = {"Authorization": "Bearer owner-fixture-token", "X-Deskweave-Request": "1"}
+        self.session = ClientSession()
+        async with self.session.post(self.base + "/api/start", json={}, headers=self.headers) as response:
+            self.assertEqual(response.status, 200)
+        self.viewer = await self.session.ws_connect(self.base + "/rfb", headers=self.headers, protocols=("binary",))
+        await asyncio.sleep(.05)
+        self.assertEqual(len(self.broker.viewers), 1)
+
+    async def asyncTearDown(self):
+        await self.viewer.close()
+        await self.session.close()
+        await self.runner.cleanup()
+        self.rfb.close()
+
+    async def test_cleanup_closes_open_viewer_without_waiting_for_shutdown_timeout(self):
+        started = time.monotonic()
+        await asyncio.wait_for(self.runner.cleanup(), 10)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual(self.broker.viewers, set())
+        self.assertIn(("stop",), self.workspace.calls)
+        message = await asyncio.wait_for(self.viewer.receive(), 2)
+        self.assertIn(message.type, (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.CLOSING))
+
+    async def test_shutdown_action_closes_viewers_before_the_broker_stops(self):
+        async with self.session.post(self.base + "/api/shutdown", json={}, headers=self.headers) as response:
+            self.assertEqual(response.status, 200)
+        message = await asyncio.wait_for(self.viewer.receive(), 5)
+        self.assertIn(message.type, (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.CLOSING))
+        await asyncio.wait_for(self.stopped.wait(), 2)
 
 
 if __name__ == "__main__":

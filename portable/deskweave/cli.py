@@ -30,14 +30,27 @@ def backend_name(value):
 
 
 def workspace(args):
+    # The workspace is a subfolder so the owner connection file is never inside its tree.
+    root = args.data_dir / "workspace"
     if backend_name(args.backend) == "desktop":
         from .native import NativeWorkspace
         if sys.platform != "linux":
             raise ValueError("Desktop mode needs Linux. Use browser mode here, or run the Linux container.")
-        return NativeWorkspace(args.data_dir, args.width, args.height, args.fps)
+        return NativeWorkspace(root, args.width, args.height, args.fps)
     from .browser import BrowserWorkspace
-    return BrowserWorkspace(args.data_dir, args.width, args.height, args.fps,
+    return BrowserWorkspace(root, args.width, args.height, args.fps,
                             browser_path=args.browser_path, scale=args.scale)
+
+
+def move_legacy_workspace(data_dir):
+    """0.1.0 used the data folder itself as the workspace; carry its files and profile over once."""
+    root = data_dir / "workspace"
+    if root.exists() or not (data_dir / "files").is_dir():
+        return
+    root.mkdir(mode=0o700)
+    for name in ("files", "home", "browser-profile"):
+        if (data_dir / name).exists() and not (data_dir / name).is_symlink():
+            (data_dir / name).rename(root / name)
 
 
 class InstanceLock:
@@ -82,8 +95,10 @@ async def serve(args):
     args.data_dir = args.data_dir.expanduser().resolve()
     instance = InstanceLock(args.data_dir)
     connection = args.data_dir / "connection.json"
+    bridge = args.data_dir / "agent-connection.json"
     runner = None
     try:
+        move_legacy_workspace(args.data_dir)
         stopped = asyncio.Event()
         broker = Broker(workspace(args), host_platform=args.host_platform, shutdown=stopped.set)
         runner = web.AppRunner(make_app(broker), access_log=None, shutdown_timeout=65)
@@ -95,10 +110,11 @@ async def serve(args):
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
         url = f"http://127.0.0.1:{port}"
-        private_json(connection, {"version": __version__, "url": url, "ownerToken": broker.owner_token,
-                                   "agentToken": broker.agent_token, "pid": os.getpid(),
-                                   "backend": backend_name(args.backend),
-                                   "commandsSupported": backend_name(args.backend) == "desktop"})
+        shared = {"version": __version__, "url": url, "agentToken": broker.agent_token, "pid": os.getpid(),
+                  "backend": backend_name(args.backend), "commandsSupported": backend_name(args.backend) == "desktop"}
+        # The MCP bridge runs as the agent, so its file must not carry the owner token.
+        private_json(bridge, shared)
+        private_json(connection, {**shared, "ownerToken": broker.owner_token})
         print(f"Deskweave {__version__} · {backend_name(args.backend)} workspace", flush=True)
         print(f"Local viewer: {url}  (use 'python -m deskweave open --connection ...' to authenticate)", flush=True)
         print(f"Private connection file: {connection}", flush=True)
@@ -123,11 +139,12 @@ async def serve(args):
         finally:
             try:
                 connection.unlink(missing_ok=True)
+                bridge.unlink(missing_ok=True)
             finally:
                 instance.close()
 
 
-def load_connection(path):
+def load_connection(path, owner=True):
     from urllib.parse import urlsplit
     import re
     try:
@@ -149,8 +166,10 @@ def load_connection(path):
         raise ValueError("Connection must name a local HTTP broker and port. Restart the Deskweave launcher.")
     data["url"] = url.rstrip("/")
     if any(not isinstance(data.get(key), str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,512}", data[key])
-           for key in ("ownerToken", "agentToken")):
+           for key in (("ownerToken", "agentToken") if owner else ("agentToken",))):
         raise ValueError("Connection authentication is incomplete. Restart the Deskweave launcher.")
+    if not owner:
+        data.pop("ownerToken", None)
     return data
 
 
@@ -175,7 +194,8 @@ def build_parser():
             p.add_argument("--host-platform", default=None)
     for name in ("open", "mcp", "sample", "shutdown"):
         p = commands.add_parser(name)
-        p.add_argument("--connection", type=Path, default=data_default() / "connection.json")
+        p.add_argument("--connection", type=Path,
+                       default=data_default() / ("agent-connection.json" if name == "mcp" else "connection.json"))
         if name == "sample":
             p.add_argument("--seconds", type=int, default=30)
             p.add_argument("--output", type=Path, required=True)
@@ -219,7 +239,7 @@ def main(argv=None):
             webbrowser.open(f"{data['url']}/#token={data['ownerToken']}")
         elif args.command == "mcp":
             from .mcp import stdio
-            stdio(load_connection(args.connection))
+            stdio(load_connection(args.connection, owner=False))
         elif args.command == "shutdown":
             from .mcp import http_json
             data = load_connection(args.connection)

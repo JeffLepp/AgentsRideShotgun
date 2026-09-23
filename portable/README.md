@@ -141,14 +141,17 @@ implemented.
 
 ### Connect an MCP agent
 
-The launcher writes a private `connection.json` and prints its location, without printing
-credentials. Default locations:
+The launcher writes two private files in its data folder without printing credentials:
+`connection.json` holds the owner token for `open`, `shutdown` and `sample`, and
+`agent-connection.json` holds only what the MCP bridge needs. Give agents the second one;
+the bridge runs as the agent, so it never sees the owner token. The workspace itself lives
+in the `workspace/` subfolder, outside the folder that holds the owner file. Default data folders:
 
-| Host | Connection file |
+| Host | Data folder |
 |---|---|
-| Linux | `~/.local/share/deskweave-portable/connection.json` (respects `XDG_DATA_HOME`) |
-| Mac | `~/Library/Application Support/Deskweave Portable/connection.json` |
-| Windows | `%LOCALAPPDATA%/DeskweavePortable/connection.json` |
+| Linux | `~/.local/share/deskweave-portable/` (respects `XDG_DATA_HOME`) |
+| Mac | `~/Library/Application Support/Deskweave Portable/` |
+| Windows | `%LOCALAPPDATA%/DeskweavePortable/` |
 
 Configure the agent's stdio MCP server with an absolute interpreter path, this folder as
 working directory, and these arguments:
@@ -156,7 +159,7 @@ working directory, and these arguments:
 ```json
 {
   "command": "/absolute/path/Deskweave-Portable/.venv/bin/python",
-  "args": ["-m", "deskweave", "mcp", "--connection", "/absolute/path/to/connection.json"],
+  "args": ["-m", "deskweave", "mcp", "--connection", "/absolute/path/to/agent-connection.json"],
   "cwd": "/absolute/path/Deskweave-Portable"
 }
 ```
@@ -184,7 +187,7 @@ Use `--runtime podman` if needed. The helper builds a Linux image and owns only 
 `deskweave-portable-pilot` container and `deskweave-portable-data` volume. It publishes one
 random port on `127.0.0.1`, caps container memory at 1024 MiB, and mounts no host home,
 desktop socket, or browser profile. The private host MCP connection lives in
-`.state/container-connection.json`. The volume persists after Stop. Docker/Podman VM memory
+`.state/container-connection.json` and holds only the URL and agent token. The volume persists after Stop. Docker/Podman VM memory
 and the viewer are additional costs beyond the container limit. Chromium retains its
 normal sandbox; hosts that block it must report the failure, not disable it to get a pass.
 The helper uses a pinned official Playwright seccomp profile that allows Chromium to create
