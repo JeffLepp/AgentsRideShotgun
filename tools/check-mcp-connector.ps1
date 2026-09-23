@@ -33,10 +33,19 @@ try {
     $tools = ReadReply 2
     $names = @($tools.result.tools | ForEach-Object { $_.name })
     foreach ($name in @('run','browse','computer')) { if ($name -notin $names) { throw "Missing MCP tool: $name" } }
+    $process.StandardInput.WriteLine('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{}}}')
+    $process.StandardInput.WriteLine('{"jsonrpc":"2.0","id":4,"method":"ping"}')
+    $process.StandardInput.Flush()
+    $status = ReadReply 3
+    if ($null -eq $status.result -or $status.result.isError -eq $true -or @($status.result.content).Count -eq 0) {
+        throw 'MCP status tool did not return usable content.'
+    }
+    $ping = ReadReply 4
+    if ($null -eq $ping.result) { throw 'MCP ping failed.' }
     $process.StandardInput.Close()
     if (-not $process.WaitForExit(10000)) { throw 'MCP connector did not exit after stdin closed.' }
     if ($process.ExitCode -ne 0) { throw "MCP connector exited $($process.ExitCode): $($process.StandardError.ReadToEnd())" }
-    [pscustomobject]@{ Initialize='passed'; ToolsList='passed'; ToolCount=$names.Count; ExitCode=$process.ExitCode; Connector=$exe } | ConvertTo-Json -Compress
+    [pscustomobject]@{ Initialize='passed'; ToolsList='passed'; StatusTool='passed'; Ping='passed'; ToolCount=$names.Count; ExitCode=$process.ExitCode; Connector=$exe } | ConvertTo-Json -Compress
 }
 finally {
     if (-not $process.HasExited) { $process.Kill() }

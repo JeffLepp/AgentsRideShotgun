@@ -56,9 +56,11 @@ if ($Sign) {
     }
     [IO.File]::WriteAllText($signMetadata,($signConfig | ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
     try {
+        # SignTool prints the private signing-account name; keep its full log in ignored artifacts.
+        $signLog = Join-Path $work 'signing.log'
         & $SignTool sign /fd SHA256 /tr 'http://timestamp.acs.microsoft.com' /td SHA256 `
-            /dlib $SigningDlib /dmdf $signMetadata $exe
-        if ($LASTEXITCODE -ne 0) { throw "Microsoft SignTool failed ($LASTEXITCODE)." }
+            /dlib $SigningDlib /dmdf $signMetadata $exe *> $signLog
+        if ($LASTEXITCODE -ne 0) { throw "Microsoft SignTool failed ($LASTEXITCODE). Inspect the private signing.log in the build work folder." }
     }
     finally { Remove-Item -LiteralPath $signMetadata -ErrorAction SilentlyContinue }
     if ((Get-AuthenticodeSignature -LiteralPath $exe).Status -ne 'Valid') { throw 'MCP connector signature is not valid.' }
@@ -82,7 +84,7 @@ $manifest = [ordered]@{
     server = [ordered]@{
         type = 'binary'
         entry_point = 'server/Deskweave.McpConnector.exe'
-        mcp_config = [ordered]@{ command = 'server/Deskweave.McpConnector.exe'; args = @() }
+        mcp_config = [ordered]@{ command = '${__dirname}/server/Deskweave.McpConnector.exe'; args = @() }
     }
 }
 $manifestPath = Join-Path $stage 'manifest.json'
