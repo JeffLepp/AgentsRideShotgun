@@ -48,8 +48,9 @@ internal sealed class WorkspacePeekDropHook : IDisposable
     internal bool Installed => _hook != 0;
 
     /// <param name="target">The corner rect to watch for, in screen pixels, asked fresh each time.</param>
-    /// <param name="summon">Called once, on the hook's own thread, when a drag from the desktop or
-    /// Explorer reaches the target. The caller hops to its own thread before touching a window.</param>
+    /// <param name="summon">Called once, inside the hook callback on the installing thread, when a drag
+    /// from the desktop or Explorer reaches the target. It must only post the real work (BeginInvoke)
+    /// and return: a CheckAccess hop never fires here, since the callback already runs on that thread.</param>
     internal WorkspacePeekDropHook(Func<Rect> target, Action summon)
     {
         _proc = (code, wparam, lparam) =>

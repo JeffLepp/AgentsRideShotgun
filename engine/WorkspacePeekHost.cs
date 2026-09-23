@@ -220,9 +220,19 @@ internal static class WorkspacePeekHost
     {
         if (_owner is not { } owner) return;
         if (!owner.CheckAccess()) { owner.BeginInvoke(() => Driven(id, who)); return; }
-        if (who != Driver.Agent || !_followed.ContainsKey(id)) return;
-        _runStarted[id] = DateTimeOffset.Now;
-        if (_resultForId == id) _resultForId = null;
+        if (!_followed.TryGetValue(id, out Follow? follow)) return;
+        if (who == Driver.Agent)
+        {
+            _runStarted[id] = DateTimeOffset.Now;
+            if (_resultForId == id) _resultForId = null;
+        }
+        // Paused, an agent that takes a workspace waits like the rest. Here on the UI thread, with
+        // the same state TogglePauseAll reads and writes, not on the agent's thread that raised it.
+        if (_pausedAll && who != Driver.Owner && follow.Runtime.Plane is { } plane)
+        {
+            _pausedByUs.Add(id);
+            plane.OwnerTakes();
+        }
     }
 
     static void StirFrom(string id)
@@ -261,7 +271,8 @@ internal static class WorkspacePeekHost
         WorkspaceRuntime? front = all.FirstOrDefault(r => r.Id == _chosenId)
             ?? ordered.FirstOrDefault(Busy) ?? ordered.FirstOrDefault();
         // Never replace the screen under the owner's pointer or mid-drag when another agent acts.
-        if (_window is { Hovered: true } or { Manipulating: true }
+        // The owner's own pick from the tabs is not another agent acting, so it always wins.
+        if (front?.Id != _chosenId && _window is { Hovered: true } or { Manipulating: true }
             && ordered.FirstOrDefault(r => r.Id == _frontId) is { } held) front = held;
         return (front, all);
     }
@@ -670,11 +681,15 @@ internal static class WorkspacePeekHost
 
     static void StartDropHookIfIdle()
     {
-        if (_dropHook is not null || !_started) return;
+        // The hub hides the corner, so a drag toward it would summon nothing: no global hook then.
+        if (ModuleEntry.HubShowing) { StopDropHook(); return; }
+        if (_dropHook is not null || !_started || _owner is not { } owner) return;
         if (_settings.CornerShow == CornerShow.Off) return;
         if (_window is { Watching: true }) return;
         if (Pick().Front is null) return;
-        _dropHook = new WorkspacePeekDropHook(TargetScreenRect, Summon);
+        // The hook runs on this thread inside the mouse's own delivery, which Windows cuts off if it
+        // takes long. Building and showing the window happens after it returns, never inside it.
+        _dropHook = new WorkspacePeekDropHook(TargetScreenRect, () => owner.BeginInvoke(Summon));
     }
 
     static void StopDropHook()
@@ -824,11 +839,6 @@ internal static class WorkspacePeekHost
         void Drove(Driver who)
         {
             driven(who);
-            if (_pausedAll && who != Driver.Owner && Runtime.Plane is { } plane)
-            {
-                _pausedByUs.Add(Runtime.Id);
-                plane.OwnerTakes();
-            }
             stir();
         }
         void Ended() => stir();

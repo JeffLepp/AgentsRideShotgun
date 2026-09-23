@@ -84,6 +84,16 @@ static class CornerManyScenes
         Program.Check(Marked(Tabs(window).Single(tab => (string)tab.Tag == wanted)),
             "The mark moves with it, so which workspace is on screen is never in doubt");
 
+        // With the pointer on the card: the hover hold stops other agents from swapping the screen,
+        // never the owner's own click on a tab.
+        window.ForceHoverForTests(true);
+        Button third = Tabs(window).First(tab => (string)tab.Tag != wanted && (string)tab.Tag != front);
+        string picked = (string)third.Tag;
+        third.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Task.Delay(120);
+        Program.Check(FrontId() == picked, "Clicking a tab while the pointer is on the card brings that workspace to the card");
+        window.ForceHoverForTests(false);
+
         // The keyboard, on the real window: the same next/previous a row of tabs has anywhere else.
         int at = Array.IndexOf(order, FrontId());
         RaiseKey(window, Key.Right);
