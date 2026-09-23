@@ -167,7 +167,7 @@ static partial class CornerScenes
         await DockTransitionChecks();
         await DockPolicyChecks();
         await IntegrationChecks();
-        // Wave 1's fix round (design/WAVE1.md item 14): these drive the real WorkspacePeekHost and a
+        // These drive the real WorkspacePeekHost and a
         // real WorkspacePeekWindow through internal seams - reflection into the host's own private
         // methods, and a real second global-hotkey registration to force a real conflict - rather
         // than only the pure WorkspacePeekPolicy.Wanted function WantedChecks above already covers.

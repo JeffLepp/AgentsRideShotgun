@@ -256,8 +256,8 @@ public partial class SettingsView
     /// the question with a real Yes/Cancel, never a modal dialog the gate cannot see past. The prompt
     /// is read lazily, at the moment of asking, so a Storage row can name the size it holds right
     /// then rather than the one it had when the page was built. <paramref name="enabled"/> and
-    /// <paramref name="disabledTooltip"/> are Scratch's own Clear disabled while its computer runs
-    /// (WAVE1B.md C.5); every other caller leaves them null, always enabled.</summary>
+    /// <paramref name="disabledTooltip"/> are Scratch's own Clear disabled while its computer runs;
+    /// every other caller leaves them null, always enabled.</summary>
     static ContentControl Confirm(string label, Func<string> prompt, Action action, bool danger,
         string style = "DeskButton", Func<bool>? enabled = null, string? disabledTooltip = null)
     {

@@ -5,7 +5,7 @@ using System.Text.Json;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Prompt 2 (design/FIX-PROMPTS-2026-09-20.md), the engine half: a running workspace nobody is
+/// The engine half of sleeping idle workspaces: a running workspace nobody is
 /// using must not stay awake forever, however it got stuck - an unanswered desktop request, a
 /// lease nobody disposed, or a clock that was never given a thread that pumps it.
 /// </summary>

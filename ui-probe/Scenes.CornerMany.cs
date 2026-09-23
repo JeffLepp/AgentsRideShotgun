@@ -7,7 +7,7 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave.UiProbe;
 
 /// <summary>
-/// The corner window with more than one workspace (fix prompt 7). Three real workspaces, the real
+/// The corner window with more than one workspace. Three real workspaces, the real
 /// host and the real window: every one of them has a tab, the one on the card is marked, the mouse
 /// and the keyboard both move between them, the tabs stay where they were, and nothing is drawn off
 /// the monitor at any corner the card can be placed in.

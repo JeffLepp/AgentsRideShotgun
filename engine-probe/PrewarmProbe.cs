@@ -3,7 +3,7 @@ using System.IO;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Prompt 5 (design/FIX-PROMPTS-2026-09-20.md): the warmed-up browser must not cover the window the
+/// The warmed-up browser must not cover the window the
 /// agent just opened, must not be started at all for a workspace that never browses, and must not
 /// leave a new blank tab behind every time something navigates.
 /// </summary>
@@ -89,7 +89,7 @@ internal static class PrewarmProbe
     }
 
     /// <summary>
-    /// The rest of prompt 5: under the owner's own design point of about three workspaces at once,
+    /// The rest: under the owner's own design point of about three workspaces at once,
     /// a Chrome cold start can lose its race outright. Measured 2026-09-21: twice in a row during a
     /// full gate run, never once in three isolated runs - the same load this reproduces by starting
     /// three cold starts at the same instant instead of one at a time. Checks that WorkspaceBrowser

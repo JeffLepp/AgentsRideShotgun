@@ -4,7 +4,7 @@ using System.Text.Json;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Proves prompt 4b (design/FIX-PROMPTS-2026-09-20.md): a busy window used to make
+/// Proves a fix: a busy window used to make
 /// WorkspaceTree.Read throw TimeoutException outright once its 3-second budget ran out, so the agent
 /// got nothing at all - and combined with 4a, no way to press anything on that window either
 /// (the app-testing friction review, item 6). This launches a WPF window with sixty

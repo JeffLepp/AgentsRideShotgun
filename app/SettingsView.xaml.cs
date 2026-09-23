@@ -18,8 +18,8 @@ public partial class SettingsView : UserControl
         ["general"] = "General", ["agents"] = "Agents", ["accounts"] = "Accounts", ["history"] = "History & privacy",
     };
 
-    // Four categories replaced ten in the cut round (WAVE1B.md C.1): a caller that still passes one
-    // of the retired ids lands on the page that now holds what survived from it, rather than
+    // Four categories replaced ten: a caller that still passes one of the retired ids lands on
+    // the page that now holds what survived from it, rather than
     // nowhere. Control's one surviving row (Pause every agent) moved to Agents; Corner window's one
     // surviving row (Show the corner window) moved to General; Privacy & safety's one surviving row
     // (Delete all Deskweave data) moved to History & privacy, alongside About's Licenses and data
@@ -34,9 +34,9 @@ public partial class SettingsView : UserControl
         ["about"] = "general",
     };
 
-    // A category whose page can be entirely SettingsFeatures-gated:
-    // once every row on it is hidden, the row it would show is only a bare
-    // card, so the category itself leaves the nav until the flag it names turns on. History &
+    // A category whose page can be entirely SettingsFeatures-gated: once every row on it is
+    // hidden, the row it would show is only a bare card, so the category itself leaves the nav
+    // until the flag it names turns on. History &
     // privacy is not here: Save screenshots may hide, but Storage and Delete all Deskweave data
     // always show, so its page and nav row are never empty.
     static readonly Dictionary<string, Func<bool>> CategoryGate = new(StringComparer.Ordinal)

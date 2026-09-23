@@ -4,7 +4,7 @@ using System.Text.Json;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Prompts 3 and 6 (design/FIX-PROMPTS-2026-09-20.md). Where a thing opens follows who it is for:
+/// Where a thing opens follows who it is for:
 /// the agent's own work stays in the workspace, and something the owner asked for goes to his own
 /// desktop, where the shell is - so packaged apps, file associations and one-copy-per-session
 /// applications all have a route instead of a refusal. Nothing reaches his desktop, and nothing of
@@ -97,7 +97,7 @@ internal static class OpenRouteProbe
             or InvalidOperationException or System.ComponentModel.Win32Exception) { }
     }
 
-    // --- prompt 3 ---------------------------------------------------------------------------
+    // --- where a program opens -------------------------------------------------------------
 
     /// <summary>A Store app's execution alias is a zero-byte reparse point that CreateProcess cannot
     /// start at all; an ordinary program must never be mistaken for one.</summary>
@@ -289,7 +289,7 @@ internal static class OpenRouteProbe
         }
     }
 
-    // --- prompt 6 ---------------------------------------------------------------------------
+    // --- one copy per session --------------------------------------------------------------
 
     /// <summary>
     /// Most Windows applications allow one copy per logon session, so a second launch hands its

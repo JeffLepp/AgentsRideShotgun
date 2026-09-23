@@ -11,8 +11,8 @@ namespace Deskweave;
 
 /// <summary>
 /// Settings rows that are built and wired to the store but stay hidden until the behavior behind
-/// them exists (WAVE1.md C.3: Settings shows only controls something already obeys). The Wave 2
-/// slice that builds that behavior turns its flag on; <see cref="AllOnForScenes"/> forces every
+/// them exists: Settings shows only controls something already obeys. The change that builds
+/// that behavior turns its flag on; <see cref="AllOnForScenes"/> forces every
 /// flag on for the length of one ui-probe scene, so 05, 06 and 15 still show their full pages.
 /// </summary>
 internal static class SettingsFeatures
@@ -76,7 +76,7 @@ internal sealed record StorageKind(string Label, string? Hint, string ClearNoun,
     Func<bool> Visible, Func<bool> CanClear, string? DisabledTooltip, Action Clear,
     string MeterBrush, double MeterOpacity);
 
-/// <summary>The Storage group's model (WAVE1B.md C.5): the four kinds Deskweave can size today, in
+/// <summary>The Storage group's model: the four kinds Deskweave can size today, in
 /// meter order, and the per-project rows below them.</summary>
 internal static class SettingsStorage
 {
@@ -164,7 +164,7 @@ internal static class SettingsActions
     internal static string SetupText() => JsonSerializer.Serialize(WorkspaceConnections.AppConfiguration,
         new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
-    // --- Storage: sizes and clears (WAVE1B.md C.5) ------------------------------------------------
+    // --- Storage: sizes and clears ------------------------------------------------------------
 
     /// <summary>Bytes of history: the step log and screenshots each workspace keeps in its evidence
     /// folder (WorkspaceEvidence). Read-only, so it needs no seam of its own.</summary>
@@ -269,8 +269,7 @@ internal static class SettingsActions
             RemoveEntry(entry);
     }
 
-    /// <summary>Under 1 MB in KB, under 1 GB in MB with no decimals, else GB with one decimal
-    /// (WAVE1B.md C.5).</summary>
+    /// <summary>Under 1 MB in KB, under 1 GB in MB with no decimals, else GB with one decimal.</summary>
     internal static string FormatStorageBytes(long bytes)
     {
         const long Kb = 1024, Mb = Kb * 1024, Gb = Mb * 1024;

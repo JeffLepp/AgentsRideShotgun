@@ -1,0 +1,408 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Deskweave demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Press+Start+2P&display=block" rel="stylesheet">
+<style>
+/* demo.html?side=without|with&t=3.2 : one looping screen, rendered to a gif by demo.mjs */
+*{box-sizing:border-box}
+html,body{margin:0;background:#000;overflow:hidden}
+#screen{position:relative;width:880px;height:440px;overflow:hidden;background:#000;font-family:"Segoe UI",sans-serif}
+.abs{position:absolute}
+
+#game{left:0;top:0;width:880px;height:410px;overflow:hidden;
+  background:linear-gradient(#150f3a 0%,#3b1d6e 45%,#c2477d 80%,#f07a86 100%)}
+#sun{left:560px;top:120px;width:180px;height:180px;border-radius:50%;background:linear-gradient(#ffe38a,#ff8a5c);
+  -webkit-mask-image:linear-gradient(#000 0 55%,transparent 55% 59%,#000 59% 67%,transparent 67% 71%,#000 71% 78%,transparent 78% 83%,#000 83% 89%,transparent 89% 94%,#000 94%)}
+.star{width:2px;height:2px;background:#fff;border-radius:1px}
+#far{left:0;top:190px;width:880px;height:150px;background-repeat:repeat-x;background-size:520px 150px}
+#near{left:0;top:250px;width:880px;height:100px;background-repeat:repeat-x;background-size:360px 100px}
+#ground{left:0;top:330px;width:880px;height:80px;background:#1a0f33;border-top:3px solid #ff5fae;box-shadow:0 -6px 24px rgba(255,95,174,.45)}
+#grid{left:0;top:333px;width:880px;height:77px;background:repeating-linear-gradient(90deg,rgba(255,95,174,.35) 0 2px,transparent 2px 64px);
+  -webkit-mask:linear-gradient(#000,transparent)}
+.obs{width:26px;height:42px;top:288px;border-radius:6px 6px 2px 2px;background:#35f2c8;box-shadow:0 0 14px rgba(53,242,200,.7)}
+#player{left:133px;width:34px;height:34px;border-radius:9px;background:#ffd23f;box-shadow:0 0 16px rgba(255,210,63,.6)}
+#player:before,#player:after{content:"";position:absolute;top:9px;width:6px;height:9px;border-radius:3px;background:#1a0f33}
+#player:before{left:15px}#player:after{left:24px}
+#hud{left:22px;top:18px;font:12px "Press Start 2P",monospace;color:#fff;text-shadow:0 2px 0 #000}
+#hi{right:22px;top:18px;font:12px "Press Start 2P",monospace;color:#ffd23f;text-shadow:0 2px 0 #000}
+#dim{left:0;top:0;width:880px;height:410px;background:#05070d;opacity:0}
+#paused{left:24px;top:64px;font:24px "Press Start 2P",monospace;color:#ffd23f;text-shadow:0 3px 0 #000;opacity:0}
+
+#taskbar{left:0;top:410px;width:880px;height:30px;background:#0e1726;display:flex;align-items:center;gap:9px;padding:0 12px}
+#taskbar .tb{width:16px;height:16px;border-radius:4px;flex:none;position:relative}
+#taskbar .search{width:110px;height:18px;border-radius:9px;background:#1d2a40;flex:none}
+#taskbar .on:after{content:"";position:absolute;left:3px;right:3px;bottom:-6px;height:2px;border-radius:1px;background:#7ea6ff}
+#taskbar .clock{margin-left:auto;font:500 11px "Segoe UI",sans-serif;color:#cfd8e6}
+#tray{width:16px;height:16px;margin-right:8px}
+
+/* the app under test: a small store admin */
+.win{transform-origin:0 0;border-radius:10px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.25)}
+.page{width:480px;height:300px;background:#fff;color:#111827;position:relative;font-family:"Segoe UI",sans-serif;overflow:hidden}
+.page .bar{position:absolute;left:0;top:0;right:0;height:26px;background:#eef1f5;border-bottom:1px solid #e1e5ec}
+.page .dot{position:absolute;top:10px;width:7px;height:7px;border-radius:50%;background:#c9d0da}
+.page .url{position:absolute;left:58px;top:5px;width:250px;height:16px;border-radius:8px;background:#fff;font:10px/16px "Segoe UI";color:#6b7688;padding-left:10px}
+.page .brand{position:absolute;right:16px;top:36px;font:800 13px "Bricolage Grotesque",sans-serif}
+.page .tab{position:absolute;top:36px;height:22px;font:600 11px/18px "Segoe UI";color:#6b7688;text-align:center}
+.page .tab.on{color:#111827;box-shadow:inset 0 -2px 0 #2e6bf6}
+.page .tabline{position:absolute;left:0;right:0;top:58px;height:1px;background:#e6e9ef}
+.page .pane{position:absolute;left:0;top:0;width:480px;height:300px;display:none}
+.page .box{position:absolute;border-radius:8px;box-shadow:inset 0 0 0 1px #e6e9ef}
+.page .ln{position:absolute;height:6px;border-radius:3px;background:#e3e7ee}
+.page .num{position:absolute;font:800 18px "Bricolage Grotesque",sans-serif}
+.page .txt{position:absolute;font:600 10.5px "Segoe UI"}
+.page .pill{position:absolute;height:16px;padding:0 8px;border-radius:8px;font:600 9px/16px "Segoe UI"}
+.page .tg{position:absolute;left:400px;width:36px;height:20px;border-radius:10px;background:#d5dbe5}
+.page .tg:after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.page .tg.on{background:#2e6bf6}.page .tg.on:after{left:18px}
+.page .sel{position:absolute;left:300px;width:136px;height:24px;border-radius:6px;box-shadow:inset 0 0 0 1px #d5dbe5;background:#fff;font:600 10.5px/24px "Segoe UI";padding-left:10px}
+.page .list{position:absolute;left:300px;top:198px;width:136px;border-radius:6px;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,.18),0 0 0 1px #d5dbe5;display:none}
+.page .list div{height:22px;font:600 10.5px/22px "Segoe UI";padding-left:10px;color:#111827}
+.page .list div:nth-child(2){background:#eaf0ff}
+.page .seg{position:absolute;top:210px;width:68px;height:24px;font:600 10.5px/24px "Segoe UI";text-align:center;box-shadow:inset 0 0 0 1px #d5dbe5;color:#6b7688}
+.page .seg.on{background:#2e6bf6;color:#fff;box-shadow:none}
+.page .btn{position:absolute;border-radius:6px;font:600 10.5px/26px "Segoe UI";text-align:center;color:#fff;height:26px}
+.page .modal{position:absolute;left:0;top:26px;right:0;bottom:0;background:rgba(10,14,24,.45);display:none}
+.page .card{position:absolute;left:130px;top:69px;width:220px;height:120px;border-radius:10px;background:#fff;color:#111827;box-shadow:0 12px 30px rgba(0,0,0,.3)}
+.page .reload{position:absolute;left:0;top:26px;right:0;bottom:0;background:#fff;opacity:0}
+.page.dark{background:#0f1522;color:#e6edf3}
+.page.dark .bar{background:#1b2336;border-color:#273248}
+.page.dark .url{background:#0f1522;color:#8f9ab0}
+.page.dark .tab.on{color:#e6edf3}
+.page.dark .tabline,.page.dark .ln{background:#273248}
+.page.dark .box{box-shadow:inset 0 0 0 1px #273248}
+.page.dark .sel{background:#0f1522;box-shadow:inset 0 0 0 1px #273248}
+.page.dark .seg{box-shadow:inset 0 0 0 1px #273248}
+.page.dark .tg:not(.on){background:#273248}
+.term{width:300px;height:170px;background:#0d1117;font:11px/1.55 Consolas,monospace;color:#8b949e;padding:32px 12px 0}
+.term .bar{position:absolute;left:0;top:0;right:0;height:24px;background:#1b2130;color:#c9d1d9;font:600 10px/24px "Segoe UI";padding-left:10px}
+
+/* the corner window */
+#ring{left:0;top:0;border-radius:7px;box-shadow:0 0 0 1.5px #7ea6ff,0 0 18px rgba(126,166,255,.45),0 10px 26px rgba(0,0,0,.5)}
+#handle{width:14px;height:48px;border-radius:7px 0 0 7px;background:#2e6bf6;box-shadow:0 0 16px rgba(126,166,255,.7);opacity:0}
+#handle:after{content:"";position:absolute;left:5px;top:19px;width:6px;height:6px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(45deg)}
+#chip{height:22px;padding:0 10px;border-radius:99px;background:rgba(17,24,39,.9);color:#fff;font:600 12px/22px "Segoe UI";white-space:nowrap}
+#chip b{color:#f0a987;font-weight:600}
+#chip i{font-style:normal;color:#9aa5b8;margin-left:5px}
+
+/* pointers: the agent's always wears its name */
+.cursor{width:22px;height:30px}
+.tag{left:17px;top:24px;height:20px;padding:0 8px;border-radius:6px;background:#d97757;color:#fff;font:700 11px/20px "Segoe UI";white-space:nowrap;
+  box-shadow:0 3px 10px rgba(0,0,0,.35)}
+.ripple{width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:3px solid #fff;opacity:0}
+.ripple.a{border-color:#f0a987}
+</style>
+</head>
+<body>
+<div id="screen">
+  <div id="shake" class="abs" style="left:0;top:0;width:880px;height:440px">
+    <div id="game" class="abs">
+      <div id="stars"></div>
+      <div id="sun" class="abs"></div>
+      <div id="far" class="abs"></div>
+      <div id="near" class="abs"></div>
+      <div id="ground" class="abs"></div>
+      <div id="grid" class="abs"></div>
+      <div id="obstacles"></div>
+      <div id="player" class="abs"></div>
+      <div id="hud" class="abs">LEVEL 3</div>
+      <div id="hi" class="abs">HI 048210</div>
+      <div id="dim" class="abs"></div>
+      <div id="paused" class="abs">PAUSED</div>
+    </div>
+    <div id="taskbar" class="abs">
+      <svg class="tb" viewBox="0 0 18 18"><rect x="1" y="1" width="7" height="7" fill="#5b9bff"/><rect x="10" y="1" width="7" height="7" fill="#5b9bff"/><rect x="1" y="10" width="7" height="7" fill="#5b9bff"/><rect x="10" y="10" width="7" height="7" fill="#5b9bff"/></svg>
+      <span class="search"></span>
+      <span id="tbGame" class="tb on" style="background:#ff5fae"></span>
+      <span class="tb" style="background:#f4c542"></span>
+      <span class="tb" style="background:#2e6bf6"></span>
+      <span id="tbTerm" class="tb" style="background:#3a4356"></span>
+      <span id="tbWeb" class="tb" style="background:#e8eef7"></span>
+      <span class="clock"><svg id="tray" viewBox="0 0 256 256" style="vertical-align:-3px">
+        <rect x="8" y="8" width="240" height="240" rx="58" fill="#1b2336"/>
+        <rect x="38" y="52" width="136" height="104" rx="18" fill="none" stroke="#8fb0ff" stroke-width="16"/>
+        <rect x="92" y="108" width="136" height="104" rx="18" fill="#2e6bf6"/></svg>10:42</span>
+    </div>
+    <div id="windows"></div>
+    <div id="rip" class="abs ripple"></div>
+    <div id="ucur" class="abs" style="opacity:0">
+      <svg class="abs cursor" viewBox="0 0 22 30"><path d="M2 2v23l6-6 4.5 9.5 4.5-2-4.5-9.5H21z" fill="#fff" stroke="#0b1a3a" stroke-width="2" stroke-linejoin="round"/></svg>
+      <div id="utag" class="abs tag">✦ Claude</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const ease = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const back = p => { const c = 1.9; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
+const mod = (a, n) => ((a % n) + n) % n;
+const svg = s => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
+
+const SIDE = new URLSearchParams(location.search).get('side') || 'with';
+const END = 12;          // one loop; frame END equals frame 0
+const PX = 150, GROUND = 296;
+
+// ---------- scenery ----------
+$('far').style.backgroundImage = svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 150"><path d="M0 150 L0 90 L70 40 L130 85 L200 20 L280 95 L340 55 L420 100 L470 60 L520 90 L520 150Z" fill="#4a2474"/></svg>');
+$('near').style.backgroundImage = svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 100"><path d="M0 100 L0 70 Q60 20 120 60 T240 50 T360 70 L360 100Z" fill="#2a1450"/></svg>');
+let stars = '';
+for (let i = 0; i < 38; i++) stars += `<div class="abs star" style="left:${(i * 211) % 880}px;top:${(i * 97) % 170 + 8}px;opacity:${.3 + (i % 5) * .14}"></div>`;
+$('stars').innerHTML = stars;
+
+// ---------- the app under test ----------
+const DOTS = '<div class="dot" style="left:10px"></div><div class="dot" style="left:22px"></div><div class="dot" style="left:34px"></div>';
+const TABS = [['overview', 'Overview', 16, 70], ['orders', 'Orders', 96, 52], ['customers', 'Customers', 158, 76], ['settings', 'Settings', 244, 60]];
+function adminPage(id) {
+  let h = `<div class="bar">${DOTS}<div class="url" id="${id}-url"></div></div><div class="brand">Pebble admin</div>`;
+  TABS.forEach(([k, label, x, w]) => h += `<div class="tab" id="${id}-t-${k}" style="left:${x}px;width:${w}px">${label}</div>`);
+  h += '<div class="tabline"></div>';
+
+  let p = '';
+  ['$12.4k', '318', '4.9 ★'].forEach((n, i) => {
+    const x = 16 + i * 152;
+    p += `<div class="box" style="left:${x}px;top:70px;width:144px;height:50px"></div>
+      <div class="ln" style="left:${x + 12}px;top:80px;width:50px"></div><div class="num" style="left:${x + 12}px;top:90px">${n}</div>`;
+  });
+  p += '<div class="box" style="left:16px;top:130px;width:448px;height:158px"></div>';
+  [60, 82, 70, 104, 92, 120, 98, 132, 116, 110, 138, 126, 142].forEach((b, i) =>
+    p += `<div class="abs" style="left:${30 + i * 33}px;top:${280 - b}px;width:20px;height:${b}px;border-radius:4px 4px 0 0;background:#2e6bf6;opacity:${.45 + i * .04}"></div>`);
+  h += `<div class="pane" id="${id}-p-overview">${p}</div>`;
+
+  p = '';
+  [['Paid', '#dcfce7', '#166534'], ['Pending', '#fef3c7', '#92400e'], ['Paid', '#dcfce7', '#166534'], ['Refunded', '#eef1f5', '#556074'], ['Paid', '#dcfce7', '#166534']]
+    .forEach(([s, bg, fg], i) => {
+      const y = 70 + i * 44;
+      p += `<div class="txt" style="left:16px;top:${y + 12}px">#10${42 + i}</div>
+        <div class="ln" style="left:86px;top:${y + 17}px;width:${[110, 80, 130, 96, 70][i]}px"></div>
+        <div class="txt" style="left:270px;top:${y + 12}px">$${[48, 112, 36, 64, 90][i]}.00</div>
+        <div class="pill" style="left:370px;top:${y + 12}px;background:${bg};color:${fg}">${s}</div>
+        <div class="tabline" style="top:${y + 40}px;left:16px;right:16px"></div>`;
+    });
+  h += `<div class="pane" id="${id}-p-orders">${p}</div>`;
+
+  p = '';
+  ['#f59e0b', '#2e6bf6', '#10b981', '#ec4899', '#8b5cf6', '#ef4444', '#06b6d4', '#84cc16'].forEach((c, i) => {
+    const x = 16 + (i % 4) * 114, y = 70 + Math.floor(i / 4) * 112;
+    p += `<div class="box" style="left:${x}px;top:${y}px;width:106px;height:104px"></div>
+      <div class="abs" style="left:${x + 36}px;top:${y + 12}px;width:34px;height:34px;border-radius:50%;background:${c}"></div>
+      <div class="ln" style="left:${x + 18}px;top:${y + 60}px;width:70px"></div><div class="ln" style="left:${x + 30}px;top:${y + 74}px;width:46px"></div>`;
+  });
+  h += `<div class="pane" id="${id}-p-customers">${p}</div>`;
+
+  p = '';
+  [140, 110, 160].forEach((w, i) => p += `<div class="ln" style="left:16px;top:${83 + i * 32}px;width:${w}px"></div><div class="tg" id="${id}-tg${i}" style="top:${76 + i * 32}px"></div>`);
+  p += `<div class="ln" style="left:16px;top:181px;width:90px"></div><div class="sel" id="${id}-cur" style="top:172px"></div>
+    <div class="ln" style="left:16px;top:219px;width:70px"></div>
+    <div class="seg" id="${id}-light" style="left:300px;border-radius:6px 0 0 6px">Light</div>
+    <div class="seg" id="${id}-dark" style="left:368px;border-radius:0 6px 6px 0">Dark</div>
+    <div class="btn" style="left:16px;top:254px;width:110px;background:#dc2626">Delete store</div>
+    <div class="list" id="${id}-list"><div>USD</div><div>EUR</div><div>GBP</div></div>`;
+  h += `<div class="pane" id="${id}-p-settings">${p}</div>`;
+
+  h += `<div class="modal" id="${id}-modal"><div class="card">
+      <div style="position:absolute;left:18px;top:16px;font:800 15px 'Bricolage Grotesque'">Delete this store?</div>
+      <div class="ln" style="left:18px;top:46px;width:170px"></div><div class="ln" style="left:18px;top:58px;width:120px"></div>
+      <div class="btn" style="left:20px;top:82px;width:90px;background:#e6e9ef;color:#111827">Cancel</div>
+      <div class="btn" style="left:120px;top:82px;width:80px;background:#dc2626">Delete</div></div></div>
+    <div class="reload" id="${id}-reload"></div>`;
+  return `<div class="page" id="${id}">${h}</div>`;
+}
+function paint(id, s) {
+  const q = k => $(id + '-' + k);
+  TABS.forEach(([k]) => { q('t-' + k).classList.toggle('on', s.tab === k); q('p-' + k).style.display = s.tab === k ? 'block' : 'none'; });
+  q('url').textContent = 'localhost:5173/admin/' + s.tab;
+  s.tg.forEach((on, i) => q('tg' + i).classList.toggle('on', on));
+  q('cur').textContent = s.cur + '  ▾';
+  q('list').style.display = s.open ? 'block' : 'none';
+  q('light').classList.toggle('on', !s.dark); q('dark').classList.toggle('on', s.dark);
+  $(id).classList.toggle('dark', s.dark);
+  q('modal').style.display = s.modal ? 'block' : 'none';
+  q('reload').style.opacity = s.reload;
+}
+
+// ---------- what the agent tests ----------
+// Two quick passes over the app, each RUN seconds long; both sides use the same two.
+const RUN = 2.8;
+const TAB = { orders: [122, 47], customers: [196, 47], settings: [274, 47] };
+const SET = { t1: [418, 86], t2: [418, 118], t3: [418, 150], select: [368, 184], eur: [368, 231], dark: [402, 222], del: [71, 267], cancel: [195, 190], rest: [250, 282] };
+function path(t, keys) {
+  if (t <= keys[0][0]) return keys[0].slice(1);
+  for (let i = 1; i < keys.length; i++) {
+    if (t <= keys[i][0]) {
+      const p = ease(prog(t, keys[i - 1][0], keys[i][0]));
+      return [lerp(keys[i - 1][1], keys[i][1], p), lerp(keys[i - 1][2], keys[i][2], p)];
+    }
+  }
+  return keys[keys.length - 1].slice(1);
+}
+// every tab, then a switch
+function tourRun(lt) {
+  const k = [[0, ...SET.rest], [.35, ...TAB.orders], [.6, ...TAB.orders], [.85, ...TAB.customers], [1.1, ...TAB.customers],
+    [1.35, ...TAB.settings], [1.6, ...TAB.settings], [1.95, ...SET.t1]];
+  const tab = lt < .42 ? 'overview' : lt < .92 ? 'orders' : lt < 1.42 ? 'customers' : 'settings';
+  const status = { overview: 'loading the app', orders: 'opening Orders', customers: 'opening Customers', settings: lt < 1.95 ? 'opening Settings' : 'flipping a switch' }[tab];
+  return { pt: path(lt, k), clicks: [.4, .9, 1.4, 2.0], status,
+    state: { tab, tg: [lt > 2.02, false, false], cur: 'USD', open: false, dark: false, modal: false, reload: 1 - prog(lt, 0, .25) } };
+}
+// switches, the menu, dark mode, a dialog
+function settingsRun(lt) {
+  const k = [[0, ...SET.t1], [.3, ...SET.t2], [.6, ...SET.select], [.9, ...SET.eur], [1.2, ...SET.dark], [1.55, ...SET.del], [1.95, ...SET.cancel], [2.35, ...SET.t3]];
+  const status = lt < .6 ? 'testing switches' : lt < 1.2 ? 'trying the menu' : lt < 1.55 ? 'trying dark mode' : lt < 2.35 ? 'opening a dialog' : 'last switch';
+  return { pt: path(lt, k), clicks: [.32, .62, .92, 1.22, 1.57, 1.97, 2.37], status,
+    state: { tab: 'settings', tg: [true, lt > .34, lt > 2.39], cur: lt > .94 ? 'EUR' : 'USD', open: lt > .64 && lt < .94, dark: lt > 1.24, modal: lt > 1.59 && lt < 1.99, reload: 0 } };
+}
+function ripple(el, t, clicks, x, y, k = 1) {
+  el.style.opacity = 0;
+  for (const c of clicks) {
+    const p = prog(t, c, c + .35);
+    if (p > 0 && p < 1) {
+      el.style.left = x + 'px'; el.style.top = y + 'px';
+      el.style.opacity = 1 - p; el.style.transform = `scale(${(.4 + p) * k})`;
+    }
+  }
+}
+
+// ---------- game ----------
+// the world scrolls a whole number of tiles per loop, so the last frame meets the first
+function world(G) {
+  const D = 64 * Math.round(270 * G / 64);
+  const far = 520 * Math.max(1, Math.round(.12 * D / 520)) / D;
+  const near = 360 * Math.max(1, Math.round(.35 * D / 360)) / D;
+  const obs = [];
+  const gaps = [360, 330, 410, 350, 380, 340, 400];
+  for (let x = 520, i = 0; x < D + 520 - 300; x += gaps[i++ % gaps.length]) obs.push(x);
+  return { D, far, near, obs };
+}
+let W;
+function drawGame(g, G) {
+  const w = W.D * g / G;
+  $('far').style.backgroundPosition = `${-w * W.far}px 0`;
+  $('near').style.backgroundPosition = `${-w * W.near}px 0`;
+  $('grid').style.backgroundPosition = `${-w}px 0`;
+  let y = 0;
+  W.obs.forEach((x, i) => {
+    let sx = mod(x - w, W.D);
+    if (sx > W.D - 120) sx -= W.D;
+    $('o' + i).style.left = sx - 13 + 'px';
+    const d = sx - PX;
+    if (Math.abs(d) < 70) y = Math.max(y, 96 * (1 - (d / 70) ** 2));
+  });
+  const p = $('player');
+  p.style.top = GROUND - y + 'px';
+  p.style.transform = `rotate(${y > 0 ? 10 - (96 - y) / 96 * 20 : 0}deg)`;
+}
+
+// springs in at t0, drops away at t1
+function pop(el, t, t0, t1) {
+  const pin = prog(t, t0, t0 + .28), pout = prog(t, t1, t1 + .18);
+  el.style.transformOrigin = '50% 50%';
+  el.style.transform = `scale(${pin <= 0 ? 0 : back(pin) * (1 - pout * .15)})`;
+  el.style.opacity = pin > 0 ? 1 - pout : 0;
+}
+
+// ---------- the old way ----------
+// twice a loop the agent's windows land on your screen and it takes your pointer;
+// the game loses focus and pauses until you click back in
+const HITS = [
+  { at: .9, run: tourRun, win: 'wa', term: 'ta', pos: [330, 36], back: [300, 150] },
+  { at: 7.4, run: settingsRun, win: 'wb', term: 'tb', pos: [340, 50], back: [220, 330] },
+];
+const HIT_LEN = 3.7;     // pop, the agent's pass, windows gone, you click back in
+const PAUSED_TOTAL = HITS.length * HIT_LEN;
+const gameTime = t => HITS.reduce((g, h) => g - clamp(t - h.at, 0, HIT_LEN), t);
+
+function setupWithout() {
+  $('windows').innerHTML = `
+    <div id="wa" class="abs win" style="left:330px;top:36px">${adminPage('pa')}</div>
+    <div id="ta" class="abs win term" style="left:170px;top:190px"><div class="bar">npm run dev</div>
+      <div style="color:#7ee787">VITE v6.2 ready in 312 ms</div><div>&gt; Local: <span style="color:#79c0ff">http://localhost:5173/</span></div>
+      <div>&gt; opening browser...</div><div style="color:#f0a987">✦ claude: clicking through every tab</div></div>
+    <div id="wb" class="abs win" style="left:340px;top:50px">${adminPage('pb')}</div>
+    <div id="tb" class="abs win term" style="left:60px;top:104px"><div class="bar">npm test</div>
+      <div style="color:#7ee787">✓ tabs switch</div><div style="color:#7ee787">✓ switches save</div>
+      <div>&gt; checking settings...</div><div style="color:#f0a987">✦ claude: trying dark mode</div></div>`;
+  $('tray').style.display = 'none';
+}
+function renderWithout(t) {
+  drawGame(gameTime(t), END - PAUSED_TOTAL);
+  const pz = Math.max(...HITS.map(h => prog(t, h.at + .05, h.at + .2) * (1 - prog(t, h.at + HIT_LEN - .05, h.at + HIT_LEN + .05))));
+  $('dim').style.opacity = pz * .45;
+  $('paused').style.opacity = pz;
+
+  const cur = $('ucur'), rip = $('rip');
+  cur.style.opacity = 0; rip.style.opacity = 0;
+  let sh = 0, apps = false;
+  for (const h of HITS) {
+    const a = h.at, go = a + .35, done = go + RUN, gone = done + .1, click = gone + .4;
+    pop($(h.win), t, a, gone); pop($(h.term), t, a + .15, gone);
+    [a, a + .15].forEach(c => { const p = prog(t, c, c + .22); if (p > 0 && p < 1) sh = (1 - p) * 5; });
+    if (t > a && t < gone + .1) apps = true;
+    const r = h.run(clamp(t - go, 0, RUN));
+    paint(h.win === 'wa' ? 'pa' : 'pb', r.state);
+
+    // the pointer: the agent's while it tests, yours again to click back into the game
+    if (t < go || t > click + .6) continue;
+    let pt, clicks;
+    if (t < done) { pt = [h.pos[0] + r.pt[0], h.pos[1] + r.pt[1]]; clicks = r.clicks.map(c => go + c); }
+    else { pt = path(t, [[done + .05, h.pos[0] + r.pt[0], h.pos[1] + r.pt[1]], [click - .05, ...h.back]]); clicks = [click]; }
+    cur.style.left = pt[0] - 2 + 'px'; cur.style.top = pt[1] - 2 + 'px';
+    cur.style.opacity = prog(t, go, go + .1) * (1 - prog(t, click + .3, click + .55));
+    $('utag').style.opacity = 1 - prog(t, done, done + .15);
+    $('utag').style.transform = `scale(${lerp(.6, 1, back(prog(t, go, go + .25)))})`;
+    rip.className = 'abs ripple' + (t < done + .2 ? ' a' : '');
+    ripple(rip, t, clicks, pt[0], pt[1]);
+  }
+  $('shake').style.transform = `translate(${Math.sin(t * 90) * sh}px,${Math.cos(t * 77) * sh * .6}px)`;
+  $('tbTerm').style.opacity = $('tbWeb').style.opacity = apps ? 1 : 0;
+  $('tbWeb').classList.toggle('on', apps); $('tbGame').classList.toggle('on', !apps);
+}
+
+// ---------- the new way ----------
+// the game never stops; the agent runs the same passes in a small window in the corner
+const CW = 140, CS = CW / 480, CH = Math.round(300 * CS), CX = 880 - 12 - CW, CY = 434 - CH;   // sits over the end of the taskbar; lower reads calmer
+function setupWith() {
+  $('windows').innerHTML = `
+    <div id="handle" class="abs" style="left:870px;top:${CY + CH / 2 - 24}px"></div>
+    <div id="slide" class="abs" style="left:0;top:0;width:880px;height:440px">
+    <div id="corner" class="abs" style="left:${CX}px;top:${CY}px">
+      <div id="ring" class="abs" style="width:${CW}px;height:${CH}px"></div>
+      <div class="abs win" style="left:0;top:0;width:480px;height:300px;border-radius:24px;box-shadow:none;transform:scale(${CS})">${adminPage('pc')}</div>
+    </div>
+    <div id="chip" class="abs" style="right:12px;top:${CY - 30}px"><b>✦ Claude Code</b><i id="status"></i></div>
+    <div id="rip2" class="abs ripple a"></div>
+    <svg id="acur" class="abs cursor" style="transform-origin:2px 2px;transform:scale(.5)" viewBox="0 0 22 30"><path d="M2 2v23l6-6 4.5 9.5 4.5-2-4.5-9.5H21z" fill="#d97757" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/></svg>
+    </div>`;
+  $('tbTerm').style.display = $('tbWeb').style.display = 'none';
+}
+function renderWith(t) {
+  drawGame(t, END);
+  const slot = 3, lt = t % slot, run = Math.floor(t / slot) % 2 ? settingsRun : tourRun;
+  const r = run(Math.min(lt, RUN));
+  paint('pc', r.state);
+  $('status').textContent = r.status;
+  const px = CX + r.pt[0] * CS, py = CY + r.pt[1] * CS;
+  $('acur').style.left = px - 1 + 'px'; $('acur').style.top = py - 1 + 'px';
+  ripple($('rip2'), lt, r.clicks, px, py, .4);
+  // near the loop point it tucks away to the screen edge and comes back out
+  const away = t < 2 ? 1 - ease(prog(t, .35, .9)) : ease(prog(t, 10.5, 11.05));
+  $('slide').style.transform = `translateX(${away * (CW + 30)}px)`;
+  $('handle').style.opacity = prog(away, .6, 1);
+}
+
+// ---------- boot ----------
+W = world(SIDE === 'with' ? END : END - PAUSED_TOTAL);
+$('obstacles').innerHTML = W.obs.map((_, i) => `<div class="abs obs" id="o${i}"></div>`).join('');
+if (SIDE === 'with') setupWith(); else setupWithout();
+function render(t) { t = mod(t, END); SIDE === 'with' ? renderWith(t) : renderWithout(t); }
+window.render = render;
+window.END = END;
+render(parseFloat(new URLSearchParams(location.search).get('t') || '0'));
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@ using System.Windows.Media.Imaging;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Wave 0 spike (design/BUILD_PLAYBOOK.md): how fast a workspace screen can be composited with
+/// How fast a workspace screen can be composited with
 /// PrintWindow, and what it costs. The corner window wants 10+ fps while the owner uses it and
 /// under 15% of one core. Four real windows on a real workspace desktop: two Notepads, a console
 /// that never stops printing and a browser running an animation.

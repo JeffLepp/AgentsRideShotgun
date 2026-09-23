@@ -62,7 +62,7 @@ sealed class SceneContext(string references) : IDisposable
 }
 
 /// <summary>
-/// The reference-screen harness (design/BUILD_PLAYBOOK.md, Wave 0). For every scene, in light then
+/// The reference-screen harness. For every scene, in light then
 /// dark: {name}.png is the real app, {name}.compare.png is reference | app over gray | difference
 /// (red is different), and mvp-report.json gives the size error and how much differs.
 /// </summary>

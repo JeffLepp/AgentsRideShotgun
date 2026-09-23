@@ -7,8 +7,8 @@ using Deskweave.AgentWorkspaces;
 /// <summary>
 /// How fast and how expensive the corner view's own capture loop (<see cref="WorkspacePeekCapture"/>)
 /// really is, paced at the same rate <see cref="WorkspacePeekHost"/> uses for Balanced and Battery saver,
-/// idle and in use, against one real workspace with real windows on its desktop
-/// (design/WAVE1B.md, Corner window item 6). Three 15-second samples per case. Then the hub's
+/// idle and in use, against one real workspace with real windows on its desktop.
+/// Three 15-second samples per case. Then the hub's
 /// hands-on pace (<see cref="WorkspacePeekHost.HandsOnIntervalFor"/>): the whole screen, as the hub
 /// takes it, with the windows side by side and again with one filling the screen in front of the
 /// other, which the capture no longer prints.

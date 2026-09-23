@@ -559,7 +559,7 @@ public partial class MainWindow : Window, IDisposable
 
     void Window_SourceInitialized(object? sender, EventArgs e)
     {
-        // Windows 10 stays square: a deliberate exception recorded in the spec (WAVE1, A.2).
+        // Windows 10 stays square: a deliberate exception recorded in the spec.
         if (Environment.OSVersion.Version.Build < 22000) return;
         try
         {
