@@ -153,8 +153,10 @@ public partial class SettingsView
         return stack;
     }
 
-    /// <summary>A toggle switch (reference .sw) bound to one bool setting.</summary>
-    CheckBox Toggle(string claim, Func<AppSettings, bool> read, Func<AppSettings, bool, AppSettings> write)
+    /// <summary>A toggle switch (reference .sw) bound to one bool setting. <paramref name="allow"/>
+    /// can hold a change back, to ask first: the switch goes back and the setting stays.</summary>
+    CheckBox Toggle(string claim, Func<AppSettings, bool> read, Func<AppSettings, bool, AppSettings> write,
+        Func<bool, bool>? allow = null)
     {
         var box = new CheckBox();
         box.SetResourceReference(StyleProperty, "ToggleSwitch");
@@ -162,7 +164,14 @@ public partial class SettingsView
         RoutedEventHandler changed = (_, _) =>
         {
             if (_following) return;
-            Write(s => write(s, box.IsChecked == true));
+            bool value = box.IsChecked == true;
+            if (allow?.Invoke(value) == false)
+            {
+                _following = true;
+                try { box.IsChecked = !value; } finally { _following = false; }
+                return;
+            }
+            Write(s => write(s, value));
         };
         box.Checked += changed;
         box.Unchecked += changed;

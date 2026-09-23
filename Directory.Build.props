@@ -4,8 +4,9 @@
     <Product>Deskweave</Product>
     <Copyright>Copyright © 2026 Jefferson Kline</Copyright>
     <Version>0.2.12</Version>
-    <FileVersion>0.2.12.0</FileVersion>
-    <AssemblyVersion>0.2.12.0</AssemblyVersion>
+    <!-- Derived, so Settings (which shows the assembly version) and the file properties never lag Version. -->
+    <FileVersion>$([System.Text.RegularExpressions.Regex]::Match($(Version), '^\d+\.\d+\.\d+').Value).0</FileVersion>
+    <AssemblyVersion>$(FileVersion)</AssemblyVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>

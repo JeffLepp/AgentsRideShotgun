@@ -23,6 +23,7 @@ public partial class SettingsView
 
     readonly Dictionary<string, (Button Row, TextBlock Summary)> _homeRows = new(StringComparer.Ordinal);
     ToggleButton? _cornerTile, _pauseTile, _nightTile;
+    StackPanel? _cornerAsk;
 
     /// <summary>True while the card shows its home rather than a category's page.</summary>
     internal bool AtCardHome { get; private set; } = true;
@@ -48,10 +49,19 @@ public partial class SettingsView
         _cornerTile.Margin = new Thickness(0, 0, 4, 0);
         _pauseTile.Margin = new Thickness(2, 0, 2, 0);
         _nightTile.Margin = new Thickness(4, 0, 0, 0);
+        // Off asks General's question first; the tile stays on until it is answered.
+        _cornerAsk = CornerQuestion(() => Write(s => s with { CornerShow = CornerShow.Off }));
+        _cornerAsk.Margin = new Thickness(2, 0, 2, 14);
         _cornerTile.Click += (_, _) =>
         {
-            bool on = _cornerTile.IsChecked == true;
-            Write(s => s with { CornerShow = on ? CornerShow.ComesAndGoes : CornerShow.Off });
+            if (_cornerTile.IsChecked == true)
+            {
+                _cornerAsk.Visibility = Visibility.Collapsed;
+                Write(s => s with { CornerShow = CornerShow.ComesAndGoes });
+                return;
+            }
+            _cornerTile.IsChecked = true;
+            _cornerAsk.Visibility = Visibility.Visible;
         };
         // The corner window owns pausing; it answers through AllPausedChanged, which sets the tile.
         _pauseTile.Click += (_, _) => { _pauseTile.IsChecked = ModuleEntry.AllPaused; ModuleEntry.RequestPauseAll(); };
@@ -75,6 +85,7 @@ public partial class SettingsView
             rows.Add(row);
         }
         CardHomeContent.Children.Add(tiles);
+        CardHomeContent.Children.Add(_cornerAsk);
         CardHomeContent.Children.Add(Group(rows.ToArray()));
 
         void Paused() => Dispatcher.BeginInvoke(() => { if (_pauseTile is not null) _pauseTile.IsChecked = ModuleEntry.AllPaused; });
@@ -132,6 +143,8 @@ public partial class SettingsView
     void RefreshCardHome(AppSettings settings)
     {
         if (_cornerTile is not null) _cornerTile.IsChecked = settings.CornerShow != CornerShow.Off;
+        // Turned off elsewhere, there is nothing left to ask.
+        if (_cornerAsk is not null && settings.CornerShow == CornerShow.Off) _cornerAsk.Visibility = Visibility.Collapsed;
         if (_nightTile is not null) _nightTile.IsChecked = AppearanceManager.Dark;
         if (_homeRows.Count == 0) return;
 

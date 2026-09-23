@@ -30,9 +30,8 @@ public partial class App : Application
         base.OnStartup(e);
         try
         {
-            string user = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                Environment.UserDomainName + "\\" + Environment.UserName)))[..20];
-            _instance = new Mutex(false, "Local\\Deskweave.App." + user);
+            string user = UserKey();
+            _instance = new Mutex(false, InstancePrefix + user);
             _activate = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\Deskweave.Show." + user);
             _ownsInstance = ClaimInstance(_instance, _activate, e.Args.Contains(StartWithWindows.Background), TimeSpan.FromSeconds(5));
             if (!_ownsInstance)
@@ -104,6 +103,14 @@ public partial class App : Application
     {
         if (!quitting && !hub.IsVisible) hub.Show();
     }
+
+    const string InstancePrefix = "Local\\Deskweave.App.";
+
+    static string UserKey() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+        Environment.UserDomainName + "\\" + Environment.UserName)))[..20];
+
+    /// <summary>The one-per-account lock a running Deskweave holds.</summary>
+    internal static string InstanceName => InstancePrefix + UserKey();
 
     /// <summary>
     /// Takes the one-per-account lock. A Deskweave already running is shown, unless this is a

@@ -200,7 +200,46 @@ static class SettingsScenes
             ShowSettled(view, "general");
             Bound corner = view.BoundControls.Single(b => b.Label == "Show the corner window");
             corner.Choose(false);
-            Program.Check(AppSettingsStore.Current.CornerShow == CornerShow.Off, "Corner switch turns automatic showing off");
+            SettleVisual(view);
+            Program.Check(AppSettingsStore.Current.CornerShow != CornerShow.Off && Equals(corner.Shown(), true)
+                && Visible(view, "Turn off"), "Corner switch asks before turning automatic showing off");
+            AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Off });
+            SettleVisual(view);
+            Program.Check(!Visible(view, "Turn off"), "Turning the corner window off elsewhere hides the question");
+            corner.Choose(true);
+            corner.Choose(false);
+            SettleVisual(view);
+            FindButton(view, "Turn off").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            SettleVisual(view);
+            Program.Check(AppSettingsStore.Current.CornerShow == CornerShow.Off && Equals(corner.Shown(), false)
+                && !Visible(view, "Turn off"), "Confirming the question turns automatic showing off");
+            corner.Choose(true);
+
+            // The card's corner tile asks the same question rather than turning it off in one click.
+            var card = new SettingsView(card: true);
+            var cardWindow = ProbeWindow.OffScreen(new Window
+            {
+                Content = card, Width = 340, Height = 560, WindowStyle = WindowStyle.None,
+                ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Left = at.X, Top = at.Y,
+            });
+            cardWindow.Show();
+            try
+            {
+                SettleVisual(card);
+                var tile = Descendants<System.Windows.Controls.Primitives.ToggleButton>(card)
+                    .Single(t => AutomationProperties.GetName(t) == "Show the corner window");
+                tile.IsChecked = false;
+                tile.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                SettleVisual(card);
+                Program.Check(AppSettingsStore.Current.CornerShow != CornerShow.Off && tile.IsChecked == true && Visible(card, "Turn off"),
+                    "The card's corner tile asks before turning the corner window off");
+                Descendants<Button>(card).First(b => Equals(b.Content, "Turn off") && b.IsVisible)
+                    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                SettleVisual(card);
+                Program.Check(AppSettingsStore.Current.CornerShow == CornerShow.Off && tile.IsChecked == false && !Visible(card, "Turn off"),
+                    "Confirming on the card turns the corner window off");
+            }
+            finally { cardWindow.Close(); }
             corner.Choose(true);
             Program.Check(AppSettingsStore.Current.CornerShow == CornerShow.ComesAndGoes, "Corner switch restores automatic showing");
             Bound startup = view.BoundControls.Single(b => b.Label == "Start with Windows");
@@ -474,6 +513,9 @@ static class SettingsScenes
     static Button FindButton(DependencyObject root, string label) =>
         Descendants<Button>(root).First(button => Equals(button.Content, label)
             || button.Content is not string && System.Windows.Automation.AutomationProperties.GetName(button) == label);
+
+    static bool Visible(DependencyObject root, string label) =>
+        Descendants<Button>(root).Any(button => Equals(button.Content, label) && button.IsVisible);
 
     // Row labels are authored as Run inlines so TextBlock.Text is empty even while the words are
     // visibly rendered. Read the document range the same way a text automation client does.

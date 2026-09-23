@@ -20,6 +20,7 @@ static class Program
         try
         {
             VelopackApp.Build()
+                .SetAutoApplyOnStartup(ApplyUpdateOnStart(args, App.InstanceName))
                 .OnBeforeUninstallFastCallback(_ =>
                 {
                     // While our files still exist: take Deskweave out of the agents' configs, or
@@ -53,6 +54,20 @@ static class Program
         var app = new App();
         app.InitializeComponent();
         return app.Run();
+    }
+
+    /// <summary>
+    /// Velopack applies a downloaded update at startup unless told not to, and applying stops every
+    /// running copy and restarts. Only a start the owner made applies it, with no Deskweave already
+    /// running: an agent's bridge starts it with --background (as Windows does at sign-in), and a
+    /// running copy may have an agent at work.
+    /// </summary>
+    internal static bool ApplyUpdateOnStart(string[] args, string instance)
+    {
+        if (args.Contains(StartWithWindows.Background)) return false;
+        if (!Mutex.TryOpenExisting(instance, out Mutex? running)) return true;
+        running.Dispose();
+        return false;
     }
 
     static void Cleanup(string step, Action cleanup)

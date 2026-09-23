@@ -55,8 +55,27 @@ public partial class SettingsView
 
         // On: CornerShow.ComesAndGoes (it comes and goes on its own). Off: CornerShow.Off (it never
         // appears on its own; the tray still shows it, per ModuleEntry.ShowCornerRequested).
-        var cornerShow = Toggle("Show the corner window", s => s.CornerShow != CornerShow.Off,
-            (s, v) => s with { CornerShow = v ? CornerShow.ComesAndGoes : CornerShow.Off });
+        // Turning it off asks first (CornerQuestion).
+        bool cornerConfirmed = false;
+        CheckBox? cornerShow = null;
+        var cornerAsk = CornerQuestion(() =>
+        {
+            cornerConfirmed = true;
+            try { cornerShow!.IsChecked = false; } finally { cornerConfirmed = false; }
+        });
+        cornerShow = Toggle("Show the corner window", s => s.CornerShow != CornerShow.Off,
+            (s, v) => s with { CornerShow = v ? CornerShow.ComesAndGoes : CornerShow.Off },
+            on =>
+            {
+                if (on || cornerConfirmed) { cornerAsk.Visibility = Visibility.Collapsed; return true; }
+                cornerAsk.Visibility = Visibility.Visible;
+                return false;
+            });
+        // Turned off elsewhere (the card's tile, the other Settings), there is nothing left to ask.
+        _followers.Add(s => { if (s.CornerShow == CornerShow.Off) cornerAsk.Visibility = Visibility.Collapsed; });
+        var cornerText = new StackPanel();
+        cornerText.Children.Add(RowText("Show the corner window"));
+        cornerText.Children.Add(cornerAsk);
 
         string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
         var versionRow = Row(RowText("Version"), Styled(version, "RowHint"));
@@ -89,10 +108,38 @@ public partial class SettingsView
                     Row(startupText, startup),
                     Row(RowText("Theme"), theme),
                     Row(RowText("Agent screens", "How the agent's screen looks behind its windows"), agentScreen),
-                    Row(RowText("Show the corner window"), cornerShow))),
+                    Row(cornerText, cornerShow))),
                 Section(null, Group(versionRow, licenseStack, openData)),
             },
         };
+    }
+
+    /// <summary>
+    /// The question before the corner window goes off, the same from General's switch and the card's
+    /// tile: a tester switched it off without knowing what it was. It starts hidden; Turn off runs
+    /// <paramref name="turnOff"/>, and either answer hides it again.
+    /// </summary>
+    static StackPanel CornerQuestion(Action turnOff)
+    {
+        var question = new TextBlock
+        {
+            Text = "The corner window is where you watch your agents work. Turn it off? You can still open it from the tray.",
+            TextWrapping = TextWrapping.Wrap, MaxWidth = 300,
+        };
+        question.SetResourceReference(StyleProperty, "RowHint");
+        var off = new Button { Content = "Turn off", Margin = new Thickness(0, 0, 8, 0) };
+        off.SetResourceReference(StyleProperty, "DeskButton");
+        var keep = new Button { Content = "Keep it" };
+        keep.SetResourceReference(StyleProperty, "DeskButton");
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+        buttons.Children.Add(off);
+        buttons.Children.Add(keep);
+        var ask = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 6, 0, 0) };
+        ask.Children.Add(question);
+        ask.Children.Add(buttons);
+        off.Click += (_, _) => { ask.Visibility = Visibility.Collapsed; turnOff(); };
+        keep.Click += (_, _) => ask.Visibility = Visibility.Collapsed;
+        return ask;
     }
 
     /// <summary>

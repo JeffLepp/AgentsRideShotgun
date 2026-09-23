@@ -5,7 +5,8 @@ namespace Deskweave;
 
 /// <summary>
 /// Downloads new releases from GitHub in the background. Nothing restarts under a running agent:
-/// VelopackApp applies a downloaded update the next time Deskweave starts.
+/// a downloaded update is applied only when the owner next opens Deskweave with no copy running,
+/// never on a --background start by an agent's bridge or Windows (Program.ApplyUpdateOnStart).
 /// </summary>
 static class Updates
 {
@@ -30,7 +31,7 @@ static class Updates
                         if (told != version)
                         {
                             told = version;
-                            tell("Deskweave " + version + " is ready", "It installs the next time Deskweave starts.");
+                            tell("Deskweave " + version + " is ready", "It installs when you quit and open Deskweave again.");
                         }
                     }
                 }

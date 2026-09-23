@@ -9,7 +9,8 @@ namespace Deskweave.UiProbe;
 /// <summary>
 /// Shutdown and first run: quitting over setup threw past OnExit, the lock was let go before Exit
 /// deleted the data folders, a launch during a slow quit vanished, and a cut-off last picture took
-/// down the workspace page. Each runs on the real code with the probe's own lock names and store;
+/// down the workspace page; a downloaded update applied under an agent's background start, and the
+/// version Settings shows lagged the release. Each runs on the real code with the probe's own lock names and store;
 /// no window is shown.
 /// </summary>
 static class LifecycleChecks
@@ -63,6 +64,22 @@ static class LifecycleChecks
             Program.Check(claimed && !activate.WaitOne(0), "A launch during a slow quit waits for the lock and starts, with no stale request left");
             if (claimed) mine.ReleaseMutex();
         }
+
+        // A downloaded update is applied only by the owner's own start with nothing running: never
+        // under an agent's bridge (--background) or beside a running copy.
+        bool ownerStart = Deskweave.Program.ApplyUpdateOnStart([], name);
+        bool bridgeStart = Deskweave.Program.ApplyUpdateOnStart([StartWithWindows.Background], name);
+        bool besideRunning;
+        using (var running = new Mutex(false, name)) besideRunning = Deskweave.Program.ApplyUpdateOnStart([], name);
+        Program.Check(ownerStart && !bridgeStart && !besideRunning,
+            "Updates apply on the owner's start only, not on a background start or beside a running Deskweave");
+
+        // Settings shows the assembly version; it and the file version follow Version.
+        Assembly app = typeof(App).Assembly;
+        string product = app.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0].Split('-')[0];
+        string fileVersion = app.GetCustomAttribute<AssemblyFileVersionAttribute>()!.Version;
+        Program.Check(app.GetName().Version?.ToString() == product + ".0" && fileVersion == product + ".0",
+            "The version Settings shows and the file version match the release version " + product);
 
         // A truncated last picture reads as no picture, on the hub and on the workspace page.
         StoredWorkspace cut = WorkspaceStore.Create("Cut-off picture");

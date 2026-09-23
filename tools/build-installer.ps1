@@ -29,6 +29,11 @@ foreach ($file in @('Deskweave.exe', 'Deskweave.dll', 'coreclr.dll', 'Presentati
 }
 $payloadVersion = (Get-Item -LiteralPath (Join-Path $payload 'Deskweave.dll')).VersionInfo.ProductVersion.Split('+')[0]
 if ($payloadVersion -cne $Version) { throw "Published app version $payloadVersion differs from package version $Version. Publish this version first." }
+# Settings shows the assembly version, so it and the file version must match too.
+$numeric = $Version.Split('-')[0] + '.0'
+$fileVersion = (Get-Item -LiteralPath (Join-Path $payload 'Deskweave.dll')).VersionInfo.FileVersion
+$assemblyVersion = [Reflection.AssemblyName]::GetAssemblyName((Join-Path $payload 'Deskweave.dll')).Version.ToString()
+if ($fileVersion -cne $numeric -or $assemblyVersion -cne $numeric) { throw "Published app file version $fileVersion and assembly version $assemblyVersion should both be $numeric." }
 $staging = Join-Path $root ('artifacts\installer-staging\' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff'))
 
 # The install id is not "Deskweave" on purpose: Velopack installs to %LOCALAPPDATA%\<id> and its
@@ -64,9 +69,13 @@ finally { if ($signMetadata) { Remove-Item -LiteralPath $signMetadata -ErrorActi
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $package = Get-ChildItem -LiteralPath $staging -Filter '*-full.nupkg' | Select-Object -First 1
 $zip = [IO.Compression.ZipFile]::OpenRead($package.FullName)
-try { $packed = @($zip.Entries | Where-Object { $_.FullName -like 'lib/app/*' -and $_.Name }).Count } finally { $zip.Dispose() }
-$expected = @(Get-ChildItem -LiteralPath $payload -Recurse -File | Where-Object { $_.Extension -ne '.pdb' -and $_.Name -ne 'createdump.exe' }).Count
-if ($packed -lt $expected) { throw "The package holds $packed of the app's $expected files." }
+# Compared by name: vpk adds its own few files, which would hide as many missing ones in a count.
+try { $packed = [Collections.Generic.HashSet[string]]::new([string[]]@($zip.Entries | Where-Object { $_.FullName -like 'lib/app/*' -and $_.Name } | ForEach-Object { $_.FullName.Substring(8) }), [StringComparer]::OrdinalIgnoreCase) }
+finally { $zip.Dispose() }
+$expected = @(Get-ChildItem -LiteralPath $payload -Recurse -File | Where-Object { $_.Extension -ne '.pdb' -and $_.Name -ne 'createdump.exe' } |
+    ForEach-Object { $_.FullName.Substring($payload.Length + 1).Replace('\', '/') })
+$missing = @($expected | Where-Object { -not $packed.Contains($_) })
+if ($missing.Count -gt 0) { throw "The package is missing $($missing.Count) of the app's $($expected.Count) files, first: $($missing[0])" }
 $built = Get-ChildItem -LiteralPath $staging -Filter '*Setup.exe' | Select-Object -First 1
 if (-not $built) { throw 'vpk reported success but produced no Setup.exe.' }
 # The name a person downloads. The update feed names the package, not this file.
