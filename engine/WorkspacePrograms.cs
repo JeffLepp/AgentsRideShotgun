@@ -220,7 +220,10 @@ internal static class WorkspacePrograms
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
-    static IEnumerable<Shortcut> Shortcuts(IEnumerable<string> startMenus)
+    /// <summary>How long a lookup waits for the scan. Tests shorten it to catch one that is cut off.</summary>
+    internal static TimeSpan ScanPatience = TimeSpan.FromSeconds(15);
+
+    internal static IEnumerable<Shortcut> Shortcuts(IEnumerable<string> startMenus)
     {
         string key = string.Join("|", startMenus);
         lock (Cached)
@@ -228,7 +231,10 @@ internal static class WorkspacePrograms
                 && Environment.TickCount64 - _cachedAt < 300_000)
                 return _cached;
 
-        IReadOnlyList<Shortcut> read = ReadAll(startMenus);
+        IReadOnlyList<Shortcut> read = ReadAll(startMenus, out bool complete);
+        // A scan cut off by the wait is what was read so far. Kept, it would hide every app past
+        // that point for the next five minutes; the next lookup reads the menu again instead.
+        if (!complete) return read;
         lock (Cached)
         {
             _cached = read;
@@ -238,7 +244,7 @@ internal static class WorkspacePrograms
         return read;
     }
 
-    static IReadOnlyList<Shortcut> ReadAll(IEnumerable<string> startMenus)
+    static IReadOnlyList<Shortcut> ReadAll(IEnumerable<string> startMenus, out bool complete)
     {
         var files = new List<string>();
         foreach (string menu in startMenus)
@@ -253,12 +259,13 @@ internal static class WorkspacePrograms
         var reader = new Thread(() =>
         {
             foreach (string file in files)
-                if (Read(file) is { } shortcut) found.Add(shortcut);
+                if (Read(file) is { } shortcut) lock (found) found.Add(shortcut);
         }) { IsBackground = true, Name = "start-menu" };
         reader.SetApartmentState(ApartmentState.STA);
         reader.Start();
-        reader.Join(TimeSpan.FromSeconds(15));
-        return found;
+        complete = reader.Join(ScanPatience);
+        // A copy: a reader past its wait keeps adding to its own list while the caller enumerates.
+        lock (found) return [.. found];
     }
 
     internal static Shortcut? Read(string file)

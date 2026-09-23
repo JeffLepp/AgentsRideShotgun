@@ -211,12 +211,17 @@ public sealed partial class AgentDesktop : IDisposable
     /// Standard input and output for the child, inherited. Browser DevTools uses LaunchBrowser
     /// instead: its explicitly named pipe handles must not also receive stdout or stderr.
     /// </param>
-    public int Launch(string exe, string? arguments = null, (nint In, nint Out)? handles = null, long lease = 0)
+    public int Launch(string exe, string? arguments = null, (nint In, nint Out)? handles = null, long lease = 0) =>
+        Launch(exe, arguments, lease, null, handles);
+
+    /// <summary>The same launch, with the process also placed in a command's own nested job, so
+    /// cancelling that command reaches descendants whose parent has already exited.</summary>
+    internal int Launch(string exe, string? arguments, long lease, WorkspaceProcessGroup? group, (nint In, nint Out)? handles = null)
     {
         lock (_lifecycle)
         {
             if (_disposed || Revoked(lease)) return 0;
-            return LaunchCore(exe, arguments, handles, lease, _limits);
+            return LaunchCore(exe, arguments, handles, lease, _limits, group: group);
         }
     }
 
@@ -237,18 +242,18 @@ public sealed partial class AgentDesktop : IDisposable
     }
 
     int LaunchCore(string exe, string? arguments, (nint In, nint Out)? handles, long lease,
-        WorkspaceLimits? limits, bool pipeHandlesOnly = false)
+        WorkspaceLimits? limits, bool pipeHandlesOnly = false, WorkspaceProcessGroup? group = null)
     {
         // A WPF program chooses how it draws while it starts, and only a software renderer leaves
         // pixels a desktop Windows does not compose can hand back. On before the process runs, off
         // again once it is up: see WorkspaceRenderMode.
         IDisposable? softened = WorkspaceRenderMode.Soften();
-        try { return LaunchCore(exe, arguments, handles, lease, limits, ref softened, pipeHandlesOnly); }
+        try { return LaunchCore(exe, arguments, handles, lease, limits, ref softened, pipeHandlesOnly, group); }
         finally { softened?.Dispose(); }
     }
 
     int LaunchCore(string exe, string? arguments, (nint In, nint Out)? handles, long lease,
-        WorkspaceLimits? limits, ref IDisposable? softened, bool pipeHandlesOnly)
+        WorkspaceLimits? limits, ref IDisposable? softened, bool pipeHandlesOnly, WorkspaceProcessGroup? group)
     {
         // Inspect the exact image we will start. A visible console can otherwise be delegated to
         // Windows Terminal through COM on Default, despite lpDesktop naming this workspace.
@@ -307,6 +312,9 @@ public sealed partial class AgentDesktop : IDisposable
             // CreateProcess, then fail closed if Windows refuses; reopening by PID after resume was
             // both racy and silently ignored assignment failure.
             if (limits is not null && !limits.TryTake(created.hProcess)) return 0;
+            // Nested inside the workspace job, never instead of it. A refusal only costs the command
+            // its orphan cleanup on cancel; the caller falls back to killing the live process tree.
+            group?.TryTake(created.hProcess);
             if (Revoked(lease)) return 0;
             if (Native.ResumeThread(created.hThread) == uint.MaxValue) return 0;
             resumed = true;

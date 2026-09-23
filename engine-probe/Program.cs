@@ -99,6 +99,8 @@ internal static class Program
             return OpenRouteProbe.RunStandalone(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--store-safety" && Path.IsPathFullyQualified(args[1]))
             return StoreSafety.RunStandalone(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--tool-hangs" && Path.IsPathFullyQualified(args[1]))
+            return ToolHangs.Run(Path.GetFullPath(args[1]));
         if (args.Length != 1 || !Path.IsPathFullyQualified(args[0])) return 2;
         return Run(Path.GetFullPath(args[0]));
     }

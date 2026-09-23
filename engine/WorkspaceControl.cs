@@ -596,7 +596,11 @@ public sealed partial class WorkspaceControl : IDisposable
     /// up. The caller needs it to say anything true about the process afterwards.
     /// </param>
     /// <inheritdoc cref="Open(string, string?, bool)"/>
-    public int Open(string exe, string? arguments, bool quiet, out string started)
+    public int Open(string exe, string? arguments, bool quiet, out string started) =>
+        Open(exe, arguments, quiet, out started, null);
+
+    /// <param name="group">A command's own nested job, from <see cref="WorkspaceCommands"/>.</param>
+    internal int Open(string exe, string? arguments, bool quiet, out string started, WorkspaceProcessGroup? group)
     {
         started = exe;
         if (_requiredLease.Value is { } expected && (expected == 0 || Ticket != expected)) return 0;
@@ -608,7 +612,7 @@ public sealed partial class WorkspaceControl : IDisposable
             _evidence.Note("open", Path.GetFileName(exe), "refused: Windows shell activation requires the owner's desktop");
             return 0;
         }
-        int pid = _desktop.Launch(exe, arguments, lease: _requiredLease.Value ?? 0);
+        int pid = _desktop.Launch(exe, arguments, _requiredLease.Value ?? 0, group);
         if (!quiet)
             Note("open", Path.GetFileName(exe) + (arguments is null ? "" : " " + arguments),
                 pid == 0 ? "REFUSED" : "pid " + pid);
@@ -1116,24 +1120,46 @@ sealed class WindowWatch : IDisposable
         if (desktop == 0 || !Native.SetThreadDesktop(desktop)) return;
         _threadId = Native.GetCurrentThreadId();
 
-        _callback = (_, _, window, objectId, _, _, _) =>
+        _callback = (_, _, window, objectId, childId, _, _) =>
         {
-            if (objectId != Native.ObjIdWindow || _stopped) return;
-            var title = new System.Text.StringBuilder(256);
-            Native.GetWindowTextW(window, title, title.Capacity);
-            string text = title.ToString();
-            if (text.Contains(_titled, StringComparison.OrdinalIgnoreCase)) _found(text);
+            if (objectId != Native.ObjIdWindow || childId != 0 || _stopped) return;
+            Match(window);
         };
+        // Appearing, and a title set after the window was shown: a browser or an editor names its
+        // window once the page or file has loaded, which is usually the title an agent waits for.
         nint hook = Native.SetWinEventHook(Native.EventObjectCreate, Native.EventObjectShow, 0,
             _callback, 0, 0, Native.WineventOutOfContext);
-        Hooked = hook != 0;
-        if (hook == 0) { Native.CloseDesktop(desktop); return; }
+        nint renamed = hook == 0 ? 0 : Native.SetWinEventHook(Native.EventObjectNameChange, Native.EventObjectNameChange, 0,
+            _callback, 0, 0, Native.WineventOutOfContext);
+        Hooked = hook != 0 && renamed != 0;
+        if (!Hooked)
+        {
+            if (hook != 0) Native.UnhookWinEvent(hook);
+            Native.CloseDesktop(desktop);
+            return;
+        }
+
+        // A window that was already open before the wait began would never raise either event.
+        // Checked after hooking, so one appearing in between is caught by one or the other.
+        Native.EnumDesktopWindows(desktop, (window, _) => { Match(window); return !_stopped; }, 0);
 
         while (!_stopped && Native.GetMessageW(out Native.Msg message, 0, 0, 0) > 0)
             Native.DispatchMessageW(ref message);
 
+        Native.UnhookWinEvent(renamed);
         Native.UnhookWinEvent(hook);
         Native.CloseDesktop(desktop);
+    }
+
+    /// <summary>A visible top-level window with the title. A control inside a window is not one:
+    /// an edit box's text is its window name, and typing the searched-for words would end the wait.</summary>
+    void Match(nint window)
+    {
+        if (Native.GetAncestor(window, 2) != window || !Native.IsWindowVisible(window)) return;   // GA_ROOT
+        var title = new System.Text.StringBuilder(256);
+        Native.GetWindowTextW(window, title, title.Capacity);
+        string text = title.ToString();
+        if (text.Contains(_titled, StringComparison.OrdinalIgnoreCase)) _found(text);
     }
 
     /// <summary>Whether Windows accepted the hook at all. Measured rather than assumed.</summary>

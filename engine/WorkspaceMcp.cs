@@ -110,7 +110,7 @@ public sealed class WorkspaceMcp : IDisposable
                 ("text", "string", "")], [], false),
         new("wait", "Waits without spending tokens: for up to the given seconds, or until a window whose title contains "
             + "the given text appears. Use it instead of looking again and again.",
-            [("seconds", "number", "how long to wait at most"), ("window", "string", "part of a window title to wait for")], [], false),
+            [("seconds", "number", "how long to wait at most, 30 if not given"), ("window", "string", "part of a window title to wait for")], [], false),
     ];
 
     static readonly Definition[] ExternalTools =
@@ -462,13 +462,14 @@ public sealed class WorkspaceMcp : IDisposable
             {
                 double seconds = Double(arguments, "seconds");
                 string? titled = Str(arguments, "window") is { Length: > 0 } w ? w : null;
-                if (seconds <= 0 && titled is null) seconds = 30;
+                // A title that never shows up is still bounded: without seconds the wait used to hold
+                // the call open until the client gave up on it.
+                if (seconds <= 0) seconds = 30;
                 // ponytail: capped at the tool timeout the CLI is started with. A wait longer than
                 // that wants the session parked and resumed, which is the Sleeping state and is not
                 // built - the cap is honest and the agent is told the real number.
                 if (seconds > MaxWaitSeconds) seconds = MaxWaitSeconds;
-                string why = await _control.Until(seconds > 0 ? TimeSpan.FromSeconds(seconds) : null,
-                    0, titled, cancel).ConfigureAwait(false);
+                string why = await _control.Until(TimeSpan.FromSeconds(seconds), 0, titled, cancel).ConfigureAwait(false);
                 return Say("woke on " + why);
             }
 
@@ -731,7 +732,9 @@ public sealed class WorkspaceMcp : IDisposable
         string method = Str(call, "method");
         object? id = call.TryGetProperty("id", out JsonElement raw)
             && raw.ValueKind is JsonValueKind.Number or JsonValueKind.String ? raw : null;
-        if (id is null) return null;                        // a notification: nothing to answer
+        // A notification: nothing to answer. notifications/cancelled arrives here only after the call
+        // it names has finished; WorkspacePipeServer acts on it while that call is still running.
+        if (id is null) return null;
 
         try
         {
@@ -767,12 +770,27 @@ public sealed class WorkspaceMcp : IDisposable
                 });
         }
         }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException
-            or ArgumentException or OverflowException)
+        catch (Exception ex) when (ArgumentFault(ex))
         { return Error(id, -32602, "Invalid tool parameters."); }
+        catch (ObjectDisposedException)
+        { return Ok(id, Fail("The workspace closed while this was running. Call status before trying again.")); }
         catch (Exception ex) when (ex is not OperationCanceledException)
         { return Ok(id, Fail(ex.GetType().Name + ": " + ex.Message)); }
     }
+
+    /// <summary>
+    /// Whether a call failed on what it was given rather than on the workspace. InvalidOperationException
+    /// is both: JsonElement throws it for a value of the wrong kind, and a workspace torn down under a
+    /// call throws ObjectDisposedException, which is one too. Reporting that as bad parameters sent the
+    /// agent to rewrite a call that was fine.
+    /// </summary>
+    internal static bool ArgumentFault(Exception ex) => ex switch
+    {
+        ObjectDisposedException => false,
+        JsonException or KeyNotFoundException or ArgumentException or OverflowException => true,
+        InvalidOperationException => ex.TargetSite?.DeclaringType?.Assembly == typeof(JsonElement).Assembly,
+        _ => false,
+    };
 
     static object Png(BitmapSource frame)
     {

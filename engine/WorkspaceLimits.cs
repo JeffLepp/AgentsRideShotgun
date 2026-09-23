@@ -247,10 +247,17 @@ sealed class WorkspaceLimits : IDisposable
 /// A nested job for one tracked command. The workspace job remains the resource boundary; this
 /// child job supplies an independently cancellable process tree without giving a command a route
 /// around the workspace's CPU, memory, desktop, or shutdown limits.
+///
+/// Killing the process tree misses anything whose parent already exited: `start` in a script, or a
+/// build server a build left behind. Everything a command starts lands in its job, so cancelling
+/// or a time limit ends those too. There is deliberately no kill-on-close: a command that ends on
+/// its own keeps what it started, since `run` is also how an agent opens the app it is testing,
+/// and the workspace job still ends all of it when the workspace closes.
 /// </summary>
 sealed class WorkspaceProcessGroup : IDisposable
 {
     readonly nint _job;
+    readonly Lock _gate = new();
     bool _disposed;
 
     public WorkspaceProcessGroup()
@@ -259,44 +266,32 @@ sealed class WorkspaceProcessGroup : IDisposable
         if (_job == 0)
             throw new InvalidOperationException(
                 $"Windows would not create the command job object (error {Marshal.GetLastWin32Error()}).");
-
-        var limits = new Native.JobExtendedLimitInformationData
-        {
-            BasicLimitInformation = new Native.JobBasicLimitInformation
-            {
-                LimitFlags = Native.JobLimitKillOnJobClose
-            }
-        };
-        int size = Marshal.SizeOf<Native.JobExtendedLimitInformationData>();
-        nint buffer = Marshal.AllocHGlobal(size);
-        try
-        {
-            Marshal.StructureToPtr(limits, buffer, false);
-            if (!Native.SetInformationJobObject(_job, Native.JobExtendedLimitInformation, buffer, size))
-                throw new InvalidOperationException(
-                    $"Windows refused the command job limit (error {Marshal.GetLastWin32Error()}).");
-        }
-        catch
-        {
-            Native.CloseHandle(_job);
-            throw;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
     }
 
+    /// <summary>True once the command's root process is in this job.</summary>
+    public bool Holding { get; private set; }
+
     /// <summary>Called while the root process is suspended, after the workspace job assignment.</summary>
-    public bool TryTake(nint process) => !_disposed && Native.AssignProcessToJobObject(_job, process);
+    public bool TryTake(nint process)
+    {
+        if (_disposed || !Native.AssignProcessToJobObject(_job, process)) return false;
+        return Holding = true;
+    }
 
     /// <summary>Kills this command and every descendant it placed in the nested job.</summary>
-    public bool Terminate(uint exitCode) => !_disposed && Native.TerminateJobObject(_job, exitCode);
+    public bool Terminate(uint exitCode)
+    {
+        // A cancel can race the job settling on its own; never terminate through a closed handle.
+        lock (_gate) return !_disposed && Holding && Native.TerminateJobObject(_job, exitCode);
+    }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        if (_job != 0) Native.CloseHandle(_job); // KILL_ON_JOB_CLOSE is the final backstop.
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            if (_job != 0) Native.CloseHandle(_job);
+        }
     }
 }

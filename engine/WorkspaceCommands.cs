@@ -59,6 +59,7 @@ public sealed class CommandJob
     internal string Output = string.Empty;
     internal string[] Scripts = [];
     internal Process? Process;
+    internal WorkspaceProcessGroup? Group;
     internal readonly TaskCompletionSource<bool> Finished =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -201,10 +202,13 @@ public sealed class WorkspaceCommands : IDisposable
         // shell as well as the script, so a failure before the script starts is still readable.
         // < NUL is the one thing keeping a command that asks a question from waiting for an answer
         // forever now that nothing kills it on a timer.
+        try { job.Group = new WorkspaceProcessGroup(); }
+        catch (InvalidOperationException) { }   // cancelling falls back to the live process tree
         int pid = _control.Open("cmd.exe",
-            "/d /s /c \"" + Quote(script) + " > " + Quote(output) + " 2>&1 < NUL\"", quiet: true);
+            "/d /s /c \"" + Quote(script) + " > " + Quote(output) + " 2>&1 < NUL\"", true, out _, job.Group);
         if (pid == 0)
         {
+            job.Group?.Dispose();
             Clean(job);
             error = "the workspace would not start a command shell";
             return null;
@@ -361,6 +365,8 @@ public sealed class WorkspaceCommands : IDisposable
         foreach (string leftover in job.Scripts) Delete(leftover);
         job.Process?.Dispose();
         job.Process = null;
+        job.Group?.Dispose();     // no kill on close: what a finished command started keeps running
+        job.Group = null;
         job.Finished.TrySetResult(true);
         _control.Evidence.Note("run", job.Id, job.Status
             + (job.ExitCode is { } actual ? ", exit code " + actual : "")
@@ -378,7 +384,9 @@ public sealed class WorkspaceCommands : IDisposable
             job.State = state;
             job.Reason = reason;
         }
-        try { job.Process?.Kill(entireProcessTree: true); }
+        // The command's own job first: it also holds what a parent that already exited left running,
+        // which the process tree no longer leads to.
+        try { if (job.Group?.Terminate(1) != true) job.Process?.Kill(entireProcessTree: true); }
         catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException
             or System.ComponentModel.Win32Exception or AggregateException)
         {
@@ -485,7 +493,7 @@ public sealed class WorkspaceCommands : IDisposable
                 lock (_gate) { job.State = CommandState.Cancelled; job.Reason = "the workspace closed"; job.Ended = DateTimeOffset.Now; }
                 try
                 {
-                    job.Process?.Kill(entireProcessTree: true);
+                    if (job.Group?.Terminate(1) != true) job.Process?.Kill(entireProcessTree: true);
                     // Wait for the shell to actually go before deleting under it. Kill only signals,
                     // and its redirected output file is still open until the last child has exited.
                     job.Process?.WaitForExit(3000);
@@ -496,6 +504,8 @@ public sealed class WorkspaceCommands : IDisposable
             }
             job.Process?.Dispose();
             job.Process = null;
+            job.Group?.Dispose();
+            job.Group = null;
             Clean(job);
         }
         _stop.Cancel();

@@ -218,6 +218,7 @@ static partial class Native
 
     public const uint EventObjectShow = 0x8002;
     public const uint EventObjectCreate = 0x8000;
+    public const uint EventObjectNameChange = 0x800C;
     public const uint WineventOutOfContext = 0x0000;
     public const uint WmQuit = 0x0012;
     public const int ObjIdWindow = 0;
