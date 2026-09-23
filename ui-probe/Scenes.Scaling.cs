@@ -14,7 +14,7 @@ namespace Deskweave.UiProbe;
 
 /// <summary>
 /// 100%, 125% and 150%, every surface at its minimum size, plus the keyboard and reduced-motion
-/// passes MVP_SPEC's "Done means" asks for and VALIDATION.md deferred three times.
+/// passes MVP_SPEC's "Done means" asks for and earlier validation rounds deferred three times.
 ///
 /// The lever is <see cref="VisualTreeHelper.SetRootDpi"/>: it hands the whole tree the DPI a real
 /// 125% or 150% monitor gives it, so layout rounding, glyph metrics and the device-pixel grid are

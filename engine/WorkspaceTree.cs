@@ -118,7 +118,7 @@ public sealed class WorkspaceTree : IDisposable
     /// Like <see cref="Read(nint, bool, string?)"/>, but also says whether the read stopped at its
     /// time budget with more of the tree left unread. A busy window used to mean CheckDeadline threw
     /// and the agent got nothing at all - see AGENT_WORKSPACES_TECHNICAL_REPORT.md and
-    /// Found in app testing. What was collected before the clock ran
+    /// the app-testing friction review, item 6. What was collected before the clock ran
     /// out is worth more than an exception, every time.
     /// </summary>
     public IReadOnlyList<WorkspaceElement> Read(nint window, bool everything, string? nameContains, out bool partial)

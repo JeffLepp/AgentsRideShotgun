@@ -98,6 +98,8 @@ static class Mvp
             {
                 using var context = new SceneContext(references);
                 var element = await (Task<FrameworkElement>)method.Invoke(null, [context])!;
+                // Display text is snapped to 1x pixels and turns jagged when scaled up.
+                if (scale != 1) TextOptions.SetTextFormattingMode(element, TextFormattingMode.Ideal);
                 await context.Settle();
                 BitmapSource shot = Photograph(element, scale);
                 Save(shot, Path.Combine(folder, scene!.Name + ".png"));

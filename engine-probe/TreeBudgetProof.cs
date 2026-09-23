@@ -7,7 +7,7 @@ using Deskweave.AgentWorkspaces;
 /// Proves prompt 4b (design/FIX-PROMPTS-2026-09-20.md): a busy window used to make
 /// WorkspaceTree.Read throw TimeoutException outright once its 3-second budget ran out, so the agent
 /// got nothing at all - and combined with 4a, no way to press anything on that window either
-/// (found in app testing). This launches a WPF window with sixty
+/// (the app-testing friction review, item 6). This launches a WPF window with sixty
 /// controls, reads it once at the ordinary budget to know the true count, then reads it again with
 /// WorkspaceTree's own test-only knobs turned down - so the deadline is hit deterministically instead
 /// of racing a real slow window - and checks that the second read still comes back, marked partial,

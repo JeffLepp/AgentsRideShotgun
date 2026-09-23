@@ -39,7 +39,7 @@ $staging = Join-Path $root ('artifacts\installer-staging\' + [DateTime]::UtcNow.
 # The install id is not "Deskweave" on purpose: Velopack installs to %LOCALAPPDATA%\<id> and its
 # uninstall deletes that whole folder, while the owner's workspaces live in %LOCALAPPDATA%\Deskweave.
 # A technical floor for this private candidate, matching its oldest observed test guest.
-# Edition/lifecycle support is narrower and is stated in LAUNCH.md; a build number cannot encode it.
+# Edition/lifecycle support is narrower and is stated in the launch notes; a build number cannot encode it.
 $packageRuntime = 'win10.0.19041-x64'
 $signing = @()
 if ($Sign) {

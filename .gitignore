@@ -1,12 +1,34 @@
-# Local build products and validation captures are reproducible, not app source.
+# Build output, reproducible from source.
 **/bin/
 **/obj/
 out/
 artifacts/
 .worktrees/
+
+# Editors and OS clutter.
 .vs/
+.vscode/
+.idea/
 *.user
+*.suo
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Python and Node leftovers.
+__pycache__/
+*.py[cod]
+node_modules/
+
+# Logs.
+*.log
+
+# Local experiments, trial runs and throwaway checks.
+/scratch/
 
 # Launch art scratch: rendered previews and contact sheets.
 launch/_*
 launch/assets/_*
+
+# Private planning notes, old logs and review rounds (kept on the owner's machine).
+/.local-notes/
