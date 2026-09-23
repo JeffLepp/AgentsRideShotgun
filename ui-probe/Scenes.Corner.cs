@@ -445,13 +445,19 @@ static partial class CornerScenes
             string sourcePath = Path.Combine(sourceDir, "notes.txt");
             File.WriteAllText(sourcePath, "drag me");
             string folder = runtime.Plane!.Folder;
-            WorkspacePeekHost.DropFiles([sourcePath]);
+            await WorkspacePeekHost.DropFiles([sourcePath]);
             string destination = Path.Combine(folder, "notes.txt");
             Program.Check(File.Exists(destination) && File.ReadAllText(destination) == "drag me" && File.Exists(sourcePath),
                 "Dropping a file copies it into the workspace folder and leaves the source in place");
-            WorkspacePeekHost.DropFiles([sourcePath]);
+            await WorkspacePeekHost.DropFiles([sourcePath]);
             Program.Check(File.Exists(Path.Combine(folder, "notes (2).txt")),
                 "A clash on drop is renamed \" (2)\" rather than overwriting the first copy");
+            // A file another program holds open cannot be copied; the card says so instead of nothing.
+            using (File.Open(sourcePath, FileMode.Open, FileAccess.Read, FileShare.None))
+                await WorkspacePeekHost.DropFiles([sourcePath]);
+            Program.Check(GateWindow() is { Notice: "Couldn't copy notes.txt into Corner gate fixture" }
+                && !File.Exists(Path.Combine(folder, "notes (3).txt")),
+                "A drop that cannot be copied is told on the card, off the UI thread, naming the file and the workspace");
 
             // Alerts (MVP_SPEC): with the corner off, an agent's question becomes one Windows notification.
             var heard = new List<(string Title, string Text, string Workspace, string Request)>();
@@ -663,8 +669,15 @@ static partial class CornerScenes
                 InvokeHost("Rethink");
                 Program.Check(window.FrontRect == moving, "Preview refreshes do not snap a window back during a move");
                 typeof(WorkspacePeekWindow).GetField("_moving", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, false);
-                second.Plane.Release();
+                // A file dragged in from Explorer sends no mouse events, so it is not hover; the drag
+                // itself has to hold the card, or the drop lands in whichever workspace took over.
                 window.ForceHoverForTests(false);
+                window.ForceDropOverlayForTests(true);
+                InvokeHost("StirFrom", second.Id);
+                Program.Check((string?)typeof(WorkspacePeekHost).GetField("_frontId", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null) == stored.Id,
+                    "A file dragged over the card holds it on its workspace while another agent acts");
+                window.ForceDropOverlayForTests(false);
+                second.Plane.Release();
             }
             InvokeHost("StirFrom", stored.Id);
             Program.Check(Close(window.FrontRect.Left, savedLeft) && Close(window.FrontRect.Top, savedTop),
@@ -848,8 +861,8 @@ static partial class CornerScenes
     }
 
     /// <summary>
-    /// A competing real registration makes the stored Pause shortcut unavailable. The host saves
-    /// the first available fallback for Settings and reports no refusal while one is held.
+    /// A competing real registration makes the owner's chosen Pause shortcut unavailable. The host
+    /// keeps his choice in Settings and reports the refusal there, rather than saving a fallback over it.
     /// </summary>
     static async Task ReportShortcutsChecks()
     {
@@ -862,9 +875,9 @@ static partial class CornerScenes
             AppSettingsStore.Update(s => s with { PauseHotkey = "Ctrl+Alt+Shift+F11" });
             WorkspacePeekHost.Start();
             await Task.Delay(300);
-            Program.Check(AppSettingsStore.Current.PauseHotkey == "Ctrl+Alt+Shift+P"
-                && !ModuleEntry.PauseShortcutTaken,
-                "Pause takes and saves the first free fallback when Windows refuses the stored key");
+            Program.Check(AppSettingsStore.Current.PauseHotkey == "Ctrl+Alt+Shift+F11"
+                && ModuleEntry.PauseShortcutTaken,
+                "When Windows refuses the owner's chosen Pause key, his choice stays saved and Settings is told it is taken");
         }
         finally
         {

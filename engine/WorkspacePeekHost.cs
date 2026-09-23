@@ -413,7 +413,7 @@ internal static class WorkspacePeekHost
             { CornerLeft = rect.Left, CornerTop = rect.Top, CornerPinned = true });
         window.Resized += rect => AppSettingsStore.Update(s => s with
             { CornerWidth = rect.Width, CornerLeft = rect.Left, CornerTop = rect.Top, CornerPinned = true });
-        window.FilesDropped += DropFiles;
+        window.FilesDropped += paths => _ = DropFiles(paths);
         window.SheetOpenClicked += () => Decide(true);
         window.SheetKeepClicked += () => Decide(false);
         window.ResumeClicked += ModuleEntry.RequestPauseAll;
@@ -433,21 +433,43 @@ internal static class WorkspacePeekHost
     }
 
     /// <summary>Copies dropped files into the front workspace's folder, never moving the source.
+    /// The target is fixed on the UI thread at the drop; the copying runs off it, so a big file does
+    /// not freeze the card, and anything that did not copy is said on the card afterward.
     /// Internal rather than private so the gate can exercise it without a real OS drag.</summary>
-    internal static void DropFiles(string[] paths)
+    internal static async Task DropFiles(string[] paths)
     {
         if (_frontId is not { } id || !_followed.TryGetValue(id, out Follow? f) || f.Runtime.Plane is not { } plane) return;
         string folder = plane.Folder;
         if (folder.Length == 0) return;
+        string name = WorkspaceName(f.Runtime);
+        List<string> failed = await Task.Run(() => CopyInto(folder, paths));
+        if (failed.Count > 0) CopyFailed(name, failed);
+    }
+
+    static List<string> CopyInto(string folder, string[] paths)
+    {
+        var failed = new List<string>();
         foreach (string path in paths)
         {
             try
             {
-                if (!File.Exists(path)) continue;
+                if (!File.Exists(path)) { failed.Add(path); continue; }
                 File.Copy(path, UniqueDestination(folder, Path.GetFileName(path)), overwrite: false);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed.Add(path); }
         }
+        return failed;
+    }
+
+    /// <summary>Back on the UI thread: brings the card up if it went away meanwhile and says what
+    /// did not copy, rather than the file quietly not being there.</summary>
+    static void CopyFailed(string workspace, List<string> failed)
+    {
+        if (_owner is not { } owner) return;
+        if (!owner.CheckAccess()) { owner.BeginInvoke(() => CopyFailed(workspace, failed)); return; }
+        string what = failed.Count == 1 ? Path.GetFileName(failed[0].TrimEnd('\\', '/')) : failed.Count + " files";
+        Summon();
+        _window?.ShowNotice("Couldn't copy " + what + " into " + workspace);
     }
 
     static string UniqueDestination(string folder, string name)
@@ -564,7 +586,7 @@ internal static class WorkspacePeekHost
     {
         if (_pausedAll) window.ShowPausedToast();
         else if (front.Plane?.Driving == Driver.Owner) window.ShowUsingToast(ShortAgentName(front));
-        else window.HideToast();
+        else if (window.Notice is null) window.HideToast();
     }
 
     static (string Message, PeekTone Tone) Status(WorkspaceRuntime r)
@@ -745,9 +767,14 @@ internal static class WorkspacePeekHost
             chosen = candidate;
             break;
         }
-        ModuleEntry.ReportPauseShortcut(!held);
-        if (chosen is not null && chosen != _settings.PauseHotkey)
-            AppSettingsStore.Update(s => s with { PauseHotkey = chosen });
+        // A key the owner picked stays his: a stand-in keeps Pause working for this run, Settings says
+        // his key is taken, and the next start tries it again. Only the untouched default moves to
+        // the free key, which Settings then shows.
+        bool picked = _settings.PauseHotkey != new AppSettings().PauseHotkey;
+        bool standIn = chosen is not null && chosen != _settings.PauseHotkey;
+        ModuleEntry.ReportPauseShortcut(!held || standIn && picked);
+        if (standIn && !picked)
+            AppSettingsStore.Update(s => s with { PauseHotkey = chosen! });
     }
 
     static WorkspacePeekHotkey? MakeHotkey(Action pressed)

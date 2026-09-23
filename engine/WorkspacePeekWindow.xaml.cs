@@ -45,7 +45,7 @@ public partial class WorkspacePeekWindow : Window
     bool _hovered;
     double _stackExtra;
     string? _chipPath;
-    bool _chipPressed, _chipDragging;
+    bool _chipPressed, _chipDragging, _dragInside;
     Point _chipStart;
     WorkspaceScreenInput? _input;
     PeekEdges _dragEdges;
@@ -86,7 +86,11 @@ public partial class WorkspacePeekWindow : Window
 
     /// <summary>Whether the owner's pointer is over the card right now. Held, in the policy's terms.</summary>
     internal bool Hovered => _hovered;
-    internal bool Manipulating => _moving || _dragEdges != PeekEdges.None;
+    /// <summary>Moving, resizing, or holding a file drag over the card. A drag from Explorer sends no
+    /// mouse events, so it never counts as hover; without this the card could tuck away or swap
+    /// workspace under the file before it lands.</summary>
+    internal bool Manipulating => _moving || _dragEdges != PeekEdges.None || Dropping;
+    internal bool Dropping => DropOverlay.Visibility == Visibility.Visible;
 
     /// <summary>The visible card's own bounding size, back-card peek included but shadow margin
     /// excluded - what <see cref="Configure"/> just laid out and the corner rule should place.</summary>
@@ -450,8 +454,12 @@ public partial class WorkspacePeekWindow : Window
 
     void SetDropOverlay(bool shown)
     {
+        bool changed = Dropping != shown;
         DropOverlay.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         UpdateChrome();
+        // The host treats a drag like a hand on the card: it holds on the way in, and the quiet
+        // time starts over on the way out.
+        if (changed) HoverChanged?.Invoke();
     }
 
     /// <summary>Fades in, rising a little, from wherever it is now. Interrupts a fade out. No motion
@@ -651,15 +659,25 @@ public partial class WorkspacePeekWindow : Window
         Toast.Visibility = Visibility.Visible;
         ToastText.Text = said;
         ToastLink.Visibility = Visibility.Collapsed;
+        _notice = said;
         _poppedTimer?.Stop();
         _poppedTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _poppedTimer.Tick += (_, _) =>
         {
             _poppedTimer?.Stop();
+            _notice = null;
             if (ToastText.Text == said) HideToast();
         };
         _poppedTimer.Start();
     }
+
+    string? _notice;
+
+    /// <summary>A one-off line in the card's toast for a few seconds, such as a drop that did not copy.</summary>
+    internal void ShowNotice(string said) => ShowPoppedOut(said);
+
+    /// <summary>The line <see cref="ShowNotice"/> is showing right now, which the host's refresh leaves up.</summary>
+    internal string? Notice => _notice;
 
     internal bool PopOutButtonVisible => PopOutButton.Visibility == Visibility.Visible;
 
@@ -808,18 +826,27 @@ public partial class WorkspacePeekWindow : Window
 
     protected override void OnDragEnter(DragEventArgs e) => UpdateDrop(e);
     protected override void OnDragOver(DragEventArgs e) => UpdateDrop(e);
-    protected override void OnDragLeave(DragEventArgs e) => SetDropOverlay(false);
+    // Crossing from one element of the card to the next leaves one and enters the other at once.
+    // Only a leave that no enter follows ends the drag, so the hold does not flicker off between them.
+    protected override void OnDragLeave(DragEventArgs e)
+    {
+        _dragInside = false;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () => { if (!_dragInside) SetDropOverlay(false); });
+    }
     protected override void OnDrop(DragEventArgs e)
     {
-        SetDropOverlay(false);
+        _dragInside = false;
+        // Hand the files over while the drag still holds the card, so they go to the workspace it shows.
         if (e.Data.GetDataPresent(DataFormats.FileDrop) && e.Data.GetData(DataFormats.FileDrop) is string[] paths && paths.Length > 0)
             FilesDropped?.Invoke(paths);
+        SetDropOverlay(false);
         e.Handled = true;
     }
 
     void UpdateDrop(DragEventArgs e)
     {
         bool has = e.Data.GetDataPresent(DataFormats.FileDrop);
+        _dragInside = has;
         e.Effects = has ? DragDropEffects.Copy : DragDropEffects.None;
         SetDropOverlay(has);
         e.Handled = true;
