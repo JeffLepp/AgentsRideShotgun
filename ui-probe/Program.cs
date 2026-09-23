@@ -79,12 +79,13 @@ static class Program
         bool mvp = args.Length is 2 or 3 && args[0] == "--mvp";
         bool cornerRendering = args.Length == 2 && args[0] == "--corner-rendering";
         bool cornerDocking = args.Length == 2 && args[0] == "--corner-docking";
-        if (!mvp && !cornerRendering && !cornerDocking && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
+        bool storage = args.Length == 2 && args[0] == "--storage";
+        if (!mvp && !cornerRendering && !cornerDocking && !storage && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
         {
-            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix] | --corner-rendering <output-folder> | --corner-docking <output-folder>");
+            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix] | --corner-rendering <output-folder> | --corner-docking <output-folder> | --storage <output-folder>");
             return 2;
         }
-        _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking ? args[1] : args[0]);
+        _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking || storage ? args[1] : args[0]);
         Directory.CreateDirectory(_output);
         // The scenes stand in for every agent seam; if one is ever missed, what it writes lands here and
         // not in the owner's own configuration, which is what the gate-1 run did.
@@ -104,7 +105,8 @@ static class Program
         using var scope = WorkspaceStore.UseRootForTests(Path.Combine(_output, "workspaces"));
         using var preferences = ShellPreferences.UseFileForTests(Path.Combine(_output, "shell.json"));
         using var settings = AppSettingsStore.UseFileForTests(Path.Combine(_output, "settings.json"));
-        TestScreen.Use();
+        // The storage checks show no window, so they need no spare monitor either.
+        if (!storage) TestScreen.Use();
         // Fixtures use the selected spare monitor. Their synthetic fullscreen states must not
         // depend on the owner's game, and their explicit navigation must not activate over it.
         WorkspacePresentation.SuppressedForTests = () => false;
@@ -145,6 +147,7 @@ static class Program
                     AppearanceManager.Apply(ThemeChoice.Light);
                     await CornerScenes.RenderingLifecycleChecks();
                 }
+                else if (storage) await StorageChecks.Run();
                 else if (mvp) await Mvp.Run(_output, args.Length == 3 ? args[2] : null);
                 else await Run();
             }

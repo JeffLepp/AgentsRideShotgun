@@ -494,7 +494,9 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         WorkspaceRuntime.Of(id)?.Dispose();
         WorkspaceAccessStore.Write(id, new WorkspaceAccessPolicy());
         WorkspaceAccessStore.Withdraw(id);
-        WorkspaceStore.Delete(id);
+        // Windows can still hold a file in it for longer than Delete waits. The workspace is still
+        // there then, so say so here rather than let the hub drop a card for something that stayed.
+        if (!WorkspaceStore.Delete(id)) { ShowHeaderError("Couldn't delete it. Something still has its files open."); return; }
         Deleted?.Invoke(id);
     }
 

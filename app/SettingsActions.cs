@@ -254,7 +254,7 @@ internal static class SettingsActions
     static string? ScratchFolder()
     {
         StoredWorkspace? scratch = ScratchWorkspace();
-        return scratch is null ? null : WorkspaceStore.FolderForDesktop(scratch.Id);
+        return scratch is null ? null : WorkspaceStore.FolderOf(scratch.Id);
     }
 
     internal static Func<long> LogsBytes = () => EntryBytes(ProductContext.Local("logs"));

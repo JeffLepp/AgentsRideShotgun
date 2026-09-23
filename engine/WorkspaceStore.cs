@@ -61,8 +61,8 @@ public sealed record StoredWorkspace
 /// so there is nothing to rebuild and nothing to promise about what survives.
 ///
 /// There is deliberately no central list to corrupt. A workspace whose <c>workspace.json</c> is
-/// missing or unreadable still appears, recovered from its folder name, because the folder is the
-/// record of record.
+/// missing or corrupt still appears, recovered from its folder name, because the folder is the
+/// record of record. One that is only locked is left out of that read instead.
 /// </summary>
 public static class WorkspaceStore
 {
@@ -373,7 +373,10 @@ public static class WorkspaceStore
         id = id[prefix.Length..];
 
         string record = Path.Combine(folder, RecordName);
-        if (File.Exists(record))
+        // A record that is only locked right now (a save in flight, a scan) is not a broken one.
+        // Recovering it saved a stripped record - no mission, Free, no project - over the real one,
+        // so a locked record is tried a few more times and otherwise skipped for this read.
+        for (int attempt = 0; File.Exists(record); attempt++)
         {
             try
             {
@@ -382,13 +385,17 @@ public static class WorkspaceStore
                 // folder is what the desktop and the low integrity label are named after.
                 if (stored is not null && !string.IsNullOrWhiteSpace(stored.Name))
                     return stored with { Id = id };
+                break;
             }
-            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            catch (JsonException) { break; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                if (attempt == 2) return null;
+                Thread.Sleep(50);
             }
         }
 
-        // Recovery: an unreadable or missing record loses the name and the dates, not the workspace.
+        // Recovery: a corrupt or missing record loses the name and the dates, not the workspace.
         var recovered = new StoredWorkspace
         {
             Id = id,
@@ -396,7 +403,7 @@ public static class WorkspaceStore
             Created = Directory.GetCreationTime(folder),
             LastUsed = Directory.GetLastWriteTime(folder)
         };
-        try { Save(recovered); } catch (IOException) { }
+        try { Save(recovered); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         return recovered;
     }
 

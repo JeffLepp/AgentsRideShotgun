@@ -120,7 +120,18 @@ public static class AppSettingsStore
     /// <summary>After every change, on the thread that made it. UI listeners dispatch to their own.</summary>
     public static event Action<AppSettings>? Changed;
 
-    public static AppSettings Current { get { lock (Gate) return _current ??= Read(); } }
+    // A settings.json that was locked at launch (a backup tool, an antivirus scan) reads as the
+    // defaults. Keeping those, and then saving them on the next change, replaced the owner's real
+    // file with them. Until one read gets through, a failed read is tried again and nothing is saved.
+    static bool _read;
+
+    public static AppSettings Current { get { lock (Gate) return Loaded(); } }
+
+    static AppSettings Loaded()
+    {
+        if (!_read && Read() is { } read) { _current = read; _read = true; }
+        return _current ?? new AppSettings().Sane();
+    }
 
     /// <summary>Applies a change, saves it and raises <see cref="Changed"/>. False when it could
     /// not be written; the change still holds for this session.</summary>
@@ -133,10 +144,10 @@ public static class AppSettingsStore
             long mine;
             lock (Gate)
             {
-                next = change(_current ??= Read()).Sane();
+                next = change(Loaded()).Sane();
                 _current = next;
                 mine = ++_version;
-                saved = Write(next);
+                saved = _read && Write(next);
             }
             // One listener failing must not keep the change from the others; it is already saved.
             foreach (Action<AppSettings> listener in Changed?.GetInvocationList().Cast<Action<AppSettings>>() ?? [])
@@ -151,13 +162,17 @@ public static class AppSettingsStore
         }
     }
 
-    static AppSettings Read()
+    /// <summary>Null when the file is there and could not be read right now.</summary>
+    static AppSettings? Read()
     {
         try
         {
             if (!System.IO.File.Exists(File)) return new AppSettings().Sane();
             if (new FileInfo(File).Length > MaxBytes) return Unusable();
             AppSettings? read = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(File), Json);
+            // A newer Deskweave's file is the owner's choices in a shape this build does not know.
+            // Kept aside like an unusable one, so going back to that build can put them back.
+            if (read is { Schema: > 1 }) return Unusable("settings.newer.json");
             return read is { Schema: 1 } ? read.Sane() : new AppSettings().Sane();
         }
         catch (JsonException)
@@ -167,7 +182,7 @@ public static class AppSettingsStore
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Locked or unreadable right now, which says nothing about what is in it. Leave it alone.
-            return new AppSettings().Sane();
+            return null;
         }
     }
 
@@ -178,13 +193,13 @@ public static class AppSettingsStore
     /// file is kept next door as settings.bad.json first. A failed rename changes nothing and is not
     /// allowed to escape: defaults either way.
     /// </summary>
-    static AppSettings Unusable()
+    static AppSettings Unusable(string keptAs = "settings.bad.json")
     {
         try
         {
             string? folder = Path.GetDirectoryName(File);
             if (!string.IsNullOrEmpty(folder))
-                System.IO.File.Move(File, Path.Combine(folder, "settings.bad.json"), true);
+                System.IO.File.Move(File, Path.Combine(folder, keptAs), true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or ArgumentException or NotSupportedException) { }
@@ -237,12 +252,13 @@ public static class AppSettingsStore
             if (_testFile is not null) throw new InvalidOperationException("A settings override is already active.");
             _testFile = Path.GetFullPath(path);
             _current = null;
+            _read = false;
         }
         return new Scope();
     }
 
     sealed class Scope : IDisposable
     {
-        public void Dispose() { lock (Gate) { _testFile = null; _current = null; } }
+        public void Dispose() { lock (Gate) { _testFile = null; _current = null; _read = false; } }
     }
 }
