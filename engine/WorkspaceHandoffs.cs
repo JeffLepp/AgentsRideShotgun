@@ -4,8 +4,10 @@ using System.Security.Cryptography;
 
 namespace Deskweave.AgentWorkspaces;
 
+/// <summary>A program request carries its own arguments, fixed when it is made: the owner is shown
+/// exactly this and approving runs exactly this, so nothing can be swapped in before his click.</summary>
 internal sealed record WorkspaceHandoff(string Id, string Kind, string Target, string Reason,
-    string State, string Detail, DateTimeOffset Created, string? Sha256 = null);
+    string State, string Detail, DateTimeOffset Created, string? Sha256 = null, string? Arguments = null);
 
 /// <summary>Requests are data, never permission. Only an owner UI action calls Decide.</summary>
 internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
@@ -26,11 +28,14 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
     /// </summary>
     internal Func<WorkspaceHandoff, string?>? Perform { get; set; }
 
-    internal WorkspaceHandoff Request(string kind, string target, string reason)
+    internal WorkspaceHandoff Request(string kind, string target, string reason, string? arguments = null)
     {
         if (target.Length is < 1 or > 2048 || target.Any(char.IsControl)
             || reason.Length is < 1 or > 500 || reason.Any(char.IsControl))
             throw new ArgumentException("Provide a target and a short, single-line reason.");
+        if (string.IsNullOrWhiteSpace(arguments)) arguments = null;
+        else if (kind is not ("program" or "takeover") || arguments.Length > 1024 || arguments.Any(char.IsControl))
+            throw new ArgumentException("Program arguments must be one line of at most 1024 characters.");
         string? hash = null;
         if (kind == "url")
         {
@@ -58,15 +63,16 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
         {
             // Kind is part of what makes a request the same request: "open Notepad on your desktop"
             // and "close your copy of Notepad and start it in here" name the same program and ask
-            // opposite things, and answering one must never be taken for answering the other.
+            // opposite things, and answering one must never be taken for answering the other. The
+            // arguments are too: the same program with a different command line is a different ask.
             var existing = _requests.FirstOrDefault(r =>
-                r.State == "pending" && r.Kind == kind && r.Target == target && r.Sha256 == hash);
+                r.State == "pending" && r.Kind == kind && r.Target == target && r.Sha256 == hash && r.Arguments == arguments);
             if (existing is not null) return existing;
             if (_requests.Count(r => r.State == "pending") >= 8)
                 throw new InvalidOperationException("Eight desktop requests are already waiting. Wait for the owner.");
             if (_requests.Count >= 40) _requests.RemoveAll(r => r.State != "pending");
             request = new(Guid.NewGuid().ToString("N"), kind, target, reason, "pending",
-                "Waiting for the owner's click in Deskweave. Nothing has opened on the main desktop.", DateTimeOffset.UtcNow, hash);
+                "Waiting for the owner's click in Deskweave. Nothing has opened on the main desktop.", DateTimeOffset.UtcNow, hash, arguments);
             _requests.Add(request);
         }
         Changed?.Invoke();
@@ -84,7 +90,16 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
         return full;
     }
 
+    /// <summary>Changed is raised after the lock is let go: its listeners reach the workspace's own
+    /// lock, which an agent thread can hold while it waits for this one in Request.</summary>
     internal WorkspaceHandoff Decide(string requestId, bool approve, Action<string>? open = null)
+    {
+        WorkspaceHandoff decided = Settle(requestId, approve, open);
+        if (decided.State != "pending") Changed?.Invoke();
+        return decided;
+    }
+
+    WorkspaceHandoff Settle(string requestId, bool approve, Action<string>? open)
     {
         lock (_gate)
         {
@@ -141,7 +156,6 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
     WorkspaceHandoff Replace(int index, WorkspaceHandoff updated)
     {
         _requests[index] = updated;
-        Changed?.Invoke();
         return updated;
     }
     internal void CancelPending()

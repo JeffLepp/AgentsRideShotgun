@@ -139,13 +139,18 @@ static class CornerManyScenes
     /// program's name to keep it true.</summary>
     static void QuestionChecks()
     {
-        static string Ask(string kind, string target) => (string)InvokeHost("Question",
-            new WorkspaceHandoff("id", kind, target, "why", "pending", "", DateTimeOffset.UtcNow))!;
+        static string Ask(string kind, string target, string? arguments = null) => (string)InvokeHost("Question",
+            new WorkspaceHandoff("id", kind, target, "why", "pending", "", DateTimeOffset.UtcNow, Arguments: arguments))!;
         Program.Check(Ask("takeover", "Notepad") == "Close your copy of Notepad and start it in the workspace?"
-            && Ask("program", "Notepad") == "Open Notepad on your desktop?"
+            && Ask("program", "Notepad") == "Open this on your desktop?\nNotepad\nWhy: why"
             && Ask("file", @"C:\somewhere\report.pdf") == "Open report.pdf on your desktop?"
             && Ask("url", "http://localhost:5173/") == "Open http://localhost:5173/ on your desktop?",
             "A takeover asks to close the owner's own copy and start it in the workspace; every other request still asks to open something on his desktop");
+        // The owner approves what will actually run: a program's whole command line and the agent's
+        // reason are on the card, not just its name.
+        Program.Check(Ask("program", @"C:\Program Files\Tool\tool.exe", "--wipe \"C:\\data\"")
+                == "Open this on your desktop?\n\"C:\\Program Files\\Tool\\tool.exe\" --wipe \"C:\\data\"\nWhy: why",
+            "A program request's approval card shows the full command line, arguments included, and the agent's reason");
     }
 
     static StackPanel Strip(WorkspacePeekWindow window) => (StackPanel)window.FindName("TabStrip")!;

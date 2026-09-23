@@ -255,17 +255,20 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     { internal long Started => started; }
     internal sealed class UseLease(long lease, Action release) : IDisposable
     { internal long Lease => lease; public void Dispose() => release(); }
+    /// <summary>
+    /// Checked under this workspace's lock, asked outside it: Request hashes a document of up to
+    /// 25 MB and takes the handoffs' lock, and Decide raises Changed into listeners that come back
+    /// for this one, so holding it across the call could deadlock against the owner's click.
+    /// </summary>
     internal WorkspaceHandoff RequestDesktop(Guid client, string kind, string target, string reason)
     {
         lock (_gate)
-        {
             if (!MayUse(client) || !Policy.DesktopRequests)
                 throw new InvalidOperationException("Desktop requests are disabled or this connection no longer has control.");
-            // Programs are asked for through RequestProgram, which is the only thing that records
-            // what to start. Naming one here would put a question to the owner that does nothing.
-            if (kind is not ("file" or "url")) throw new ArgumentException("Request a document file or an HTTP(S) link.");
-            return Handoffs.Request(kind, target, reason);
-        }
+        // Programs are asked for through RequestProgram, which is the only thing that records
+        // what to start. Naming one here would put a question to the owner that does nothing.
+        if (kind is not ("file" or "url")) throw new ArgumentException("Request a document file or an HTTP(S) link.");
+        return Handoffs.Request(kind, target, reason);
     }
 
     /// <summary>
@@ -277,35 +280,19 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     internal WorkspaceHandoff RequestProgram(Guid client, string program, string? arguments, string reason, bool takeOver)
     {
         lock (_gate)
-        {
             if (!MayUse(client) || !Policy.DesktopRequests)
                 throw new InvalidOperationException("Desktop requests are disabled or this connection no longer has control.");
-            // The plain program name for both kinds: the corner window asks a takeover its own way
-            // round now, so what it does no longer has to be spelled out inside the name.
-            WorkspaceHandoff request = Handoffs.Request(takeOver ? "takeover" : "program", program, reason);
-            lock (_programs)
-            {
-                foreach (string gone in _programs.Keys.Where(k => Handoffs.All.All(r => r.Id != k)).ToArray())
-                    _programs.Remove(gone);
-                _programs[request.Id] = (program, arguments);
-            }
-            return request;
-        }
+        // The plain program name for both kinds: the corner window asks a takeover its own way
+        // round now, so what it does no longer has to be spelled out inside the name. The
+        // arguments travel on the request itself, so the owner's card shows exactly what runs.
+        return Handoffs.Request(takeOver ? "takeover" : "program", program, reason, arguments);
     }
 
-    /// <summary>
-    /// What each program request is actually for, kept here rather than on the request, which
-    /// carries the sentence the owner reads and not a command line. Its own lock, held for the
-    /// lookup only: Decide calls Carry while it holds the handoffs' lock, so taking this workspace's
-    /// lock in there would order the two the opposite way round from RequestProgram.
-    /// </summary>
-    readonly Dictionary<string, (string Program, string? Arguments)> _programs = [];
-
-    /// <summary>The owner clicked. Only Decide reaches this, and only for a request he approved.</summary>
+    /// <summary>The owner clicked. Only Decide reaches this, and only for a request he approved.
+    /// It runs the program and arguments the request was made with, the same ones his card showed.</summary>
     string? Carry(WorkspaceHandoff request)
     {
-        (string Program, string? Arguments) what;
-        lock (_programs) if (!_programs.TryGetValue(request.Id, out what)) return "That request is no longer on this workspace.";
+        (string Program, string? Arguments) what = (request.Target, request.Arguments);
         if (request.Kind == "takeover") return _control.TakeOver(what.Program, what.Arguments);
         try
         {

@@ -12,6 +12,37 @@ using Deskweave.AgentWorkspaces;
 /// </summary>
 internal static class OpenRouteProbe
 {
+    internal static int RunStandalone(string output)
+    {
+        Directory.CreateDirectory(output);
+        string fixture = Path.Combine(Path.GetDirectoryName(output)!, "of-" + Guid.NewGuid().ToString("N")[..8]);
+        using var store = WorkspaceStore.UseRootForTests(Path.Combine(fixture, "w"));
+        using var settings = AppSettingsStore.UseFileForTests(Path.Combine(fixture, "settings.json"));
+        using var watchdog = new Timer(_ =>
+        {
+            File.WriteAllText(Path.Combine(output, "timeout.txt"), "Open route probe exceeded 180 seconds.");
+            Environment.Exit(2);
+        }, null, TimeSpan.FromSeconds(180), Timeout.InfiniteTimeSpan);
+        var claims = new List<string>();
+        string? failure = null;
+        try { Run(Check); }
+        catch (Exception ex) { failure = ex.ToString(); }
+        File.WriteAllText(Path.Combine(output, "open-route.json"), JsonSerializer.Serialize(new
+        {
+            status = failure is null ? "passed" : "failed", observedAt = DateTimeOffset.UtcNow,
+            os = Environment.OSVersion.ToString(), engine = typeof(WorkspaceRuntime).Assembly.Location,
+            fixture, claims, failure, globalInputEventsSent = 0, modelCalls = 0,
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        return failure is null ? 0 : 1;
+
+        void Check(bool passed, string claim)
+        {
+            if (!passed) throw new InvalidOperationException(claim);
+            claims.Add(claim);
+            File.AppendAllText(Path.Combine(output, "progress.log"), "PASS " + claim + Environment.NewLine);
+        }
+    }
+
     internal static void Run(Action<bool, string> check)
     {
         try
@@ -19,6 +50,7 @@ internal static class OpenRouteProbe
             Classifies(check);
             PackagedIsARoute(check);
             OwnerRouteWaitsForTheClick(check);
+            OwnerApprovesWhatRuns(check);
             AlreadyRunningOutside(check);
         }
         finally { WorkspaceRuntime.Rest(); }
@@ -195,6 +227,64 @@ internal static class OpenRouteProbe
         finally
         {
             StopOracle(his);
+            runtime.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The owner approves a command line, not a program name. Asking again with other arguments
+    /// used to find the waiting request and overwrite what it would run, so an agent could ask with
+    /// something harmless and swap in something else before his click. Each command line is now its
+    /// own request, fixed when it is made, and approving one runs exactly that one.
+    /// </summary>
+    static void OwnerApprovesWhatRuns(Action<bool, string> check)
+    {
+        (WorkspaceRuntime runtime, _) = NewWorkspace("OpenPinned");
+        string folder = runtime.Computer!.Folder!;
+        string shown = Path.Combine(folder, "pinned-shown.json");
+        string swapped = Path.Combine(folder, "pinned-swapped.json");
+        try
+        {
+            WorkspaceExternalAccess access = runtime.Access!;
+            Guid agent = access.AcquireForTests();
+            WorkspaceHandoff first = access.RequestProgram(agent, Environment.ProcessPath!, Oracle(shown), "the owner asked", false);
+            WorkspaceHandoff second = access.RequestProgram(agent, Environment.ProcessPath!, Oracle(swapped), "the owner asked", false);
+            WorkspaceHandoff again = access.RequestProgram(agent, Environment.ProcessPath!, Oracle(shown), "the owner asked", false);
+            check(second.Id != first.Id && again.Id == first.Id
+                && access.Handoffs.All.Single(r => r.Id == first.Id).Arguments == Oracle(shown),
+                "The same program with other arguments is a separate request, and the one the owner is looking at keeps its own command line");
+            WorkspaceHandoff decided = access.Handoffs.Decide(first.Id, approve: true);
+            access.Handoffs.Decide(second.Id, approve: false);
+            check(decided.State == "opened" && DesktopIn(shown) is not null && DesktopIn(swapped, 3) is null,
+                "Approving a program request runs exactly the command line that request was made with, never one asked for later");
+
+            // Neither side holds its own lock while it waits for the other's. The listener here
+            // stands in for the corner window, which reads the workspace from another thread
+            // when a request changes; before, Decide raised Changed under the handoffs' lock and
+            // a request held the workspace's lock across the whole ask.
+            bool requestFree = false, decideFree = false;
+            string? phase = "request";
+            void Listen()
+            {
+                bool free = Task.Run(() => { _ = access.HasDriver; _ = access.Handoffs.All; }).Wait(TimeSpan.FromSeconds(3));
+                if (phase == "request") requestFree = free; else if (phase == "decide") decideFree = free;
+            }
+            access.Handoffs.Changed += Listen;
+            try
+            {
+                WorkspaceHandoff asked = access.RequestProgram(agent, Environment.ProcessPath!, "--lock-order", "the owner asked", false);
+                phase = "decide";
+                access.Handoffs.Decide(asked.Id, approve: false);
+                phase = null;
+            }
+            finally { access.Handoffs.Changed -= Listen; }
+            check(requestFree && decideFree,
+                "A desktop request and the owner's answer both announce the change with no lock held, so the corner window reading the workspace cannot deadlock against an agent asking");
+        }
+        finally
+        {
+            StopOracle(shown);
+            StopOracle(swapped);
             runtime.Dispose();
         }
     }

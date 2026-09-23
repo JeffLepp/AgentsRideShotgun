@@ -540,8 +540,14 @@ internal static class WorkspacePeekHost
     {
         "takeover" => "Close your copy of " + request.Target + " and start it in the workspace?",
         "file" => "Open " + Path.GetFileName(request.Target) + " on your desktop?",
+        // A program runs with whatever command line came with it, so he sees all of it, and why.
+        "program" => "Open this on your desktop?\n" + CommandLine(request) + "\nWhy: " + request.Reason,
         _ => "Open " + request.Target + " on your desktop?",
     };
+
+    static string CommandLine(WorkspaceHandoff request) =>
+        (request.Target.Contains(' ') && !request.Target.StartsWith('"') ? "\"" + request.Target + "\"" : request.Target)
+        + (request.Arguments is { } arguments ? " " + arguments : "");
 
     static void UpdateToast(WorkspacePeekWindow window, WorkspaceRuntime front)
     {
