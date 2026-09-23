@@ -348,6 +348,11 @@ public partial class MainWindow : Window, IDisposable
         e.Handled = true;
     }
 
+    void StopMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string id }) WorkspaceRuntime.Of(id)?.Dispose();
+    }
+
     void BeginFilter()
     {
         FilterHost.Visibility = Visibility.Visible;

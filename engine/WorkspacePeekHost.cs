@@ -393,6 +393,8 @@ internal static class WorkspacePeekHost
                 CornerTop = s.CornerTop is null ? null : to.Top,
             });
         };
+        // Right-click on the name: the same stop as the hub's sleep button. The next agent call starts it again.
+        window.StopRequested += () => { if (_frontId is { } id) WorkspaceRuntime.Of(id)?.Dispose(); };
         window.HideRequested += () => { _dismissed = true; AppSettingsStore.Update(s => s with { CornerPinned = false }); };
         window.HoverChanged += () =>
         {

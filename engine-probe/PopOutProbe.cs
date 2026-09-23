@@ -192,8 +192,9 @@ static class PopOutProbe
         check(Until(() => (grown = AgentDesktop.Drawn(computer.Windows().First(w => w.Handle == window))) is { } g
                 && g.Width > shows.Width + 40 && g.Height > shows.Height + 30),
             "Dragging the corner makes the window bigger, both ways");
-        check(Math.Abs(grown!.X - shows.X) <= 2 && Math.Abs(grown.Y - shows.Y) <= 2,
-            "The opposite corner stays put while the dragged one moves");
+        check(Until(() => (grown = AgentDesktop.Drawn(computer.Windows().First(w => w.Handle == window))) is { } g
+                && Math.Abs(g.X - shows.X) <= 2 && Math.Abs(g.Y - shows.Y) <= 2),
+            $"The opposite corner stays put while the dragged one moves (before {shows.X},{shows.Y} {shows.Width}x{shows.Height}; after {grown?.X},{grown?.Y} {grown?.Width}x{grown?.Height})");
 
         // --- the button: the owner's copy stays up, so the workspace's closes and the agent hears --
         using var agent = new Program.Client(stored.Id);

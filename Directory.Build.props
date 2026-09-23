@@ -3,7 +3,7 @@
     <Company>Jefferson Kline</Company>
     <Product>Deskweave</Product>
     <Copyright>Copyright © 2026 Jefferson Kline</Copyright>
-    <Version>0.2.12</Version>
+    <Version>0.2.14</Version>
     <!-- Derived, so Settings (which shows the assembly version) and the file properties never lag Version. -->
     <FileVersion>$([System.Text.RegularExpressions.Regex]::Match($(Version), '^\d+\.\d+\.\d+').Value).0</FileVersion>
     <AssemblyVersion>$(FileVersion)</AssemblyVersion>

@@ -3,10 +3,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        ShowInTaskbar="False" ResizeMode="NoResize" Topmost="True" Opacity="0"
+        ShowInTaskbar="False" ResizeMode="CanResize" Topmost="True" Opacity="0"
         ShowActivated="False" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
         SnapsToDevicePixels="True" Title="Workspace corner view" AllowDrop="True"
         automation:AutomationProperties.Name="Workspace corner view">
+    <!-- Native SC_SIZE needs WS_THICKFRAME, supplied by CanResize; the card still uses its own resize zones and bounds rule. -->
     <Window.Resources>
         <!-- The hover actions and the grip live on glass, not on the app's own chrome: a small
              round button of their own rather than the title-bar IconButton. -->
@@ -173,6 +174,11 @@
                         Background="{DynamicResource GlassBrush}" BorderBrush="{DynamicResource GlassEdgeBrush}"
                         BorderThickness="1" CornerRadius="{DynamicResource PillRadius}" Padding="9,4"
                         Cursor="SizeAll" MouseLeftButtonDown="Pill_MouseLeftButtonDown">
+                    <Border.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Stop this workspace" Click="StopMenu_Click"/>
+                        </ContextMenu>
+                    </Border.ContextMenu>
                     <Border.Effect>
                         <DropShadowEffect Color="Black" Opacity="0.08" BlurRadius="3" ShadowDepth="1" Direction="270"/>
                     </Border.Effect>

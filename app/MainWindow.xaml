@@ -86,6 +86,7 @@
         <DataTemplate x:Key="WorkingCardTemplate">
             <StackPanel Margin="0,3,0,5">
                 <Border CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}" Background="{DynamicResource CardBrush}">
+                    <Border.ContextMenu><ContextMenu><MenuItem Header="Stop this workspace" Click="StopMenu_Click" Tag="{Binding Id}"/></ContextMenu></Border.ContextMenu>
                     <Grid>
                         <Button Style="{StaticResource StackItemButton}" Click="WorkingCard_Click" Tag="{Binding Id}"
                                 ToolTip="{Binding PreviewLabel}" AutomationProperties.Name="{Binding PreviewLabel}">
@@ -151,6 +152,7 @@
             <!-- Padding overrides SidebarItem's own (reference .item: padding 7px 8px). -->
             <RadioButton GroupName="HubSidebar" Style="{StaticResource SidebarItem}" Padding="8,7" IsChecked="{Binding Selected, Mode=OneWay}"
                          Checked="SidebarItem_Checked" AutomationProperties.Name="{Binding OpenLabel}">
+                <RadioButton.ContextMenu><ContextMenu><MenuItem Header="Stop this workspace" Click="StopMenu_Click" Tag="{Binding Id}"/></ContextMenu></RadioButton.ContextMenu>
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <Border Grid.Column="0" Width="64" Height="40" CornerRadius="5" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"

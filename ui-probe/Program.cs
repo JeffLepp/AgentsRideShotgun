@@ -81,12 +81,13 @@ static class Program
         bool cornerDocking = args.Length == 2 && args[0] == "--corner-docking";
         bool storage = args.Length == 2 && args[0] == "--storage";
         bool lifecycle = args.Length == 2 && args[0] == "--lifecycle";
-        if (!mvp && !cornerRendering && !cornerDocking && !storage && !lifecycle && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
+        bool scaling = args.Length == 2 && args[0] == "--scaling";
+        if (!mvp && !cornerRendering && !cornerDocking && !storage && !lifecycle && !scaling && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
         {
-            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix] | --corner-rendering <output-folder> | --corner-docking <output-folder> | --storage <output-folder> | --lifecycle <output-folder>");
+            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix] | --corner-rendering <output-folder> | --corner-docking <output-folder> | --storage <output-folder> | --lifecycle <output-folder> | --scaling <output-folder>");
             return 2;
         }
-        _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking || storage || lifecycle ? args[1] : args[0]);
+        _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking || storage || lifecycle || scaling ? args[1] : args[0]);
         Directory.CreateDirectory(_output);
         // The scenes stand in for every agent seam; if one is ever missed, what it writes lands here and
         // not in the owner's own configuration, which is what the gate-1 run did.
@@ -150,6 +151,7 @@ static class Program
                 }
                 else if (storage) await StorageChecks.Run();
                 else if (lifecycle) await LifecycleChecks.Run();
+                else if (scaling) await ScalingScenes.Gate();
                 else if (mvp) await Mvp.Run(_output, args.Length == 3 ? args[2] : null);
                 else await Run();
             }

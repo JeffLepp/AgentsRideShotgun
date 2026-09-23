@@ -81,15 +81,14 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Setup connects agents, then leaves Deskweave in the tray. Dismissing setup without
-    /// connecting opens the hub so Settings remains discoverable.
+    /// Setup connects agents, then opens the hub either way, so a fresh install shows where
+    /// Deskweave lives instead of vanishing into the tray.
     /// </summary>
     void ShowFirstRun(MainWindow hub)
     {
         var first = new FirstRunWindow();
         first.Closed += (_, _) =>
         {
-            if (AppSettingsStore.Current.ConnectAgents) return;
             ShowHubAfterFirstRun(hub, _quitting);
         };
         first.Show();

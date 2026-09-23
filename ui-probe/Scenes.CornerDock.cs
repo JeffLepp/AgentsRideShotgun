@@ -1,5 +1,7 @@
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Automation.Peers;
@@ -13,6 +15,9 @@ namespace Deskweave.UiProbe;
 
 static partial class CornerScenes
 {
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    static extern nint GetWindowLongPtr(nint window, int index);
+
     static WorkspacePeekTab? EdgeTab(WorkspacePeekWindow window) =>
         (WorkspacePeekTab?)typeof(WorkspacePeekWindow).GetField("_edgeTab", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window);
 
@@ -47,6 +52,8 @@ static partial class CornerScenes
                 window.Describe("Corner docking fixture", "Agent", PeekTone.Quiet);
                 window.Arrive();
                 await Task.Delay(300);
+                nint style = GetWindowLongPtr(new WindowInteropHelper(window).Handle, -16);
+                Program.Check((style & 0x00040000) != 0, "The corner window has a native sizing border for its Windows resize command");
                 Rect before = window.FrontRect;
                 window.Dock("Corner docking fixture");
                 await Task.Delay(55);

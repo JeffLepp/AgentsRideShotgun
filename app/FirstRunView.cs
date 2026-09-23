@@ -20,14 +20,14 @@ namespace Deskweave;
 /// </summary>
 public sealed class FirstRunWindow : Window
 {
-    internal const string Headline = "Give your agents their own screen";
-    internal const string Explanation = "Connect Claude Code or Codex to test apps in a corner window while you use your desktop. Deskweave stays in the background. Restart agent sessions already open to pick it up.";
+    internal const string Headline = "Deskweave works on its own";
+    internal const string Explanation = "Press Start once and you're done. Claude Code and Codex use Deskweave by themselves to test apps on their own screen, and you can watch in a small corner window while you keep using your desktop. You never have to do anything in this app.";
     internal const string LocalLine = "Deskweave runs only on this PC";
     internal const string NoAgentLine = "No Claude Code or Codex yet. Install one and Deskweave connects it.";
     internal const string StartLabel = "Start";
     internal const string TryAgainLabel = "Try again";
     internal const string ConnectedTitle = "Your agents are connected";
-    internal const string RestartLine = "Restart agent sessions already open. Deskweave stays in the tray; open it there for history and settings.";
+    internal const string RestartLine = "Restart agent sessions already open so they pick it up. Deskweave keeps running in the tray.";
 
     /// <summary>The agent apps this screen offers, in reference order, with their tile.</summary>
     static readonly (WorkspaceConnections.AgentApp App, string Letter, Color Tile)[] Candidates =

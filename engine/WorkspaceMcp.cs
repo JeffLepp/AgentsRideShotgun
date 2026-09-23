@@ -82,12 +82,13 @@ public sealed class WorkspaceMcp : IDisposable
             [("actions", "array", "ordered press, write (with text) or read steps, each with a control number")], ["actions"], true),
         new("open", "Starts a program by name (notepad, chrome, a Start Menu entry) or full path. where=workspace, the default, "
             + "opens it on your screen for anything you will test or click, and returns its windows. where=owner is for something "
-            + "the user asked for: it opens on their desktop after their one click in Deskweave, and also takes a document path or "
-            + "http(s) link to hand them a finished result. Check status for their answer.",
+            + "the user asked for: an http(s) link opens in their browser at once; a program or document opens on their desktop "
+            + "after their one click in Deskweave (check status for their answer).",
             [("program", "string", "a program, path, document or http(s) link"), ("arguments", "string", "its command line, if any"),
                 ("where", "string", "workspace (default) or owner"),
                 ("reason", "string", "one short line for the user, when where=owner")], ["program"], true),
-        new("run", "Runs a command in your working folder on the workspace, so any window it opens stays off the user's screen. "
+        new("run", "Use instead of your shell to start anything you will look at or click (your app, a GUI test). "
+            + "Runs a command in your working folder on the workspace, so any window it opens stays off the user's screen. "
             + "shell=cmd (default) or powershell, which takes quotes and several lines as written. Returns the exit code if it "
             + "finishes within seconds; otherwise it keeps running, so check it with job rather than starting it again.",
             [("command", "string", ""), ("shell", "string", "cmd (default) or powershell"),
@@ -98,7 +99,8 @@ public sealed class WorkspaceMcp : IDisposable
             [("job", "string", "a job ID from run; omit to list them"),
                 ("offset", "number", "where to continue reading its output"),
                 ("cancel", "boolean", "stop this job")], [], false),
-        new("browse", "Opens a link in the workspace's own browser, in the current tab or a new one. The first call can take "
+        new("browse", "Opens a link in the workspace's own browser, in the current tab or a new one. Use it, not your shell, "
+            + "for any page you will check. The first call can take "
             + "about forty seconds while Chrome starts; wait for it rather than calling again.",
             [("url", "string", ""), ("new_tab", "boolean", "")], ["url"], true),
         new("tab", "Lists the browser tabs, or works in one by number and brings it to the front. 0 goes back to following "
@@ -612,6 +614,16 @@ public sealed class WorkspaceMcp : IDisposable
         if (!_external.Policy.DesktopRequests)
             return Say("The owner set this workspace to workspace-only, so nothing in here can reach his desktop."
                 + " Ask him in your answer instead.");
+        // A web link for the owner is something the agent could open from its own shell anyway, so
+        // Deskweave does not stand between them: it opens in his browser now, no click. Programs and
+        // documents still ask, since those reach past the agent's own sandbox.
+        if (kind == "url")
+        {
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(link!.AbsoluteUri) { UseShellExecute = true })?.Dispose(); }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            { return Fail("The owner's browser would not open it: " + ex.Message); }
+            return Say("Opened in the owner's own browser.");
+        }
         // A relative document path means the agent's own folder, the same place run starts in.
         if (kind == "file" && _home.Length > 0) trimmed = Path.GetFullPath(trimmed, _home);
         try

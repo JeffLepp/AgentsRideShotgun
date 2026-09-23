@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -50,7 +50,6 @@ public partial class WorkspacePeekWindow : Window
     WorkspaceScreenInput? _input;
     PeekEdges _dragEdges;
     Rect _dragStart;
-    Point _dragAnchor;
 
     internal WorkspacePeekWindow()
     {
@@ -71,6 +70,7 @@ public partial class WorkspacePeekWindow : Window
     internal event Action? PinClicked;
     internal event Action? ShrinkClicked;
     internal event Action? HideRequested;
+    internal event Action? StopRequested;
     internal event Action? OwnerActed;
     internal event Action<Rect>? Moved;
     internal event Action<Rect>? Resized;
@@ -536,6 +536,12 @@ public partial class WorkspacePeekWindow : Window
     nint HitTest(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
         const int WmNcHitTest = 0x0084, HtTransparent = -1;
+        if (message == WmSizing && _dragEdges != PeekEdges.None)
+        {
+            Sizing(lParam);
+            handled = true;
+            return 1;
+        }
         if (message != WmNcHitTest) return 0;
         long raw = lParam.ToInt64();
         var screen = new Point(unchecked((short)(raw & 0xFFFF)), unchecked((short)((raw >> 16) & 0xFFFF)));
@@ -784,6 +790,7 @@ public partial class WorkspacePeekWindow : Window
     void ShrinkButton_Click(object sender, RoutedEventArgs e) => ShrinkClicked?.Invoke();
     void OpenButton_Click(object sender, RoutedEventArgs e) => OpenRequested?.Invoke();
     void HideButton_Click(object sender, RoutedEventArgs e) => HideRequested?.Invoke();
+    void StopMenu_Click(object sender, RoutedEventArgs e) => StopRequested?.Invoke();
     void SheetOpen_Click(object sender, RoutedEventArgs e) => SheetOpenClicked?.Invoke();
     void SheetKeep_Click(object sender, RoutedEventArgs e) => SheetKeepClicked?.Invoke();
     void ToastLink_Click(object sender, RoutedEventArgs e) => ResumeClicked?.Invoke();
@@ -861,62 +868,80 @@ public partial class WorkspacePeekWindow : Window
     void ResizeTopRight_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => BeginResize(sender, e, PeekEdges.Right | PeekEdges.Top);
     void ResizeTopLeft_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => BeginResize(sender, e, PeekEdges.Left | PeekEdges.Top);
 
+    /// <summary>
+    /// Hands the drag to Windows' own sizing loop, the way <see cref="MoveWindow"/> hands a move to
+    /// DragMove. Resizing by hand meant four separate window changes per mouse move on a layered
+    /// window, and any stray loss of capture ended the drag early and put the card back at its
+    /// saved size. The loop keeps the pointer for the whole gesture and moves and sizes the window
+    /// in one step; WM_SIZING below holds it to 16:10 and to the monitor.
+    /// </summary>
     void BeginResize(object sender, MouseButtonEventArgs e, PeekEdges edges)
     {
-        if (Sliding) return;
-        var zone = (UIElement)sender;
-        zone.CaptureMouse();
-        _dragEdges = edges;
-        _dragStart = FrontRect;
-        _dragAnchor = ScreenDip();
-        zone.MouseMove += ResizeZone_MouseMove;
-        zone.MouseLeftButtonUp += ResizeZone_MouseLeftButtonUp;
-        zone.LostMouseCapture += ResizeZone_LostMouseCapture;
+        if (Sliding || PresentationSource.FromVisual(this) is not HwndSource source) return;
         e.Handled = true;
+        Rect before = FrontRect;
+        _dragEdges = edges;
+        _dragStart = before;
+        try
+        {
+            Mouse.Capture(null);
+            ReleaseCapture();
+            SendMessage(source.Handle, WmSysCommand, ScSize | SizingEdge(edges), 0);
+        }
+        finally
+        {
+            _dragEdges = PeekEdges.None;
+            if (Differs(FrontRect, before)) Resized?.Invoke(FrontRect);
+        }
     }
 
-    void ResizeZone_MouseMove(object sender, MouseEventArgs e)
+    static nint SizingEdge(PeekEdges edges) => edges switch
     {
-        if (e.LeftButton != MouseButtonState.Pressed) return;
-        Vector delta = ScreenDip() - _dragAnchor;
-        // The monitor under the card as the drag started, its own DPI and work area - not always the
-        // primary monitor's, so a card grown on a secondary monitor clamps to that monitor's edges.
+        PeekEdges.Left => 1,
+        PeekEdges.Right => 2,
+        PeekEdges.Top => 3,
+        PeekEdges.Left | PeekEdges.Top => 4,
+        PeekEdges.Right | PeekEdges.Top => 5,
+        PeekEdges.Bottom => 6,
+        PeekEdges.Left | PeekEdges.Bottom => 7,
+        _ => 8,
+    };
+
+    /// <summary>
+    /// Windows proposes a window rect for where the pointer has got to; this answers with the
+    /// card's own rule instead - 16:10, clamped to the monitor it started on - and lays the card out
+    /// at that size before the window takes it, so picture and bounds change together.
+    /// </summary>
+    void Sizing(nint lParam)
+    {
+        var proposed = Marshal.PtrToStructure<SizingRect>(lParam);
+        DpiScale dpi = VisualTreeHelper.GetDpi(this);
+        double sx = dpi.DpiScaleX, sy = dpi.DpiScaleY;
+        // The window is the card plus the shadow margin all round and the tab strip above it.
+        double left = proposed.Left / sx + ShadowMargin, right = proposed.Right / sx - ShadowMargin;
+        double top = proposed.Top / sy + ShadowMargin + _stackExtra, bottom = proposed.Bottom / sy - ShadowMargin;
+        var delta = new Vector(
+            _dragEdges.HasFlag(PeekEdges.Left) ? left - _dragStart.Left : right - _dragStart.Right,
+            _dragEdges.HasFlag(PeekEdges.Top) ? top - _dragStart.Top : bottom - _dragStart.Bottom);
         Rect work = WorkspacePeekPlacement.MonitorFor(_dragStart).WorkArea;
-        // The drag is anchored on the front card's own rect (set in BeginResize), so the result must
-        // go back through the same offset Configure gave the front card - the stacked back card's
-        // peek above it - rather than being placed as if it were the whole visible box itself.
         Rect next = WorkspacePeekPlacement.Resize(_dragStart, _dragEdges, delta, work);
         FrontCard.Width = next.Width;
         FrontCard.Height = next.Height;
         VisibleSize = new Size(next.Width, next.Height + _stackExtra);
-        Place(new Rect(next.Left, next.Top - _stackExtra, next.Width, next.Height + _stackExtra));
+        var answer = new SizingRect
+        {
+            Left = (int)Math.Round((next.Left - ShadowMargin) * sx),
+            Top = (int)Math.Round((next.Top - _stackExtra - ShadowMargin) * sy),
+            Right = (int)Math.Round((next.Right + ShadowMargin) * sx),
+            Bottom = (int)Math.Round((next.Bottom + ShadowMargin) * sy),
+        };
+        Marshal.StructureToPtr(answer, lParam, false);
     }
 
-    void ResizeZone_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-        => EndResize((UIElement)sender);
+    const int WmSysCommand = 0x0112, WmSizing = 0x0214;
+    const nint ScSize = 0xF000;
 
-    void ResizeZone_LostMouseCapture(object sender, MouseEventArgs e)
-        => EndResize((UIElement)sender);
-
-    void EndResize(UIElement zone)
-    {
-        zone.MouseMove -= ResizeZone_MouseMove;
-        zone.MouseLeftButtonUp -= ResizeZone_MouseLeftButtonUp;
-        zone.LostMouseCapture -= ResizeZone_LostMouseCapture;
-        _dragEdges = PeekEdges.None;
-        if (zone.IsMouseCaptured) zone.ReleaseMouseCapture();
-        if (Differs(FrontRect, _dragStart)) Resized?.Invoke(FrontRect);
-    }
-
-    /// <summary>The cursor, in DIPs, wherever it is on the virtual desktop - independent of this
-    /// window's own moving bounds, unlike a position relative to one of its elements.</summary>
-    Point ScreenDip()
-    {
-        GetCursorPos(out NativePoint p);
-        DpiScale dpi = VisualTreeHelper.GetDpi(this);
-        return new Point(p.X / dpi.DpiScaleX, p.Y / dpi.DpiScaleY);
-    }
-
-    [StructLayout(LayoutKind.Sequential)] readonly struct NativePoint { public readonly int X, Y; }
-    [DllImport("user32.dll")] static extern bool GetCursorPos(out NativePoint point);
+    [StructLayout(LayoutKind.Sequential)] struct SizingRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
 }
