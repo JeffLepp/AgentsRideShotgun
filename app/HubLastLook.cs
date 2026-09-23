@@ -84,7 +84,7 @@ internal static class HubLastLook
             return image;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException
-            or ArgumentException or System.Runtime.InteropServices.COMException)
+            or ArgumentException or FormatException or System.Runtime.InteropServices.COMException)
         {
             return null;
         }

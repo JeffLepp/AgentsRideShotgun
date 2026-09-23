@@ -33,14 +33,10 @@ public partial class App : Application
             string user = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                 Environment.UserDomainName + "\\" + Environment.UserName)))[..20];
             _instance = new Mutex(false, "Local\\Deskweave.App." + user);
-            try { _ownsInstance = _instance.WaitOne(0); }
-            catch (AbandonedMutexException) { _ownsInstance = true; }
             _activate = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\Deskweave.Show." + user);
+            _ownsInstance = ClaimInstance(_instance, _activate, e.Args.Contains(StartWithWindows.Background), TimeSpan.FromSeconds(5));
             if (!_ownsInstance)
             {
-                // A background start (Windows at sign-in, or an agent's bridge) found Deskweave
-                // already running: that is all it wanted, so nothing opens on the owner's screen.
-                if (!e.Args.Contains(StartWithWindows.Background)) _activate.Set();
                 Shutdown();
                 return;
             }
@@ -89,15 +85,42 @@ public partial class App : Application
     /// Setup connects agents, then leaves Deskweave in the tray. Dismissing setup without
     /// connecting opens the hub so Settings remains discoverable.
     /// </summary>
-    static void ShowFirstRun(MainWindow hub)
+    void ShowFirstRun(MainWindow hub)
     {
         var first = new FirstRunWindow();
         first.Closed += (_, _) =>
         {
             if (AppSettingsStore.Current.ConnectAgents) return;
-            if (!hub.IsVisible) hub.Show();
+            ShowHubAfterFirstRun(hub, _quitting);
         };
         first.Show();
+    }
+
+    /// <summary>
+    /// Quitting, signing out or a failed start closes every window, the hub before setup. Showing
+    /// the closed hub again threw, and OnExit's tray, engine and lock cleanup never ran.
+    /// </summary>
+    internal static void ShowHubAfterFirstRun(Window hub, bool quitting)
+    {
+        if (!quitting && !hub.IsVisible) hub.Show();
+    }
+
+    /// <summary>
+    /// Takes the one-per-account lock. A Deskweave already running is shown, unless this is a
+    /// background start (Windows at sign-in, or an agent's bridge) that only wanted it running, and
+    /// this launch ends. One that is quitting has stopped listening but keeps the lock until its
+    /// cleanup is done, so the launch waits a moment for it and then starts normally.
+    /// </summary>
+    internal static bool ClaimInstance(Mutex instance, EventWaitHandle activate, bool background, TimeSpan patience)
+    {
+        try { if (instance.WaitOne(0)) return true; }
+        catch (AbandonedMutexException) { return true; }
+        if (!background) activate.Set();
+        try { if (!instance.WaitOne(patience)) return false; }
+        catch (AbandonedMutexException) { }
+        // Nobody took the request; this launch opens its own window instead.
+        activate.Reset();
+        return true;
     }
 
     void CreateTray()
@@ -199,10 +222,23 @@ public partial class App : Application
             catch (Exception failure) { LogFailure(failure); }
             try { ModuleEntry.Shutdown(); }
             catch (Exception failure) { LogFailure(failure); }
-            finally { _instance?.ReleaseMutex(); }
         }
-        _instance?.Dispose();
-        base.OnExit(e);
+        ExitHoldingInstance(() => base.OnExit(e), _instance, _ownsInstance);
+    }
+
+    /// <summary>
+    /// Raises Exit with the one-per-account lock still held. "Delete all data" and Uninstall remove
+    /// the data folders there, and a launch or an agent's bridge must not start a new Deskweave
+    /// into a folder being deleted.
+    /// </summary>
+    internal static void ExitHoldingInstance(Action raiseExit, Mutex? instance, bool owns)
+    {
+        try { raiseExit(); }
+        finally
+        {
+            if (owns) instance?.ReleaseMutex();
+            instance?.Dispose();
+        }
     }
 
     internal static void LogFailure(Exception failure)

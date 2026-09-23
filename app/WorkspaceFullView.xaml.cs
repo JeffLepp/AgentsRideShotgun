@@ -351,7 +351,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             image.Freeze();
             return image;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { return null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException
+            or FormatException) { return null; }
     }
 
     void Root_SizeChanged(object sender, SizeChangedEventArgs e)
