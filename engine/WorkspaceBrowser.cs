@@ -185,8 +185,13 @@ public sealed partial class WorkspaceBrowser : IDisposable
     {
         get
         {
+            // The class alone also matches Electron apps (VS Code, Slack) in the same workspace.
             foreach (AgentWindow window in _desktop.Windows())
-                if (window.ClassName.StartsWith("Chrome_WidgetWin", StringComparison.Ordinal)) return window.Handle;
+            {
+                if (!window.ClassName.StartsWith("Chrome_WidgetWin", StringComparison.Ordinal)) continue;
+                Native.GetWindowThreadProcessId(window.Handle, out int owner);
+                if (owner == ProcessId) return window.Handle;
+            }
             return 0;
         }
     }
@@ -217,8 +222,10 @@ public sealed partial class WorkspaceBrowser : IDisposable
         // a workspace browser ends. An agent should not have to recognise and dismiss it to see the
         // page it just asked for. Maximized, then filled to the whole screen once it is up, because
         // the workspace screen is what the corner shows: a page filling it is readable there.
+        // Muted by Chrome itself: the workspace's audio sweep cannot reach the browser's own job, and
+        // muting chrome.exe's session through Windows is remembered for the owner's Chrome as well.
         string common = $"--no-first-run --no-default-browser-check --hide-crash-restore-bubble --start-maximized " +
-            $"--disable-session-crashed-bubble --restore-last-session=false " +
+            $"--disable-session-crashed-bubble --restore-last-session=false --mute-audio " +
             $"--user-data-dir=\"{profile}\" ";
 
         cancel.ThrowIfCancellationRequested();
@@ -431,7 +438,8 @@ public sealed partial class WorkspaceBrowser : IDisposable
         }
     }
 
-    static string Quote(string url) => "\"" + url.Replace("\"", string.Empty) + "\"";
+    // "--" ends Chrome's switches, so a url such as "--remote-debugging-port=9222" stays a url.
+    static string Quote(string url) => "-- \"" + url.Replace("\"", string.Empty) + "\"";
 
     /// <summary>
     /// Finds the page and attaches flat, so both transports look identical above this line: one
