@@ -13,8 +13,49 @@ namespace Deskweave.UiProbe;
 /// </summary>
 static class StorageChecks
 {
+    /// <summary>The move from the Deskweave folders, against folders of the probe's own.</summary>
+    static void FormerNameChecks()
+    {
+        string parent = Directory.CreateTempSubdirectory("ars-former-").FullName;
+        try
+        {
+            string old = Path.Combine(parent, "Deskweave");
+            Directory.CreateDirectory(Path.Combine(old, "agent-workspaces", "Deskweave-abc"));
+            File.WriteAllText(Path.Combine(old, "settings.json"), "mine");
+            File.WriteAllText(Path.Combine(old, "agent-workspaces", "Deskweave-abc", "workspace.json"), "abc");
+            FormerName.Move(parent);
+            string now = Path.Combine(parent, "ARS");
+            FormerName.RenameWorkspaces(Path.Combine(now, "agent-workspaces"));
+            Program.Check(!Directory.Exists(old) && File.ReadAllText(Path.Combine(now, "settings.json")) == "mine"
+                && File.ReadAllText(Path.Combine(now, "agent-workspaces", "ARS-abc", "workspace.json")) == "abc",
+                "The Deskweave folder moves to ARS whole, and its workspace folders take the ARS- name");
+
+            Directory.CreateDirectory(old);
+            File.WriteAllText(Path.Combine(old, "renderer-state.json"), "old");
+            File.WriteAllText(Path.Combine(old, "shell.json"), "shell");
+            File.WriteAllText(Path.Combine(now, "renderer-state.json"), "new");
+            FormerName.Move(parent);
+            Program.Check(File.ReadAllText(Path.Combine(now, "shell.json")) == "shell"
+                && File.ReadAllText(Path.Combine(now, "renderer-state.json")) == "new"
+                && File.ReadAllText(Path.Combine(old, "renderer-state.json")) == "old",
+                "Beside an existing ARS folder, only what it lacks moves and nothing of either is overwritten");
+
+            File.WriteAllText(Path.Combine(old, "logs.txt"), "held");
+            bool refused;
+            using (new FileStream(Path.Combine(old, "logs.txt"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                try { FormerName.Move(parent); refused = false; }
+                catch (IOException ex) { refused = ex.Message.Contains(old, StringComparison.Ordinal); }
+            }
+            Program.Check(refused && File.Exists(Path.Combine(old, "logs.txt")),
+                "A file in use stops the start with where the data is, and nothing is lost");
+        }
+        finally { Directory.Delete(parent, true); }
+    }
+
     internal static Task Run()
     {
+        FormerNameChecks();
         StoredWorkspace scratch = WorkspaceHome.EnsureScratch();
         string folder = WorkspaceStore.FolderOf(scratch.Id);
         File.WriteAllBytes(Path.Combine(folder, "note.txt"), new byte[4096]);

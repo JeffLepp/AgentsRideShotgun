@@ -20,14 +20,14 @@ namespace Deskweave;
 /// </summary>
 public sealed class FirstRunWindow : Window
 {
-    internal const string Headline = "Deskweave works on its own";
-    internal const string Explanation = "Press Start once and you're done. Claude Code and Codex use Deskweave by themselves to test apps on their own screen, and you can watch in a small corner window while you keep using your desktop. You never have to do anything in this app.";
-    internal const string LocalLine = "Deskweave runs only on this PC";
-    internal const string NoAgentLine = "No Claude Code or Codex yet. Install one and Deskweave connects it.";
+    internal const string Headline = "ARS works on its own";
+    internal const string Explanation = "Press Start once and you're done. Claude Code and Codex use ARS by themselves to test apps on their own screen, and you can watch in a small corner window while you keep using your desktop. You never have to do anything in this app.";
+    internal const string LocalLine = "ARS runs only on this PC";
+    internal const string NoAgentLine = "No Claude Code or Codex yet. Install one and ARS connects it.";
     internal const string StartLabel = "Start";
     internal const string TryAgainLabel = "Try again";
     internal const string ConnectedTitle = "Your agents are connected";
-    internal const string RestartLine = "Restart agent sessions already open so they pick it up. Deskweave keeps running in the tray.";
+    internal const string RestartLine = "Restart agent sessions already open so they pick it up. ARS keeps running in the tray.";
 
     /// <summary>The agent apps this screen offers, in reference order, with their tile.</summary>
     static readonly (WorkspaceConnections.AgentApp App, string Letter, Color Tile)[] Candidates =
@@ -52,7 +52,7 @@ public sealed class FirstRunWindow : Window
 
     public FirstRunWindow()
     {
-        Title = "Deskweave";
+        Title = "ARS";
         Width = 520;
         // As tall as what it says: one agent row or two, or an error line under one.
         SizeToContent = SizeToContent.Height;
@@ -151,7 +151,7 @@ public sealed class FirstRunWindow : Window
 
         var name = new TextBlock
         {
-            Text = "Deskweave", FontWeight = FontWeights.SemiBold, FontSize = 12.5,
+            Text = "ARS", FontWeight = FontWeights.SemiBold, FontSize = 12.5,
             Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
         };
         Grid.SetColumn(name, 1);
@@ -159,7 +159,7 @@ public sealed class FirstRunWindow : Window
 
         var close = new Button { ToolTip = "Close" };
         close.SetResourceReference(StyleProperty, "CloseCaptionButton");
-        AutomationProperties.SetName(close, "Close Deskweave");
+        AutomationProperties.SetName(close, "Close ARS");
         var glyph = new Path();
         glyph.SetResourceReference(StyleProperty, "CaptionIcon");
         glyph.SetResourceReference(Path.DataProperty, "Icon.Close");
@@ -250,7 +250,7 @@ public sealed class FirstRunWindow : Window
             if (_preview is not null) return _preview;
             var image = new BitmapImage();
             image.BeginInit();
-            image.UriSource = new Uri("pack://application:,,,/Deskweave;component/Assets/first-run-preview.png");
+            image.UriSource = new Uri("pack://application:,,,/ARS;component/Assets/first-run-preview.png");
             // Shown at 150 x 94; decoding the whole fixture would keep four megabytes for it.
             image.DecodePixelWidth = 300;
             image.CacheOption = BitmapCacheOption.OnLoad;

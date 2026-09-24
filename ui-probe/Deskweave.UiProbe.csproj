@@ -10,5 +10,5 @@
     <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
     <SelfContained>true</SelfContained>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="../app/Deskweave.csproj"/></ItemGroup>
+  <ItemGroup><ProjectReference Include="../app/ARS.csproj"/></ItemGroup>
 </Project>

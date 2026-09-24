@@ -6,12 +6,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>Deskweave</AssemblyName>
+    <AssemblyName>ARS</AssemblyName>
     <RootNamespace>Deskweave</RootNamespace>
-    <AssemblyTitle>Deskweave</AssemblyTitle>
+    <AssemblyTitle>ARS</AssemblyTitle>
     <Description>Local Windows workspaces for your agents.</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>Assets/Deskweave.ico</ApplicationIcon>
+    <ApplicationIcon>Assets/ARS.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
     <SelfContained>true</SelfContained>
@@ -29,7 +29,7 @@
     <ProjectReference Include="../engine/Deskweave.Engine.csproj" />
     <InternalsVisibleTo Include="Deskweave.Probe" />
     <InternalsVisibleTo Include="Deskweave.UiProbe" />
-    <Resource Include="Assets/Deskweave.ico" />
+    <Resource Include="Assets/ARS.ico" />
     <Resource Include="Assets/ThirdPartyNotices.txt" />
     <Resource Include="Assets/first-run-preview.png" />
   </ItemGroup>

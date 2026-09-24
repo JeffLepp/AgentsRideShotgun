@@ -200,7 +200,7 @@ public sealed partial class AgentDesktop : IDisposable
             if (length == safe.Length) break;
             if (char.IsAsciiLetterOrDigit(letter)) safe[length++] = letter;
         }
-        return "Deskweave-" + (length == 0 ? "workspace" : new string(safe[..length]));
+        return "ARS-" + (length == 0 ? "workspace" : new string(safe[..length]));
     }
 
     /// <summary>
@@ -273,7 +273,7 @@ public sealed partial class AgentDesktop : IDisposable
         {
             // The inbox console explicitly refuses default-terminal handoff for minimized startup.
             // This takes effect before console allocation; hiding an already delegated window is late.
-            consoleTitle = "Deskweave console " + Guid.NewGuid().ToString("N");
+            consoleTitle = "ARS console " + Guid.NewGuid().ToString("N");
             info.lpTitle = consoleTitle;
             info.dwFlags |= ConsoleStartfUseShowWindow;
             info.wShowWindow = ConsoleShowMinNoActive;

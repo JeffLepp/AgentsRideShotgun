@@ -1,7 +1,7 @@
 {
-  "name": "deskweave",
+  "name": "ars",
   "version": "0.1.0",
-  "description": "Use an installed Deskweave workspace for Windows app and browser testing without taking over the owner's desktop.",
+  "description": "Use an installed ARS workspace for Windows app and browser testing without taking over the owner's desktop.",
   "author": { "name": "Jefferson Kline" },
   "repository": "https://github.com/JeffLepp/Deskweave",
   "license": "MIT"

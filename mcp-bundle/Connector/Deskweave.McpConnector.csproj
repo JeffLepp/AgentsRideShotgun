@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>Deskweave.McpConnector</AssemblyName>
+    <AssemblyName>ARS.McpConnector</AssemblyName>
     <RootNamespace>Deskweave.McpConnector</RootNamespace>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>

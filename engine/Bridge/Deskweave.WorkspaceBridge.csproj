@@ -8,8 +8,8 @@
     <SelfContained>true</SelfContained>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>Deskweave.WorkspaceBridge</AssemblyName>
-    <AssemblyTitle>Deskweave Workspace Bridge</AssemblyTitle>
+    <AssemblyName>ARS.WorkspaceBridge</AssemblyName>
+    <AssemblyTitle>ARS Workspace Bridge</AssemblyTitle>
     <Description>Connects a local agent's MCP standard streams to its Windows workspace pipe.</Description>
   </PropertyGroup>
   <ItemGroup>

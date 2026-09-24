@@ -7,8 +7,8 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Deskweave.AgentWorkspaces</RootNamespace>
     <AssemblyName>Deskweave.AgentWorkspaces</AssemblyName>
-    <AssemblyTitle>Deskweave workspace engine</AssemblyTitle>
-    <Description>Local Windows desktops and agent control for Deskweave.</Description>
+    <AssemblyTitle>ARS workspace engine</AssemblyTitle>
+    <Description>Local Windows desktops and agent control for ARS.</Description>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
 
@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Deskweave" />
+    <InternalsVisibleTo Include="ARS" />
     <InternalsVisibleTo Include="Deskweave.Probe" />
     <InternalsVisibleTo Include="Deskweave.UiProbe" />
     <InternalsVisibleTo Include="Deskweave.Tests" />

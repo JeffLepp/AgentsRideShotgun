@@ -5,7 +5,7 @@ using Microsoft.Win32;
 namespace Deskweave;
 
 /// <summary>
-/// Settings > General > Start with Windows: one "Deskweave" value under the user's Run key,
+/// Settings > General > Start with Windows: one "ARS" value under the user's Run key,
 /// pointing at the exe that is running, started in the background. Kept in step with the setting
 /// at every launch and every change, so the default (on) is real without a click. Nothing is
 /// written until first launch has been answered.
@@ -13,7 +13,7 @@ namespace Deskweave;
 internal static class StartWithWindows
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string Name = "Deskweave";
+    internal const string Name = "ARS";
     internal const string Background = "--background";
 
     /// <summary>False when Windows refused the change, so Settings can say so instead of showing a
@@ -26,6 +26,8 @@ internal static class StartWithWindows
             using RegistryKey? run = Registry.CurrentUser.CreateSubKey(RunKey);
             if (run is null) return false;
             string command = "\"" + exe + "\" " + Background;
+            // The value from before the rename would start a second copy at sign-in.
+            if (run.GetValue(FormerName.Name) is not null) run.DeleteValue(FormerName.Name, false);
             if (settings.StartWithWindows)
             {
                 if (run.GetValue(Name) as string != command) run.SetValue(Name, command);

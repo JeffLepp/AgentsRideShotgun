@@ -11,7 +11,7 @@ param(
     # Check background browser work while the owner is in fullscreen/presentation mode.
     [switch]$ExpectQuietPreview
 )
-# Checks the running out/Deskweave.exe the way a connected agent reaches it: the entry an agent app
+# Checks the running out/ARS.exe the way a connected agent reaches it: the entry an agent app
 # was configured with, the packaged bridge, the router ticket, and a workspace. Harmless calls only
 # (initialize, tools/list, status, one screenshot, release). No model is called, the owner's own Claude
 # Code and Codex configuration is fingerprinted before and after, and nothing here starts or stops
@@ -51,9 +51,9 @@ public static class DeskweavePipe {
 }
 '@
 $deskweaveRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$executable = Join-Path $deskweaveRoot 'out\Deskweave.exe'
-$bridge = Join-Path $deskweaveRoot 'out\Bridge\Deskweave.WorkspaceBridge.exe'
-$product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Deskweave'
+$executable = Join-Path $deskweaveRoot 'out\ARS.exe'
+$bridge = Join-Path $deskweaveRoot 'out\Bridge\ARS.WorkspaceBridge.exe'
+$product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS'
 $store = Join-Path $product 'agent-workspaces'
 $ticket = Join-Path $product 'agent-workspaces.access\router.json'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
@@ -83,11 +83,11 @@ function Get-OwnerEntries {
     foreach ($file in ($claudeFiles | Select-Object -Unique)) {
         $entries[$file] = if (Test-Path -LiteralPath $file) {
             $json = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json -AsHashtable
-            if ($json['mcpServers'] -and $json['mcpServers']['deskweave']) { $json['mcpServers']['deskweave'] | ConvertTo-Json -Compress -Depth 5 } else { '' }
+            if ($json['mcpServers'] -and $json['mcpServers']['ars']) { $json['mcpServers']['ars'] | ConvertTo-Json -Compress -Depth 5 } else { '' }
         } else { '' }
     }
     $codex = Join-Path $profile '.codex\config.toml'
-    $entries[$codex] = if (Test-Path -LiteralPath $codex) { (Get-TomlTable (Get-Content -LiteralPath $codex) 'deskweave') -join "`n" } else { '' }
+    $entries[$codex] = if (Test-Path -LiteralPath $codex) { (Get-TomlTable (Get-Content -LiteralPath $codex) 'ars') -join "`n" } else { '' }
     return $entries
 }
 function Get-TomlTable([string[]]$lines, [string]$name) {
@@ -253,7 +253,7 @@ function Invoke-McpSession([string]$label, [string]$command, [string[]]$argument
 
 try {
     $owner = Get-OwnerEntries
-    $running = @(Get-Process Deskweave -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable })
+    $running = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable })
     Check ($running.Count -eq 1) 'Exactly one Deskweave is running, from this publish folder'
     $report.app = [ordered]@{ pid = $running[0].Id; started = $running[0].StartTime.ToString('o'); exeSha256 = Hash $executable
         engineSha256 = Hash (Join-Path $deskweaveRoot 'out\Deskweave.AgentWorkspaces.dll'); bridgeSha256 = Hash $bridge
@@ -274,13 +274,13 @@ try {
             $isolated = @{ CLAUDE_CONFIG_DIR = $claudeHome }
             $report.provider.claudeVersion = (Invoke-Tool $claude @('--version') $isolated).output
             if (Test-Path -LiteralPath (Join-Path $claudeHome '.claude.json')) {
-                $report.provider.claudeRemove = Invoke-Tool $claude @('mcp', 'remove', '--scope', 'user', 'deskweave') $isolated
+                $report.provider.claudeRemove = Invoke-Tool $claude @('mcp', 'remove', '--scope', 'user', 'ars') $isolated
             }
-            $add = Invoke-Tool $claude @('mcp', 'add', '--scope', 'user', 'deskweave', '--', $bridge, '--workspace', $ticket) $isolated
+            $add = Invoke-Tool $claude @('mcp', 'add', '--scope', 'user', 'ars', '--', $bridge, '--workspace', $ticket) $isolated
             $list = Invoke-Tool $claude @('mcp', 'list') $isolated 120
             $report.provider.claudeAdd = $add; $report.provider.claudeList = $list
             $json = Get-Content -LiteralPath (Join-Path $claudeHome '.claude.json') -Raw | ConvertFrom-Json -AsHashtable
-            $entry = $json['mcpServers']['deskweave']
+            $entry = $json['mcpServers']['ars']
             Check ($add.code -eq 0 -and $entry['command'] -eq $bridge -and ($entry['args'] -join '|') -eq "--workspace|$ticket") `
                 'Claude Code, with an isolated configuration root, records the entry as the packaged bridge on the router ticket'
             Check ($list.code -eq 0 -and $list.output -match 'deskweave:.*Connected') `
@@ -291,11 +291,11 @@ try {
             $isolated = @{ CODEX_HOME = $codexHome }
             $report.provider.codexVersion = (Invoke-Tool $codex @('--version') $isolated).output
             if (Test-Path -LiteralPath (Join-Path $codexHome 'config.toml')) {
-                $report.provider.codexRemove = Invoke-Tool $codex @('mcp', 'remove', 'deskweave') $isolated
+                $report.provider.codexRemove = Invoke-Tool $codex @('mcp', 'remove', 'ars') $isolated
             }
-            $add = Invoke-Tool $codex @('mcp', 'add', 'deskweave', '--', $bridge, '--workspace', $ticket) $isolated
+            $add = Invoke-Tool $codex @('mcp', 'add', 'ars', '--', $bridge, '--workspace', $ticket) $isolated
             $report.provider.codexAdd = $add
-            $table = (Get-TomlTable (Get-Content -LiteralPath (Join-Path $codexHome 'config.toml')) 'deskweave') -join "`n"
+            $table = (Get-TomlTable (Get-Content -LiteralPath (Join-Path $codexHome 'config.toml')) 'ars') -join "`n"
             $report.provider.codexEntry = $table
             $command = @(Get-TomlStrings $table 'command')[0]; $arguments = [string[]]@(Get-TomlStrings $table 'args')
             Check ($add.code -eq 0 -and $command -eq $bridge -and ($arguments -join '|') -eq "--workspace|$ticket") `
@@ -311,7 +311,7 @@ try {
     foreach ($entry in $entries) {
         $session = Invoke-McpSession $entry.label $entry.command $entry.arguments $entry.client
         $sessions.Add($session)
-        Check ($session.serverName -eq 'deskweave' -and $session.toolNames.Count -ge 20 -and 'status' -in $session.toolNames -and 'computer' -in $session.toolNames) `
+        Check ($session.serverName -eq 'ars' -and $session.toolNames.Count -ge 20 -and 'status' -in $session.toolNames -and 'computer' -in $session.toolNames) `
             "$($entry.label): the bridge initializes as deskweave and lists $($session.toolNames.Count) tools"
         Check ($session.screenshot -and $session.workspace) `
             "$($entry.label): a screenshot comes back from workspace '$($session.workspace)', and status names it"

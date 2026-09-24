@@ -145,7 +145,7 @@ public sealed class ClipboardBroker : IDisposable
             if (Restore(_owner)) return;
             Thread.Sleep(100);
         }
-        Trace.WriteLine("Deskweave could not hand the clipboard back to the owner.");
+        Trace.WriteLine("ARS could not hand the clipboard back to the owner.");
     }
 
     /// <summary>What this workspace last copied, as text. For proofs and for the boss chat.</summary>

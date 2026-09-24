@@ -9,8 +9,8 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Validation output must be inside this Deskweave checkout.'
 }
-if (Get-Process Deskweave -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before running this check.' }
-$product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Deskweave'
+if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before running this check.' }
+$product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS'
 $settings = Join-Path $product 'settings.json'
 if ((Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).FirstRunDone) {
     throw 'This check requires unanswered first launch so a background start cannot write agent configuration or the Run key.'
@@ -27,7 +27,7 @@ $failure = $null
 function Check([bool]$ok, [string]$claim) { if (-not $ok) { throw $claim }; $checks.Add($claim); Write-Output "PASS $claim" }
 
 function Start-Bridge {
-    $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'out\Bridge\Deskweave.WorkspaceBridge.exe'))
+    $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'out\Bridge\ARS.WorkspaceBridge.exe'))
     $start.UseShellExecute = $false; $start.WorkingDirectory = $project
     $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
     $start.ArgumentList.Add('--workspace'); $start.ArgumentList.Add($ticket)
@@ -64,7 +64,7 @@ public static uint Foreground() { uint p; GetWindowThreadProcessId(GetForeground
 # Every Deskweave process seen with a visible window, and every process that held the foreground.
 $script:shownBy = @(); $script:foreground = @(); $script:pids = @()
 function Watch-Screen {
-    foreach ($p in @(Get-Process Deskweave -ErrorAction SilentlyContinue)) {
+    foreach ($p in @(Get-Process ARS -ErrorAction SilentlyContinue)) {
         $script:pids += [uint32]$p.Id
         if ([Probe.Win]::Visible([uint32]$p.Id) -gt 0) { $script:shownBy += $p.Id }
     }
@@ -79,13 +79,13 @@ try {
     $init = Ask $bridge 1 'initialize' $hello
     $twinInit = Ask $twin 1 'initialize' $hello
     $report.coldStartSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
-    Check ($init.result.serverInfo.name -eq 'deskweave') "With Deskweave closed, the agent's bridge starts it and initializes ($($report.coldStartSeconds) s)"
+    Check ($init.result.serverInfo.name -eq 'ars') "With Deskweave closed, the agent's bridge starts it and initializes ($($report.coldStartSeconds) s)"
     Check ($report.coldStartSeconds -lt 10) 'The first answer arrives inside Codex''s default 10 s MCP startup timeout'
-    Check ($twinInit.result.serverInfo.name -eq 'deskweave') 'A second session starting at the same moment connects too'
+    Check ($twinInit.result.serverInfo.name -eq 'ars') 'A second session starting at the same moment connects too'
     $twin.StandardInput.Close()
     foreach ($i in 1..15) { Watch-Screen; Start-Sleep -Milliseconds 100 }   # keep watching while it settles
     $twin.WaitForExit(5000) | Out-Null
-    $app = @(Get-Process Deskweave)
+    $app = @(Get-Process ARS)
     Check ($app.Count -eq 1) 'Exactly one Deskweave is running'
     $app = $app[0]
     $command = (Get-CimInstance Win32_Process -Filter "ProcessId = $($app.Id)").CommandLine
@@ -104,10 +104,10 @@ try {
     $again = Start-Bridge
     $init = Ask $again 1 'initialize' $hello
     $report.warmStartSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
-    Check ($init.result.serverInfo.name -eq 'deskweave' -and @(Get-Process Deskweave).Count -eq 1) "A second session joins the running Deskweave without starting another ($($report.warmStartSeconds) s)"
+    Check ($init.result.serverInfo.name -eq 'ars' -and @(Get-Process ARS).Count -eq 1) "A second session joins the running Deskweave without starting another ($($report.warmStartSeconds) s)"
     $again.StandardInput.Close(); $again.WaitForExit(5000) | Out-Null
 
-    $second = Start-Process -FilePath (Join-Path $root 'out\Deskweave.exe') -ArgumentList '--background' -PassThru
+    $second = Start-Process -FilePath (Join-Path $root 'out\ARS.exe') -ArgumentList '--background' -PassThru
     Check ($second.WaitForExit(15000)) 'A second background start exits by itself'
     Start-Sleep -Seconds 1
     $app.Refresh()
@@ -120,8 +120,8 @@ finally {
     $report.validationInstanceExited = -not $app -or $app.HasExited
     $report.status = if ($failure) { 'failed' } else { 'passed' }
     $report.failure = $failure
-    $report.exeSha256 = Hash (Join-Path $root 'out\Deskweave.exe')
-    $report.bridgeSha256 = Hash (Join-Path $root 'out\Bridge\Deskweave.WorkspaceBridge.dll')
+    $report.exeSha256 = Hash (Join-Path $root 'out\ARS.exe')
+    $report.bridgeSha256 = Hash (Join-Path $root 'out\Bridge\ARS.WorkspaceBridge.dll')
     [IO.Directory]::CreateDirectory($output) | Out-Null
     $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $output 'live-autostart-report.json') -Encoding utf8
 }

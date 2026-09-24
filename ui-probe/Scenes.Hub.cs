@@ -473,11 +473,11 @@ static class HubScenes
         {
             using var menu = TrayMenu.Build(() => opened++, ModuleEntry.RequestShowCorner,
                 ModuleEntry.RequestPauseAll, () => settings++, () => quit++);
-            Program.Check(menu.Items.Count == 6 && menu.Items[0].Text == "Open Deskweave"
+            Program.Check(menu.Items.Count == 6 && menu.Items[0].Text == "Open ARS"
                 && menu.Items[1].Text == "Show the corner window"
                 && menu.Items[2].Text == "Pause every agent" && menu.Items[3].Text == "Settings"
                 && menu.Items[4] is System.Windows.Forms.ToolStripSeparator
-                && menu.Items[5].Text == "Quit Deskweave",
+                && menu.Items[5].Text == "Quit ARS",
                 "The tray menu has the five actions in order, with one separator before Quit");
             foreach (int index in new[] { 0, 1, 2, 3, 5 })
                 ((System.Windows.Forms.ToolStripMenuItem)menu.Items[index]).PerformClick();
@@ -492,7 +492,7 @@ static class HubScenes
             Program.Check(menu.Items[2].Text == "Pause every agent",
                 "The tray pause label returns after resuming");
 
-            Program.Check(QuitQuestion.Title == "Quit Deskweave?"
+            Program.Check(QuitQuestion.Title == "Quit ARS?"
                 && QuitQuestion.Body.StartsWith("Agents working now will stop. Your files stay.", StringComparison.Ordinal)
                 && QuitQuestion.QuitLabel == "Quit" && QuitQuestion.CancelLabel == "Cancel",
                 "The quit question uses plain words and Quit/Cancel buttons");

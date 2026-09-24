@@ -37,7 +37,7 @@ internal static class TrayChecks
         }
         using var icon = (Icon)SystemIcons.Application.Clone();
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Open Deskweave");
+        menu.Items.Add("Open ARS");
         using var tray = new TrayIcon(icon, menu, identity, Notify);
         Program.Check(calls[0].Operation == 2 && entries.SetEquals([identity]),
             "Startup removes only its own stale tray identity before installing one live entry");

@@ -122,11 +122,11 @@ static class Program
         var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
         {
-            Source = new Uri("pack://application:,,,/Deskweave;component/Theme.xaml")
+            Source = new Uri("pack://application:,,,/ARS;component/Theme.xaml")
         });
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
         {
-            Source = new Uri("pack://application:,,,/Deskweave;component/Controls.xaml")
+            Source = new Uri("pack://application:,,,/ARS;component/Controls.xaml")
         });
         application.DispatcherUnhandledException += (_, e) =>
         {
@@ -393,7 +393,7 @@ static class Program
                     bool inside = false;
                     return string.Concat(File.ReadLines(path).Where(line =>
                     {
-                        if (line.TrimStart().StartsWith('[')) inside = line.Trim() == "[mcp_servers.deskweave]";
+                        if (line.TrimStart().StartsWith('[')) inside = line.Trim() == "[mcp_servers.ars]";
                         return inside;
                     }));
                 }
@@ -513,7 +513,7 @@ static class Program
             }
         }
         JsonElement hello = await Call("initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "probe-agent", version = "1" } });
-        Check(hello.GetProperty("serverInfo").GetProperty("name").GetString() == "deskweave" && WorkspaceRuntime.Of(shared.Id) is null,
+        Check(hello.GetProperty("serverInfo").GetProperty("name").GetString() == "ars" && WorkspaceRuntime.Of(shared.Id) is null,
             "Connecting an agent starts no workspace until it uses one");
         JsonElement tools = await Call("tools/list", new { });
         Check(tools.GetProperty("tools").EnumerateArray().Any(tool => tool.GetProperty("name").GetString() == "browse"),

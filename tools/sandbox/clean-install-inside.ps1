@@ -1,5 +1,5 @@
 param(
-    [string]$InstallerPath = 'C:\Users\WDAGUtilityAccount\Desktop\installer\Deskweave-Setup.exe',
+    [string]$InstallerPath = 'C:\Users\WDAGUtilityAccount\Desktop\installer\ARS-Setup.exe',
     [string]$OutputDirectory = 'C:\Users\WDAGUtilityAccount\Desktop\results',
     [switch]$VirtualMachine,
     [switch]$PreserveExistingCodexConfiguration
@@ -54,10 +54,10 @@ function WaitFor([scriptblock]$condition, [int]$seconds) {
     return $false
 }
 $local = $env:LOCALAPPDATA
-$app = Join-Path $local 'DeskweaveApp\current\Deskweave.exe'
-$bridge = Join-Path $local 'DeskweaveApp\current\Bridge\Deskweave.WorkspaceBridge.exe'
+$app = Join-Path $local 'ARSApp\current\ARS.exe'
+$bridge = Join-Path $local 'ARSApp\current\Bridge\ARS.WorkspaceBridge.exe'
 $ticket = Join-Path $local 'Deskweave\agent-workspaces.access\router.json'
-$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DeskweaveApp'
+$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARSApp'
 $project = Join-Path $results 'project'
 New-Item -ItemType Directory -Force (Join-Path $project '.git') | Out-Null
 $session = $null
@@ -83,7 +83,7 @@ function Ask([string]$method, $params, [int]$seconds = 90) {
 $failure = $null
 try {
     Check (-not (Test-Path $app)) 'This user has no existing Deskweave installation'
-    Check (-not (Test-Path (Join-Path $local 'Deskweave'))) 'This user has no existing Deskweave data'
+    Check (-not (Test-Path (Join-Path $local 'ARS'))) 'This user has no existing Deskweave data'
     # --- install ---------------------------------------------------------------------------
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $setup = Start-Process -FilePath $initialInstaller -ArgumentList ('--silent --log "' + (Join-Path $results 'setup.log') + '"') -PassThru -WindowStyle Hidden
@@ -94,9 +94,9 @@ try {
     Check (Test-Path $app) 'Deskweave installs per user under LocalAppData, no admin'
     Check (Test-Path $bridge) 'The agent bridge is installed beside it'
     $report.appVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
-    $report.appSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.dll')).Hash
+    $report.appSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'ARS.dll')).Hash
     $report.engineSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.AgentWorkspaces.dll')).Hash
-    $report.bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $bridge) 'Deskweave.WorkspaceBridge.dll')).Hash
+    $report.bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $bridge) 'ARS.WorkspaceBridge.dll')).Hash
     $shortcut = @(Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*.lnk' | Where-Object { $_.Name -like 'Deskweave*' })
     Check ($shortcut.Count -ge 1) 'A Start menu shortcut is created'
     Check (-not (Test-Path "$env:USERPROFILE\Desktop\Deskweave.lnk")) 'No desktop icon is added'
@@ -104,14 +104,14 @@ try {
     $report.displayName = (Get-ItemProperty $uninstallKey).DisplayName
 
     # --- first launch: Setup starts the app, which asks once before touching anything -------
-    $started = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30
-    if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
+    $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30
+    if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
     Check $started 'Deskweave starts after install'
     $clock.Restart()
-    $firstWindowReady = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle }).Count -gt 0 } 60
+    $firstWindowReady = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle }).Count -gt 0 } 60
     $report.firstWindowWaitSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
     Shot 'first-launch'
-    $windows = @(Get-Process Deskweave | Where-Object { $_.MainWindowTitle } | ForEach-Object { $_.MainWindowTitle })
+    $windows = @(Get-Process ARS | Where-Object { $_.MainWindowTitle } | ForEach-Object { $_.MainWindowTitle })
     $report.firstLaunchWindows = $windows
     Check ($firstWindowReady -and $windows.Count -ge 1) 'First launch shows a window on a fresh PC within 60 seconds'
     Check (-not (Test-Path (Join-Path $env:USERPROFILE '.claude.json'))) 'Unanswered first launch creates no Claude configuration'
@@ -119,7 +119,7 @@ try {
         Check ((Test-Path -LiteralPath $codexConfiguration) -and (Get-FileHash -LiteralPath $codexConfiguration).Hash -eq $codexConfigurationBefore) 'Unanswered first launch preserves the existing Codex configuration byte for byte'
     }
     else { Check (-not (Test-Path -LiteralPath $codexConfiguration)) 'Unanswered first launch creates no Codex configuration' }
-    Get-Process Deskweave | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
+    Get-Process ARS | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
 
     if ($initialInstaller -ne $installer) {
         $report.previousVersion = $report.appVersion
@@ -128,7 +128,7 @@ try {
         Set-Content -LiteralPath $upgradeMarker -Value 'saved before upgrade' -Encoding UTF8
         $session = StartBridge
         $beforeUpgrade = Ask 'initialize' @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'install-upgrade-check'; version = '1' } } 30
-        Check ($beforeUpgrade.result.serverInfo.name -eq 'deskweave') 'An agent bridge is connected before the upgrade'
+        Check ($beforeUpgrade.result.serverInfo.name -eq 'ars') 'An agent bridge is connected before the upgrade'
         $report.upgradeBridge = [ordered]@{ processId = $session.Id; executable = $bridge; connectedBefore = $true }
         $upgrade = Start-Process -FilePath $installer -ArgumentList ('--silent --log "' + (Join-Path $results 'upgrade.log') + '"') -PassThru -WindowStyle Hidden
         Check ($upgrade.WaitForExit(300000) -and $upgrade.ExitCode -eq 0) 'The new Setup upgrades the previous installed release'
@@ -150,11 +150,11 @@ try {
         Check ((Get-Content -Raw -LiteralPath $upgradeMarker).Trim() -eq 'saved before upgrade') 'An upgrade preserves existing Deskweave data'
         $report.appVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
         Check ($report.appVersion -ne $report.previousVersion) 'The installed version changes after upgrade'
-        $report.appSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.dll')).Hash
+        $report.appSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'ARS.dll')).Hash
         $report.engineSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.AgentWorkspaces.dll')).Hash
-        $report.bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $bridge) 'Deskweave.WorkspaceBridge.dll')).Hash
+        $report.bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $bridge) 'ARS.WorkspaceBridge.dll')).Hash
         Start-Sleep -Seconds 3
-        Get-Process Deskweave -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
+        Get-Process ARS -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
     }
 
     # --- an agent's bridge starts Deskweave in the background -------------------------------
@@ -162,7 +162,7 @@ try {
     $session = StartBridge
     $hello = Ask 'initialize' @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'claude-code'; version = '1' } } 30
     $report.coldStartSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
-    Check ($hello.result.serverInfo.name -eq 'deskweave') "With Deskweave closed, an agent's bridge starts it and connects ($($report.coldStartSeconds) s)"
+    Check ($hello.result.serverInfo.name -eq 'ars') "With Deskweave closed, an agent's bridge starts it and connects ($($report.coldStartSeconds) s)"
     if ($initialInstaller -ne $installer) { $report.upgradeBridge.newClientConnected = $true }
     $tools = Ask 'tools/list' @{}
     $names = @($tools.result.tools | ForEach-Object { $_.name })
@@ -185,12 +185,12 @@ try {
     $report.workspace = ($status.result.content[0].text | ConvertFrom-Json).workspace
     Check ($report.workspace -eq 'project') 'The workspace is named after the project folder'
     $session.StandardInput.Close(); Check ($session.WaitForExit(10000) -and $session.ExitCode -eq 0) 'The installed bridge exits cleanly when its agent disconnects'
-    Get-Process Deskweave -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
+    Get-Process ARS -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
     # The desktop owns browser children; killing the host app must release them too.
     Check (WaitFor { @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*Deskweave*' }).Count -eq 0 } 15) 'Closing Deskweave releases its workspace browser processes'
 
     # --- uninstall ------------------------------------------------------------------------------
-    $update = Join-Path $local 'DeskweaveApp\Update.exe'
+    $update = Join-Path $local 'ARSApp\Update.exe'
     Check (Test-Path $update) 'The uninstaller is present'
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     New-Item -Path $runKey -Force | Out-Null
@@ -218,7 +218,7 @@ public static class InstallerProviderFixture {
         string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json");
         var serializer = new JavaScriptSerializer();
         var config = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
-        ((Dictionary<string, object>)config["mcpServers"]).Remove("deskweave");
+        ((Dictionary<string, object>)config["mcpServers"]).Remove("ars");
         File.WriteAllText(path, serializer.Serialize(config));
         return 0;
     }
@@ -247,12 +247,12 @@ public static class InstallerProviderFixture {
     # The same steps the Settings row takes: quit, delete both data folders, run Update.exe.
     $setup = Start-Process -FilePath $installer -ArgumentList '--silent' -PassThru -WindowStyle Hidden
     Check ($setup.WaitForExit(300000) -and $setup.ExitCode -eq 0) 'Reinstalling over kept data succeeds'
-    $started = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30
-    if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process Deskweave -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
+    $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30
+    if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
     Check $started 'Deskweave starts after the reinstall'
     [IO.File]::WriteAllText($providerConfig, $providerFixture, (New-Object Text.UTF8Encoding $false))
-    Get-Process Deskweave -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
-    foreach ($folder in @((Join-Path $local 'Deskweave'), (Join-Path $env:APPDATA 'Deskweave'))) {
+    Get-Process ARS -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
+    foreach ($folder in @((Join-Path $local 'ARS'), (Join-Path $env:APPDATA 'ARS'))) {
         if (Test-Path $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
     }
     $un = Start-Process -FilePath $update -ArgumentList 'uninstall', '--silent' -PassThru -WindowStyle Hidden
@@ -269,7 +269,7 @@ public static class InstallerProviderFixture {
     Check (-not (Test-Path $uninstallKey)) 'Full uninstall removes the Apps & features entry'
     Check ($null -eq (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).Deskweave) 'Full uninstall leaves nothing starting with Windows'
     Check ($null -eq (Get-Content -Raw -LiteralPath $providerConfig | ConvertFrom-Json).mcpServers.deskweave) 'Full uninstall disconnects the agent'
-    Check (@(Get-Process Deskweave, Deskweave.WorkspaceBridge -ErrorAction SilentlyContinue).Count -eq 0) 'No Deskweave process is left running'
+    Check (@(Get-Process ARS, ARS.WorkspaceBridge -ErrorAction SilentlyContinue).Count -eq 0) 'No Deskweave process is left running'
 }
 catch { $failure = $_.ToString() }
 finally {

@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $packageDir = Join-Path $root "artifacts/installer/$Version"
-$installer = Join-Path $packageDir 'Deskweave-Setup.exe'
+$installer = Join-Path $packageDir 'ARS-Setup.exe'
 $evidencePath = Join-Path $packageDir 'package-evidence.json'
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Missing installer: $installer" }
 if (-not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) { throw "Missing package evidence: $evidencePath" }
@@ -30,8 +30,8 @@ if ($hash -cne ([string]$evidence.installerSha256).ToUpperInvariant()) {
 if (-not $ReleaseTag) { $ReleaseTag = "v$Version" }
 if ($ReleaseTag -notmatch '^[A-Za-z0-9._-]+$') { throw 'ReleaseTag must be a plain GitHub tag.' }
 $packageUrl = "https://github.com/$ReleaseRepository"
-$installerUrl = "$packageUrl/releases/download/$ReleaseTag/Deskweave-Setup.exe"
-$download = Join-Path ([IO.Path]::GetTempPath()) ("deskweave-winget-$([Guid]::NewGuid().ToString('N')).exe")
+$installerUrl = "$packageUrl/releases/download/$ReleaseTag/ARS-Setup.exe"
+$download = Join-Path ([IO.Path]::GetTempPath()) ("ars-winget-$([Guid]::NewGuid().ToString('N')).exe")
 try {
     & curl.exe --silent --show-error --fail --location --retry 3 --proto '=https' --proto-redir '=https' --output $download $installerUrl
     if ($LASTEXITCODE -ne 0) { throw "Public installer download failed (curl exit $LASTEXITCODE)." }
@@ -43,13 +43,13 @@ try {
 finally { Remove-Item -LiteralPath $download -ErrorAction SilentlyContinue }
 
 if (-not $OutputRoot) { $OutputRoot = Join-Path $root 'artifacts/winget' }
-$manifestDir = Join-Path $OutputRoot "manifests/j/JeffLepp/Deskweave/$Version"
+$manifestDir = Join-Path $OutputRoot "manifests/j/JeffLepp/ARS/$Version"
 if (Test-Path -LiteralPath $manifestDir) { throw "Manifest already exists: $manifestDir" }
 [IO.Directory]::CreateDirectory($manifestDir) | Out-Null
 
 $versionManifest = @'
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
-PackageIdentifier: JeffLepp.Deskweave
+PackageIdentifier: JeffLepp.ARS
 PackageVersion: __VERSION__
 DefaultLocale: en-US
 ManifestType: version
@@ -57,7 +57,7 @@ ManifestVersion: 1.12.0
 '@
 $installerManifest = @'
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
-PackageIdentifier: JeffLepp.Deskweave
+PackageIdentifier: JeffLepp.ARS
 PackageVersion: __VERSION__
 InstallerType: exe
 Scope: user
@@ -75,24 +75,24 @@ ManifestVersion: 1.12.0
 '@
 $localeManifest = @'
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
-PackageIdentifier: JeffLepp.Deskweave
+PackageIdentifier: JeffLepp.ARS
 PackageVersion: __VERSION__
 PackageLocale: en-US
 Publisher: Jefferson Kline
 PublisherUrl: https://github.com/JeffLepp
 PublisherSupportUrl: __PACKAGE_URL__/issues
 Author: Jefferson Kline
-PackageName: Deskweave
+PackageName: ARS
 PackageUrl: __PACKAGE_URL__
 License: MIT
 LicenseUrl: __PACKAGE_URL__/blob/main/LICENSE
 Copyright: Copyright (c) 2026 Jefferson Kline
 ShortDescription: Give your AI coding agent a Windows desktop of its own.
 Description: |-
-  Deskweave gives coding agents like Claude Code and Codex a second Windows desktop, so they can
+  ARS gives coding agents like Claude Code and Codex a second Windows desktop, so they can
   open apps, click and test while your mouse, keyboard and windows stay yours. A small corner
   window shows what the agent is doing. Everything runs locally.
-Moniker: deskweave
+Moniker: ars
 Tags:
   - ai
   - agent
@@ -110,10 +110,10 @@ $versionManifest = $versionManifest.Replace('__VERSION__', $Version)
 $installerManifest = $installerManifest.Replace('__VERSION__', $Version).Replace('__URL__', $installerUrl).Replace('__HASH__', $hash).Replace('__DATE__', [DateTime]::UtcNow.ToString('yyyy-MM-dd'))
 $localeManifest = $localeManifest.Replace('__VERSION__', $Version).Replace('__PACKAGE_URL__', $packageUrl).Replace('__TAG__', $ReleaseTag)
 $utf8 = [Text.UTF8Encoding]::new($false)
-[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.Deskweave.yaml'), $versionManifest + [Environment]::NewLine, $utf8)
-[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.Deskweave.installer.yaml'), $installerManifest + [Environment]::NewLine, $utf8)
-[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.Deskweave.locale.en-US.yaml'), $localeManifest + [Environment]::NewLine, $utf8)
-$oneLineTemplate = '$u=''__URL__'';$h=''__HASH__'';$p=Join-Path $env:TEMP (''Deskweave-''+[guid]::NewGuid().ToString(''N'')+''.exe'');try{& curl.exe --silent --show-error --fail --location --retry 3 --proto ''=https'' --proto-redir ''=https'' --output $p $u;if($LASTEXITCODE){throw ''Download failed''};$s=Get-AuthenticodeSignature -LiteralPath $p;if((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash -cne $h -or $s.Status -ne ''Valid'' -or $s.SignerCertificate.Subject -notmatch ''^CN=Jefferson Kline(?:,|$)''){throw ''Verification failed''};Set-Content -LiteralPath $p -Stream Zone.Identifier -Encoding Ascii -Value ''[ZoneTransfer]'',''ZoneId=3'',(''HostUrl='' + $u);$r=Start-Process -FilePath $p -ArgumentList ''--silent'' -PassThru -Wait;if($r.ExitCode){throw (''Installer exited ''+$r.ExitCode)}}finally{Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue}'
+[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.ARS.yaml'), $versionManifest + [Environment]::NewLine, $utf8)
+[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.ARS.installer.yaml'), $installerManifest + [Environment]::NewLine, $utf8)
+[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.ARS.locale.en-US.yaml'), $localeManifest + [Environment]::NewLine, $utf8)
+$oneLineTemplate = '$u=''__URL__'';$h=''__HASH__'';$p=Join-Path $env:TEMP (''ARS-''+[guid]::NewGuid().ToString(''N'')+''.exe'');try{& curl.exe --silent --show-error --fail --location --retry 3 --proto ''=https'' --proto-redir ''=https'' --output $p $u;if($LASTEXITCODE){throw ''Download failed''};$s=Get-AuthenticodeSignature -LiteralPath $p;if((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash -cne $h -or $s.Status -ne ''Valid'' -or $s.SignerCertificate.Subject -notmatch ''^CN=Jefferson Kline(?:,|$)''){throw ''Verification failed''};Set-Content -LiteralPath $p -Stream Zone.Identifier -Encoding Ascii -Value ''[ZoneTransfer]'',''ZoneId=3'',(''HostUrl='' + $u);$r=Start-Process -FilePath $p -ArgumentList ''--silent'' -PassThru -Wait;if($r.ExitCode){throw (''Installer exited ''+$r.ExitCode)}}finally{Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue}'
 $oneLine = $oneLineTemplate.Replace('__URL__', $installerUrl).Replace('__HASH__', $hash)
 Write-Output 'PowerShell install command (download verified; clean install still required):'
 Write-Output $oneLine

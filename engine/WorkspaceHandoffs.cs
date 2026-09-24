@@ -72,7 +72,7 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
                 throw new InvalidOperationException("Eight desktop requests are already waiting. Wait for the owner.");
             if (_requests.Count >= 40) _requests.RemoveAll(r => r.State != "pending");
             request = new(Guid.NewGuid().ToString("N"), kind, target, reason, "pending",
-                "Waiting for the owner's click in Deskweave. Nothing has opened on the main desktop.", DateTimeOffset.UtcNow, hash, arguments);
+                "Waiting for the owner's click in ARS. Nothing has opened on the main desktop.", DateTimeOffset.UtcNow, hash, arguments);
             _requests.Add(request);
         }
         Changed?.Invoke();

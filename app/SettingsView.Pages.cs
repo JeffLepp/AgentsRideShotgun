@@ -95,9 +95,9 @@ public partial class SettingsView
         licenseStack.Children.Add(licenses);
         licenseStack.Children.Add(licenseBody);
 
-        var openData = new Button { Content = RowAction("Open Deskweave data", "Icon.Folder") };
+        var openData = new Button { Content = RowAction("Open ARS data", "Icon.Folder") };
         openData.SetResourceReference(StyleProperty, "RowButton");
-        AutomationProperties.SetName(openData, "Open Deskweave data");
+        AutomationProperties.SetName(openData, "Open ARS data");
         openData.Click += (_, _) => SettingsActions.OpenFolder(ProductContext.LocalRoot);
 
         return new StackPanel
@@ -230,7 +230,7 @@ public partial class SettingsView
                 _ => "Connected",
             };
             toggle.ToolTip = profiles.Total > 1
-                ? $"Connects Deskweave to all {profiles.Total} detected configuration profiles." : null;
+                ? $"Connects ARS to all {profiles.Total} detected configuration profiles." : null;
             string? failure = requestFailure ?? SettingsActions.ReadConnectionFailure(app);
             error.Text = failure ?? "";
             error.Visibility = failure is null ? Visibility.Collapsed : Visibility.Visible;
@@ -266,7 +266,7 @@ public partial class SettingsView
         var button = new Button { Content = "Copy setup" };
         button.SetResourceReference(StyleProperty, "DeskButton");
         button.Click += (_, _) => SettingsActions.CopyText(SettingsActions.SetupText());
-        return Row(RowText("Connect another agent", "For an agent Deskweave can't connect by itself"), button);
+        return Row(RowText("Connect another agent", "For an agent ARS can't connect by itself"), button);
     }
 
     FrameworkElement Accounts()
@@ -277,7 +277,7 @@ public partial class SettingsView
         // wraps to two lines and any shortfall in the per-line height doubles up, shrinking the banner.
         var bannerText = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18.85, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         bannerText.Inlines.Add(new Run("Local only.") { FontWeight = FontWeights.SemiBold });
-        bannerText.Inlines.Add(new Run(" Sign-ins live in Deskweave's own browser, on this PC, and your own Chrome is never touched."));
+        bannerText.Inlines.Add(new Run(" Sign-ins live in ARS's own browser, on this PC, and your own Chrome is never touched."));
         banner.Content = bannerText;
 
         var accountRows = SettingsFeatures.Accounts
@@ -436,11 +436,11 @@ public partial class SettingsView
         // SettingsFeatures.ProjectFiles is on and there is at least one row to show.
         projects.Visibility = SettingsFeatures.ProjectFiles && projectRows.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        var deleteRow = Row(RowText("Delete all Deskweave data", "Stops every workspace, deletes Deskweave's data, and quits. Your projects stay."),
-            Confirm("Delete", () => "Delete all Deskweave data? This can't be undone.",
+        var deleteRow = Row(RowText("Delete all ARS data", "Stops every workspace, deletes ARS's data, and quits. Your projects stay."),
+            Confirm("Delete", () => "Delete all ARS data? This can't be undone.",
                 () => SettingsActions.DeleteAllData(SettingsActions.DataFolders), danger: true));
-        var uninstallRow = Row(RowText("Uninstall Deskweave", "Deletes all Deskweave data, disconnects your agents, and removes the app. Your projects stay."),
-            Confirm("Uninstall", () => "Uninstall Deskweave and delete all its data? This can't be undone.",
+        var uninstallRow = Row(RowText("Uninstall ARS", "Deletes all ARS data, disconnects your agents, and removes the app. Your projects stay."),
+            Confirm("Uninstall", () => "Uninstall ARS and delete all its data? This can't be undone.",
                 () => SettingsActions.Uninstall(), danger: true));
 
         return new StackPanel
@@ -459,7 +459,7 @@ public partial class SettingsView
     {
         try
         {
-            var uri = new Uri("pack://application:,,,/Deskweave;component/Assets/ThirdPartyNotices.txt");
+            var uri = new Uri("pack://application:,,,/ARS;component/Assets/ThirdPartyNotices.txt");
             StreamResourceInfo? info = Application.GetResourceStream(uri);
             if (info is null) return "Third-party notices are unavailable.";
             using Stream stream = info.Stream;

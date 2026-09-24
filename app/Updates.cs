@@ -31,7 +31,7 @@ static class Updates
                         if (told != version)
                         {
                             told = version;
-                            tell("Deskweave " + version + " is ready", "It installs when you quit and open Deskweave again.");
+                            tell("ARS " + version + " is ready", "It installs when you quit and open ARS again.");
                         }
                     }
                 }

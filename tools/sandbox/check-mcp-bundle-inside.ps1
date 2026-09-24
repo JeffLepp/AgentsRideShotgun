@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $inputFolder = 'C:\Users\WDAGUtilityAccount\Desktop\mcp-input'
 $results = 'C:\Users\WDAGUtilityAccount\Desktop\mcp-results'
-$installer = Join-Path $inputFolder 'Deskweave-Setup.exe'
+$installer = Join-Path $inputFolder 'ARS-Setup.exe'
 $bundle = Join-Path $inputFolder 'Deskweave.mcpb'
 function Mark([string]$step) {
     try { Add-Content -LiteralPath (Join-Path $results 'progress.txt') -Value ((Get-Date).ToString('o') + ' ' + $step) }
@@ -18,7 +18,7 @@ $report = [ordered]@{
 try {
     if ($env:USERNAME -ne 'WDAGUtilityAccount') { throw 'This check only runs inside Windows Sandbox.' }
     $report.windows = (Get-CimInstance Win32_OperatingSystem).Caption
-    $app = Join-Path $env:LOCALAPPDATA 'DeskweaveApp\current\Deskweave.exe'
+    $app = Join-Path $env:LOCALAPPDATA 'ARSApp\current\ARS.exe'
     if (Test-Path -LiteralPath $app) { throw 'This Windows user already has Deskweave installed.' }
     $setupLog = Join-Path $results 'setup.log'
     Mark 'starting installer'
@@ -26,16 +26,16 @@ try {
     if (-not $process.WaitForExit(300000) -or $process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
     Mark ('installer exited ' + $process.ExitCode)
     $report.checks += 'fresh per-user install'
-    if (-not (Test-Path -LiteralPath $app)) { throw 'Installed Deskweave.exe is missing.' }
+    if (-not (Test-Path -LiteralPath $app)) { throw 'Installed ARS.exe is missing.' }
     $report.appVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
-    Get-Process Deskweave -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
+    Get-Process ARS -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $unpacked = Join-Path $env:TEMP 'deskweave-mcpb-check'
     Mark 'extracting MCPB'
     [IO.Compression.ZipFile]::ExtractToDirectory($bundle,$unpacked)
     Mark 'MCPB extracted'
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $unpacked 'manifest.json') | ConvertFrom-Json
-    if ($manifest.server.mcp_config.command -cne '${__dirname}/server/Deskweave.McpConnector.exe') { throw 'MCPB executable command is not install-relative.' }
+    if ($manifest.server.mcp_config.command -cne '${__dirname}/server/ARS.McpConnector.exe') { throw 'MCPB executable command is not install-relative.' }
     $connector = $manifest.server.mcp_config.command.Replace('${__dirname}', $unpacked.Replace('\','/'))
     if (-not (Test-Path -LiteralPath $connector)) { throw 'MCPB command did not resolve to an executable.' }
     $signature = Get-AuthenticodeSignature -LiteralPath $connector
@@ -68,7 +68,7 @@ try {
     Mark ('connector handshake returned ' + $handshake.ToolCount + ' tools')
     $report.toolCount = $handshake.ToolCount
     $report.checks += 'cold MCP initialize, tools/list, status, ping, shutdown'
-    if (-not (Get-Process Deskweave -ErrorAction SilentlyContinue)) { throw 'The connector did not start the installed app.' }
+    if (-not (Get-Process ARS -ErrorAction SilentlyContinue)) { throw 'The connector did not start the installed app.' }
     $report.checks += 'connector starts installed app in background'
     $report.status = 'passed'
 }

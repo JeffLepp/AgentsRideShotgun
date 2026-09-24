@@ -32,12 +32,13 @@ static class Program
                         using RegistryKey? run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
                         // A different copy may now own startup. Remove only this install's value.
                         string own = "\"" + Environment.ProcessPath + "\" " + StartWithWindows.Background;
-                        if (string.Equals(run?.GetValue("Deskweave") as string, own, StringComparison.OrdinalIgnoreCase))
-                            run!.DeleteValue("Deskweave", false);
+                        foreach (string name in new[] { StartWithWindows.Name, FormerName.Name })
+                            if (string.Equals(run?.GetValue(name) as string, own, StringComparison.OrdinalIgnoreCase))
+                                run!.DeleteValue(name, false);
                     });
                     Cleanup("agent connections", () =>
                     {
-                        ProductContext.Configure("Deskweave");
+                        ProductContext.Configure(ProductContext.DefaultFolderName);
                         ModuleEntry.Uninstall();
                     });
                 })
@@ -80,7 +81,7 @@ static class Program
     {
         try
         {
-            string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deskweave");
+            string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ProductContext.DefaultFolderName);
             Directory.CreateDirectory(folder);
             // Exception types identify a failed cleanup without persisting provider configuration.
             File.AppendAllText(Path.Combine(folder, "setup-errors.log"),

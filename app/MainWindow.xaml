@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:local="clr-namespace:Deskweave"
-        Title="Deskweave" MinWidth="320" MinHeight="480"
+        Title="ARS" MinWidth="320" MinHeight="480"
         WindowStartupLocation="Manual" WindowStyle="None" ResizeMode="CanResize"
         FontFamily="{DynamicResource SkinFontFamily}" FontSize="13"
         Foreground="{DynamicResource InkBrush}" Background="{DynamicResource WindowBrush}"
@@ -214,7 +214,7 @@
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Back}"/>
                     </Button>
                 </Grid>
-                <TextBlock x:Name="TitleText" Grid.Column="1" Text="Deskweave" FontWeight="SemiBold" FontSize="12.5" Margin="8,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="TitleText" Grid.Column="1" Text="ARS" FontWeight="SemiBold" FontSize="12.5" Margin="8,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                     <Button x:Name="BackButton" Visibility="Collapsed" Style="{StaticResource IconButton}" Click="Back_Click" ToolTip="Back to workspaces" AutomationProperties.Name="Back to workspaces">
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Back}"/>
@@ -231,13 +231,13 @@
                     </Button>
                 </StackPanel>
                 <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,0,0" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                    <Button x:Name="MinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize Deskweave">
+                    <Button x:Name="MinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize ARS">
                         <Path Style="{StaticResource CaptionIcon}" Data="{StaticResource Icon.Min}"/>
                     </Button>
-                    <Button x:Name="MaximizeButton" Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="Maximize" AutomationProperties.Name="Maximize or restore Deskweave">
+                    <Button x:Name="MaximizeButton" Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="Maximize" AutomationProperties.Name="Maximize or restore ARS">
                         <Path Style="{StaticResource CaptionIcon}" Data="{StaticResource Icon.Max}"/>
                     </Button>
-                    <Button x:Name="CloseButton" Style="{StaticResource CloseCaptionButton}" Click="Close_Click" ToolTip="Close" AutomationProperties.Name="Close Deskweave">
+                    <Button x:Name="CloseButton" Style="{StaticResource CloseCaptionButton}" Click="Close_Click" ToolTip="Close" AutomationProperties.Name="Close ARS">
                         <Path Style="{StaticResource CaptionIcon}" Data="{StaticResource Icon.Close}"/>
                     </Button>
                 </StackPanel>

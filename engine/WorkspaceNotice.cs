@@ -70,7 +70,7 @@ internal static class WorkspaceNotice
             uID = 1,
             uFlags = NifIcon | NifInfo | NifTip,
             hIcon = LoadIconW(0, (nint)ApplicationIcon),
-            szTip = "Deskweave workspaces",
+            szTip = "ARS workspaces",
             szInfoTitle = Cut(title, 63),
             szInfo = Cut(body, 255),
             dwInfoFlags = InfoIconInfo,

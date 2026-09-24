@@ -39,7 +39,7 @@ internal static class RouterStartup
                 JsonElement hello = bridge.Request("initialize", Hello);
                 JsonElement tools = bridge.Request("tools/list", new { });
                 coldMilliseconds = watch.Elapsed.TotalMilliseconds;
-                Check(hello.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString() == "deskweave"
+                Check(hello.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString() == "ars"
                     && tools.GetProperty("result").GetProperty("tools").GetArrayLength() == WorkspaceMcp.ExternalToolSchemas.Length,
                     "A real bridge initializes and lists tools while the fixture WPF dispatcher is blocked");
                 Check(blocked.StillBlocked && coldMilliseconds < 4000 && !WorkspaceRuntime.AnyRunning,
@@ -215,7 +215,7 @@ internal static class RouterStartup
             string errors = _errors.WaitAsync(TimeSpan.FromSeconds(1)).GetAwaiter().GetResult();
             string stdout = _process.StandardOutput.ReadToEnd();
             return _process.ExitCode == 1 && stdout.Length == 0
-                && errors.StartsWith("Deskweave isn't answering.", StringComparison.Ordinal);
+                && errors.StartsWith("ARS isn't answering.", StringComparison.Ordinal);
         }
         public void Dispose()
         {

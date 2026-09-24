@@ -10,10 +10,10 @@ using Deskweave.AgentWorkspaces;
 
 // stdout belongs exclusively to MCP. The host-issued capability arrives through the child
 // environment or a connection ticket, never a persisted provider configuration or an argument.
-const string NotOpen = "Deskweave isn't open.";
-const string NotAnswering = "Deskweave isn't answering.";
-const string Closed = "Deskweave closed while this was running.";
-const string Mismatched = "This MCP entry doesn't match the Deskweave on this PC. Connect the agent again from Deskweave's Settings.";
+const string NotOpen = "ARS isn't open.";
+const string NotAnswering = "ARS isn't answering.";
+const string Closed = "ARS closed while this was running.";
+const string Mismatched = "This MCP entry doesn't match the ARS on this PC. Connect the agent again from ARS's Settings.";
 
 string? capability = Environment.GetEnvironmentVariable("DESKWEAVE_WORKSPACE_PIPE_KEY");
 Environment.SetEnvironmentVariable("DESKWEAVE_WORKSPACE_PIPE_KEY", null);
@@ -45,8 +45,8 @@ bool mayLaunchApp = PreventStandardPipeInheritance();
 (Link? link, string why) = await Reach(TimeSpan.FromSeconds(9));
 if (link is null) return await Say(why switch
 {
-    NotOpen => why + " Open Deskweave, then reconnect this MCP server.",
-    NotAnswering => why + " Restart Deskweave, then reconnect this MCP server.",
+    NotOpen => why + " Open ARS, then reconnect this MCP server.",
+    NotAnswering => why + " Restart ARS, then reconnect this MCP server.",
     _ => why,
 }, why == Mismatched ? 2 : 1);
 if (link.Send(context, new(null, "deskweave/context", Discard: true)) is { } sent) await sent;
@@ -67,7 +67,7 @@ try
             if (next != '\n')
             {
                 if (line.Length >= WorkspacePipeProtocol.MaxRequestBytes)
-                    return await Say("An MCP request was larger than Deskweave accepts.", 1);
+                    return await Say("An MCP request was larger than ARS accepts.", 1);
                 line.Append(next);
                 continue;
             }
@@ -106,9 +106,9 @@ void Unreachable(Expect expect, string reason)
     if (expect.Id is null || expect.Discard) return;
     string text = reason switch
     {
-        NotAnswering => reason + " Ask the owner to restart Deskweave, then try again.",
+        NotAnswering => reason + " Ask the owner to restart ARS, then try again.",
         Mismatched => reason,
-        _ => reason + " Ask the owner to open Deskweave, then try again.",
+        _ => reason + " Ask the owner to open ARS, then try again.",
     };
     string reply = expect.Method == "tools/call"
         ? "{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
@@ -150,12 +150,12 @@ async Task<(Link?, string)> Reach(TimeSpan patience)
     return (found, reason);
 }
 
-// The Deskweave this bridge was installed with, when the ticket is that install's own router ticket.
+// The ARS this bridge was installed with, when the ticket is that install's own router ticket.
 string? App()
 {
-    string app = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Deskweave.exe"));
+    string app = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "ARS.exe"));
     string home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Deskweave", "agent-workspaces.access", "router.json");
+        "ARS", "agent-workspaces.access", "router.json");
     return ticket is not null && string.Equals(Path.GetFullPath(ticket), home, StringComparison.OrdinalIgnoreCase)
         && File.Exists(app) ? app : null;
 }
@@ -354,7 +354,7 @@ sealed class Link : IDisposable
         }
         _stop.Cancel();
         _pipe.Dispose();
-        foreach (Expect expect in left) _unreachable(expect, "Deskweave closed while this was running.");
+        foreach (Expect expect in left) _unreachable(expect, "ARS closed while this was running.");
     }
 
     public void Dispose()

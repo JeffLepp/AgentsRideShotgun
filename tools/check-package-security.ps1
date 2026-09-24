@@ -36,7 +36,7 @@ try {
     }
 }
 finally { $zip.Dispose() }
-if (-not (Test-Path -LiteralPath (Join-Path $payload 'Deskweave.exe') -PathType Leaf)) { throw 'The package holds no Deskweave.exe.' }
+if (-not (Test-Path -LiteralPath (Join-Path $payload 'ARS.exe') -PathType Leaf)) { throw 'The package holds no ARS.exe.' }
 $report = [ordered]@{
     observedAt = [DateTimeOffset]::UtcNow.ToString('o')
     signatureUpdatedAt = $status.AntivirusSignatureLastUpdated.ToString('o')

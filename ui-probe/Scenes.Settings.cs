@@ -247,7 +247,7 @@ static class SettingsScenes
             startupSynced = false;
             startup.Choose(false);
             Program.Check(startupSynced, "Start with Windows reaches its startup seam");
-            FindButton(view, "Open Deskweave data").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            FindButton(view, "Open ARS data").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Program.Check(opened, "Open Deskweave data reaches Explorer seam");
             Bound theme = view.BoundControls.Single(b => b.Label == "Theme");
             theme.Choose(ThemeChoice.Dark); Pump();

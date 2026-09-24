@@ -26,7 +26,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         // This is the composition root. Set identity before any copied engine observes paths.
-        ProductContext.Configure("Deskweave");
+        ProductContext.Configure(ProductContext.DefaultFolderName);
         base.OnStartup(e);
         try
         {
@@ -44,19 +44,21 @@ public partial class App : Application
             {
                 failure.Handled = true;
                 LogFailure(failure.Exception);
-                MessageBox.Show("Deskweave hit an unexpected error and will close to release its workspaces. " +
+                MessageBox.Show("ARS hit an unexpected error and will close to release its workspaces. " +
                     "Your saved workspace files are retained.\n\n" + failure.Exception.Message,
-                    "Deskweave", MessageBoxButton.OK, MessageBoxImage.Error);
+                    "ARS", MessageBoxButton.OK, MessageBoxImage.Error);
                 _quitting = true;
                 Shutdown(1);
             };
 
             SessionEnding += (_, _) => _quitting = true;
+            // Only now, holding the lock: no other copy is using the old folders while they move.
+            FormerName.MoveData();
             ModuleEntry.Initialize();
             var window = new MainWindow();
             MainWindow = window;
             window.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
-                new Uri("pack://application:,,,/Assets/Deskweave.ico"));
+                new Uri("pack://application:,,,/Assets/ARS.ico"));
             window.Closing += WindowClosing;
             CreateTray();
             _activationWait = ThreadPool.RegisterWaitForSingleObject(_activate,
@@ -73,8 +75,8 @@ public partial class App : Application
         catch (Exception failure)
         {
             LogFailure(failure);
-            MessageBox.Show("Deskweave couldn't open.\n\n" + failure.Message,
-                "Deskweave", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show("ARS couldn't open.\n\n" + failure.Message,
+                "ARS", MessageBoxButton.OK, MessageBoxImage.Error);
             _quitting = true;
             Shutdown(1);
         }
@@ -140,7 +142,7 @@ public partial class App : Application
             () => Dispatcher.BeginInvoke(RequestQuit));
         _refreshTrayPause = () => Dispatcher.BeginInvoke(() => TrayMenu.RefreshPause(menu));
         ModuleEntry.AllPausedChanged += _refreshTrayPause;
-        using var source = GetResourceStream(new Uri("pack://application:,,,/Assets/Deskweave.ico")).Stream;
+        using var source = GetResourceStream(new Uri("pack://application:,,,/Assets/ARS.ico")).Stream;
         using var icon = new System.Drawing.Icon(source);
         _tray = new TrayIcon(icon, menu, TrayIcon.IdentityFor(Environment.ProcessPath!));
         _tray.OpenRequested += () => Dispatcher.BeginInvoke(ShowWorkspace);
@@ -267,12 +269,12 @@ internal static class TrayMenu
         Action open, Action showCorner, Action pauseAll, Action settings, Action quit)
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Open Deskweave", null, (_, _) => open());
+        menu.Items.Add("Open ARS", null, (_, _) => open());
         menu.Items.Add("Show the corner window", null, (_, _) => showCorner());
         menu.Items.Add(ModuleEntry.AllPaused ? "Resume every agent" : "Pause every agent", null, (_, _) => pauseAll());
         menu.Items.Add("Settings", null, (_, _) => settings());
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("Quit Deskweave", null, (_, _) => quit());
+        menu.Items.Add("Quit ARS", null, (_, _) => quit());
         TrayMenuStyle.Apply(menu);
         return menu;
     }
@@ -283,8 +285,8 @@ internal static class TrayMenu
 
 internal static class QuitQuestion
 {
-    internal const string Title = "Quit Deskweave?";
-    internal const string Body = "Agents working now will stop. Your files stay. Deskweave starts again in the background when an agent needs it.";
+    internal const string Title = "Quit ARS?";
+    internal const string Body = "Agents working now will stop. Your files stay. ARS starts again in the background when an agent needs it.";
     internal const string QuitLabel = "Quit";
     internal const string CancelLabel = "Cancel";
     internal static Func<bool>? ConfirmForTests;

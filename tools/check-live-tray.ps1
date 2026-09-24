@@ -7,13 +7,13 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Validation output must be inside this checkout.'
 }
-if (Get-Process Deskweave -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before this check. Existing work was not stopped.' }
-$product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Deskweave'
+if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before this check. Existing work was not stopped.' }
+$product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS'
 $settings = Join-Path $product 'settings.json'
 if ((Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).FirstRunDone) {
     throw 'This live check requires unanswered first launch to protect owner configuration.'
 }
-$exe = Join-Path $root 'out/Deskweave.exe'
+$exe = Join-Path $root 'out/ARS.exe'
 [IO.Directory]::CreateDirectory($output) | Out-Null
 Add-Type -TypeDefinition @'
 using System;
@@ -107,14 +107,14 @@ try {
         foreach ($p in $duplicates) {
             if (-not $p.WaitForExit(20000) -or $p.ExitCode -ne 0) { throw 'A duplicate launch failed to exit cleanly.' }
         }
-        Check (@(Get-Process Deskweave).Count -eq 1 -and -not $app.HasExited -and [TrayProbe]::Exists($identity) -and [TrayProbe]::Windows($app.Id, $true) -eq 1) "Launch burst ${batch}: one app, one tray owner, same shell identity"
+        Check (@(Get-Process ARS).Count -eq 1 -and -not $app.HasExited -and [TrayProbe]::Exists($identity) -and [TrayProbe]::Windows($app.Id, $true) -eq 1) "Launch burst ${batch}: one app, one tray owner, same shell identity"
     }
     foreach ($cycle in 1..5) {
         $app.Kill(); $app.WaitForExit(10000) | Out-Null
         if ([TrayProbe]::Exists($identity)) { $report.crashGhostsObserved++ }
         $app = Start-Owned
         Wait-Tray $app
-        Check (@(Get-Process Deskweave).Count -eq 1 -and [TrayProbe]::Windows($app.Id, $true) -eq 1 -and [TrayProbe]::Exists($identity)) "Abrupt-stop recovery ${cycle}: one owner reclaims the same tray identity"
+        Check (@(Get-Process ARS).Count -eq 1 -and [TrayProbe]::Windows($app.Id, $true) -eq 1 -and [TrayProbe]::Exists($identity)) "Abrupt-stop recovery ${cycle}: one owner reclaims the same tray identity"
     }
     Check ([TrayProbe]::Windows($app.Id, $false) -eq 0 -and [TrayProbe]::Foreground() -ne $app.Id) 'Repeated background launches leave the hub hidden and do not leave Deskweave in the foreground'
     foreach ($file in $protected) { if ((Hash $file) -ne $before[$file]) { throw "Protected configuration changed: $file" } }
@@ -127,13 +127,13 @@ finally {
     }
     # The abrupt-exit test intentionally bypassed disposal. Clean up only this test's published
     # icon, only after every validation process exited, and never if another Deskweave appeared.
-    if (-not (Get-Process Deskweave -ErrorAction SilentlyContinue)) { [TrayProbe]::Remove($identity) }
+    if (-not (Get-Process ARS -ErrorAction SilentlyContinue)) { [TrayProbe]::Remove($identity) }
     $report.validationInstancesExited = @($children | Where-Object { -not $_.HasExited }).Count -eq 0
     $report.trayEntryRemoved = -not [TrayProbe]::Exists($identity)
     $report.status = if ($failure) { 'failed' } else { 'passed' }
     $report.failure = $failure
     $report.exeSha256 = Hash $exe
-    $report.appSha256 = Hash (Join-Path $root 'out/Deskweave.dll')
+    $report.appSha256 = Hash (Join-Path $root 'out/ARS.dll')
     $report.engineSha256 = Hash (Join-Path $root 'out/Deskweave.AgentWorkspaces.dll')
     $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $output 'live-tray-report.json') -Encoding utf8
 }

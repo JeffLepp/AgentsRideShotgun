@@ -9,7 +9,7 @@ $sourceVersion = [string]([xml](Get-Content -Raw (Join-Path $root 'Directory.Bui
 if (-not $Version) { $Version = $sourceVersion }
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') { throw 'Use a three-part version, optionally followed by a prerelease label.' }
 if ($Version -cne $sourceVersion) { throw "Package version $Version differs from source version $sourceVersion. Update Directory.Build.props first." }
-$sdkVersion = ([xml](Get-Content -Raw (Join-Path $root 'app\Deskweave.csproj'))).Project.ItemGroup.PackageReference |
+$sdkVersion = ([xml](Get-Content -Raw (Join-Path $root 'app\ARS.csproj'))).Project.ItemGroup.PackageReference |
     Where-Object { $_.Include -eq 'Velopack' } | Select-Object -ExpandProperty Version
 if (-not (Get-Command vpk -ErrorAction SilentlyContinue)) { throw "The Velopack CLI is missing. Run: dotnet tool install -g vpk --version $sdkVersion" }
 $cliHelp = & vpk -h | Out-String
@@ -24,15 +24,15 @@ if (-not $SkipPublish) {
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed; no installer was built.' }
 }
 $payload = Join-Path $root 'out'
-foreach ($file in @('Deskweave.exe', 'Deskweave.dll', 'coreclr.dll', 'PresentationFramework.dll', 'Bridge\Deskweave.WorkspaceBridge.exe', 'Bridge\coreclr.dll')) {
+foreach ($file in @('ARS.exe', 'ARS.dll', 'coreclr.dll', 'PresentationFramework.dll', 'Bridge\ARS.WorkspaceBridge.exe', 'Bridge\coreclr.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payload $file) -PathType Leaf)) { throw "Incomplete published app: $file" }
 }
-$payloadVersion = (Get-Item -LiteralPath (Join-Path $payload 'Deskweave.dll')).VersionInfo.ProductVersion.Split('+')[0]
+$payloadVersion = (Get-Item -LiteralPath (Join-Path $payload 'ARS.dll')).VersionInfo.ProductVersion.Split('+')[0]
 if ($payloadVersion -cne $Version) { throw "Published app version $payloadVersion differs from package version $Version. Publish this version first." }
 # Settings shows the assembly version, so it and the file version must match too.
 $numeric = $Version.Split('-')[0] + '.0'
-$fileVersion = (Get-Item -LiteralPath (Join-Path $payload 'Deskweave.dll')).VersionInfo.FileVersion
-$assemblyVersion = [Reflection.AssemblyName]::GetAssemblyName((Join-Path $payload 'Deskweave.dll')).Version.ToString()
+$fileVersion = (Get-Item -LiteralPath (Join-Path $payload 'ARS.dll')).VersionInfo.FileVersion
+$assemblyVersion = [Reflection.AssemblyName]::GetAssemblyName((Join-Path $payload 'ARS.dll')).Version.ToString()
 if ($fileVersion -cne $numeric -or $assemblyVersion -cne $numeric) { throw "Published app file version $fileVersion and assembly version $assemblyVersion should both be $numeric." }
 $staging = Join-Path $root ('artifacts\installer-staging\' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff'))
 
@@ -57,9 +57,9 @@ if ($Sign) {
     $signing = @('--azureTrustedSignFile', $signMetadata)
 }
 try {
-    & vpk pack --packId DeskweaveApp --packVersion $Version --packDir $payload --runtime $packageRuntime `
-        --packTitle Deskweave --packAuthors 'Jefferson Kline' --mainExe Deskweave.exe `
-        --icon (Join-Path $root 'app\Assets\Deskweave.ico') --shortcuts StartMenuRoot `
+    & vpk pack --packId ARSApp --packVersion $Version --packDir $payload --runtime $packageRuntime `
+        --packTitle ARS --packAuthors 'Jefferson Kline' --mainExe ARS.exe `
+        --icon (Join-Path $root 'app\Assets\ARS.ico') --shortcuts StartMenuRoot `
         --outputDir $staging --noPortable --skip-updates @signing
     if ($LASTEXITCODE -ne 0) { throw "vpk pack failed ($LASTEXITCODE)." }
 }
@@ -78,7 +78,7 @@ if ($missing.Count -gt 0) { throw "The package is missing $($missing.Count) of t
 $built = Get-ChildItem -LiteralPath $staging -Filter '*Setup.exe' | Select-Object -First 1
 if (-not $built) { throw 'vpk reported success but produced no Setup.exe.' }
 # The name a person downloads. The update feed names the package, not this file.
-$setup = Move-Item -LiteralPath $built.FullName -Destination (Join-Path $staging 'Deskweave-Setup.exe') -PassThru
+$setup = Move-Item -LiteralPath $built.FullName -Destination (Join-Path $staging 'ARS-Setup.exe') -PassThru
 # vpk upload reads this list, so it has to name the file that is actually there.
 $assets = Join-Path $staging 'assets.win.json'
 [IO.File]::WriteAllText($assets, [IO.File]::ReadAllText($assets).Replace($built.Name, $setup.Name))
@@ -93,14 +93,14 @@ $manifest = [ordered]@{
     installerSha256 = (Get-FileHash -LiteralPath $setup.FullName).Hash
     signature = [string](Get-AuthenticodeSignature -LiteralPath $setup.FullName).Status
     # From the package, not out/: signing changes the bytes that get installed.
-    appSha256 = PackedHash 'lib/app/Deskweave.dll'
+    appSha256 = PackedHash 'lib/app/ARS.dll'
     engineSha256 = PackedHash 'lib/app/Deskweave.AgentWorkspaces.dll'
-    bridgeSha256 = PackedHash 'lib/app/Bridge/Deskweave.WorkspaceBridge.dll'
-    frameworks = (Get-Content -Raw -LiteralPath (Join-Path $payload 'Deskweave.runtimeconfig.json') | ConvertFrom-Json).runtimeOptions.includedFrameworks
+    bridgeSha256 = PackedHash 'lib/app/Bridge/ARS.WorkspaceBridge.dll'
+    frameworks = (Get-Content -Raw -LiteralPath (Join-Path $payload 'ARS.runtimeconfig.json') | ConvertFrom-Json).runtimeOptions.includedFrameworks
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $staging 'package-evidence.json') -Encoding UTF8
 [IO.Directory]::CreateDirectory((Split-Path -Parent $output)) | Out-Null
 # A failed pack leaves only staging; it never reserves an immutable release version.
 [IO.Directory]::Move($staging, $output)
-$setup = Get-Item -LiteralPath (Join-Path $output 'Deskweave-Setup.exe')
+$setup = Get-Item -LiteralPath (Join-Path $output 'ARS-Setup.exe')
 Write-Output ("{0} ({1:N0} MB) SHA-256 {2}" -f $setup.FullName, ($setup.Length / 1MB), (Get-FileHash -LiteralPath $setup.FullName).Hash)

@@ -119,20 +119,30 @@ internal static class FirstRunConnections
                 && File.ReadAllText(claudeFile).Contains("another.exe", StringComparison.Ordinal)
                 && File.ReadAllText(codexFile).Contains("[mcp_servers.another]", StringComparison.Ordinal),
                 "Connecting replaces a stale entry with one for this Deskweave and leaves the agent's other servers alone");
-            File.WriteAllLines(codexFile, ["[mcp_servers.deskweave]", "command = '" + WorkspaceConnections.Bridge + "'",
+            // The entry an install from before the rename left, under the old name.
+            WriteStale(claudeFile, codexFile, root, WorkspaceConnections.FormerAppName);
+            Check(WorkspaceConnections.Supported.All(app => !WorkspaceConnections.HasEntry(app))
+                && Connect().Count == 0 && WorkspaceConnections.Supported.All(WorkspaceConnections.IsConnected)
+                && Entries(claudeFile) == 1 && Entries(codexFile) == 1 && Pointed(claudeFile) && Pointed(codexFile)
+                && !File.ReadAllText(claudeFile).Contains("\"deskweave\"", StringComparison.Ordinal)
+                && !File.ReadAllText(codexFile).Contains("[mcp_servers.deskweave]", StringComparison.Ordinal)
+                && File.ReadAllText(claudeFile).Contains("another.exe", StringComparison.Ordinal)
+                && File.ReadAllText(codexFile).Contains("[mcp_servers.another]", StringComparison.Ordinal),
+                "Connecting takes out the entry from before the rename, adds ARS's, and leaves the agent's other servers alone");
+            File.WriteAllLines(codexFile, ["[mcp_servers.ars]", "command = '" + WorkspaceConnections.Bridge + "'",
                 "args = [\"--workspace\", '" + WorkspaceAccessStore.RouterTicket + "']"]);
             Check(WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex),
                 "An entry in the literal-string form Codex itself writes counts as connected, so nothing rewrites it");
 
             string enabledCodex = File.ReadAllText(codexFile);
-            File.WriteAllText(codexFile, enabledCodex.Replace("[mcp_servers.deskweave]", "[mcp_servers.\"deskweave\"] # profile", StringComparison.Ordinal)
+            File.WriteAllText(codexFile, enabledCodex.Replace("[mcp_servers.ars]", "[mcp_servers.\"ars\"] # profile", StringComparison.Ordinal)
                 + "\"enabled\" = false # disabled in Codex\n");
             Check(WorkspaceConnections.ProfileCounts(WorkspaceConnections.AgentApp.Codex) == (0, 1)
                 && !WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex)
                 && WorkspaceConnections.HasEntry(WorkspaceConnections.AgentApp.Codex)
                 && !WorkspaceConnections.Missing(WorkspaceConnections.AgentApp.Codex),
                 "A disabled Codex entry is disconnected and retained, not scheduled for automatic repair");
-            File.WriteAllText(codexFile, enabledCodex + "enabled = true\n[mcp_servers.deskweave.env]\nenabled = 'false'\n"
+            File.WriteAllText(codexFile, enabledCodex + "enabled = true\n[mcp_servers.ars.env]\nenabled = 'false'\n"
                 + "[mcp_servers.another]\nenabled = false\ncommand = 'another.exe'\n");
             Check(WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex),
                 "An enabled Codex entry ignores another server's disabled flag and an environment value named enabled");
@@ -362,20 +372,20 @@ internal static class FirstRunConnections
     /// Stale Deskweave entries in both agents' own formats, beside a server that is not Deskweave's:
     /// Claude Code's JSON, and Codex's TOML with the literal strings Codex writes.
     /// </summary>
-    static void WriteStale(string claudeFile, string codexFile, string root)
+    static void WriteStale(string claudeFile, string codexFile, string root, string name = WorkspaceConnections.AppName)
     {
-        string bridge = Path.Combine(root, "moved", "Bridge", "Deskweave.WorkspaceBridge.exe");
+        string bridge = Path.Combine(root, "moved", "Bridge", "ARS.WorkspaceBridge.exe");
         string ticket = Path.Combine(root, "moved", "agent-workspaces.access", "router.json");
         File.WriteAllText(claudeFile, JsonSerializer.Serialize(new
         {
             mcpServers = new Dictionary<string, object>
             {
                 ["another"] = new { type = "stdio", command = "another.exe", args = Array.Empty<string>() },
-                [WorkspaceConnections.AppName] = new { type = "stdio", command = bridge, args = new[] { "--workspace", ticket }, env = new { } },
+                [name] = new { type = "stdio", command = bridge, args = new[] { "--workspace", ticket }, env = new { } },
             },
         }));
         File.WriteAllLines(codexFile, ["[mcp_servers.another]", "command = 'another.exe'", "",
-            "[mcp_servers.deskweave]", "command = '" + bridge + "'", "args = [\"--workspace\", '" + ticket + "']"]);
+            "[mcp_servers." + name + "]", "command = '" + bridge + "'", "args = [\"--workspace\", '" + ticket + "']"]);
     }
 
     static bool Until(Func<bool> ready)
@@ -401,10 +411,10 @@ internal static class FirstRunConnections
     {
         if (!File.Exists(configuration)) return 0;
         if (configuration.EndsWith(".toml", StringComparison.OrdinalIgnoreCase))
-            return File.ReadLines(configuration).Count(line => line.Trim() == "[mcp_servers.deskweave]");
+            return File.ReadLines(configuration).Count(line => line.Trim() == "[mcp_servers.ars]");
         using var json = JsonDocument.Parse(File.ReadAllText(configuration));
         return json.RootElement.TryGetProperty("mcpServers", out JsonElement servers)
-            && servers.TryGetProperty("deskweave", out _) ? 1 : 0;
+            && servers.TryGetProperty("ars", out _) ? 1 : 0;
     }
 
     /// <summary>
@@ -427,13 +437,14 @@ internal static class FirstRunConnections
         string path = Path.Combine(home, claude ? ".claude.json" : "config.toml");
         if (args.Length < 3) return 2;
         if (args[1] is "get" or "list") return Shown(path, claude);
-        if (!args.Contains(WorkspaceConnections.AppName)) return 2;
+        string name = args[1] == "remove" ? args[^1] : WorkspaceConnections.AppName;
+        if (name is not (WorkspaceConnections.AppName or WorkspaceConnections.FormerAppName) || !args.Contains(name)) return 2;
         if (args[1] == "remove")
         {
             if (Environment.GetEnvironmentVariable("DESKWEAVE_STUB") == "remove-silent") return 0;
             if (!File.Exists(path)) return 0;
-            if (claude) Save(path, Without(Read(path)));
-            else File.WriteAllLines(path, Table(File.ReadAllLines(path), ours: false));
+            if (claude) Save(path, Without(Read(path), name));
+            else File.WriteAllLines(path, Table(File.ReadAllLines(path), ours: false, name));
             return 0;
         }
         if (args[1] != "add") return 2;
@@ -475,7 +486,7 @@ internal static class FirstRunConnections
     }
 
     /// <summary>
-    /// The stub's read side, in the shapes the real commands print. `claude mcp get deskweave`
+    /// The stub's read side, in the shapes the real commands print. `claude mcp get ars`
     /// labels Command and Args on lines of their own and exits 1 for a name it does not have,
     /// because Claude Code has no --json for mcp (2.1.278). `codex mcp list --json` prints the
     /// array of servers <see cref="WorkspaceConnections.Codex"/> already reads.
@@ -518,21 +529,21 @@ internal static class FirstRunConnections
 
     static JsonObject Read(string path) => JsonNode.Parse(File.ReadAllText(path))!.AsObject();
 
-    static JsonObject Without(JsonObject document)
+    static JsonObject Without(JsonObject document, string name)
     {
-        (document["mcpServers"] as JsonObject)?.Remove(WorkspaceConnections.AppName);
+        (document["mcpServers"] as JsonObject)?.Remove(name);
         return document;
     }
 
     static void Save(string path, JsonObject document) => File.WriteAllText(path, document.ToJsonString());
 
-    /// <summary>A TOML file's [mcp_servers.deskweave] table, or everything but it.</summary>
-    static IEnumerable<string> Table(string[] lines, bool ours)
+    /// <summary>A TOML file's [mcp_servers.ars] table, or everything but it.</summary>
+    static IEnumerable<string> Table(string[] lines, bool ours, string name = WorkspaceConnections.AppName)
     {
         bool inside = false;
         foreach (string line in lines)
         {
-            if (line.TrimStart().StartsWith('[')) inside = line.Trim() == "[mcp_servers." + WorkspaceConnections.AppName + "]";
+            if (line.TrimStart().StartsWith('[')) inside = line.Trim() == "[mcp_servers." + name + "]";
             if (inside == ours) yield return line;
         }
     }

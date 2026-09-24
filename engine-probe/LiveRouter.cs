@@ -43,7 +43,7 @@ internal static class LiveRouter
             {
                 JsonElement hello = session.Request("initialize", Hello);
                 JsonElement tools = session.Request("tools/list", new { });
-                Check(hello.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString() == "deskweave"
+                Check(hello.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString() == "ars"
                     && tools.GetProperty("result").GetProperty("tools").GetArrayLength() == WorkspaceMcp.ExternalToolSchemas.Length,
                     "After 400 clients drop before the handshake, the packaged bridge still initializes and lists the tools");
                 Check(Text(session.Tool("status")).StartsWith("No workspace yet", StringComparison.Ordinal),
@@ -67,7 +67,7 @@ internal static class LiveRouter
                 Thread.Sleep(500);   // the bridge hears the pipe close; a call racing that is answered as "closed"
                 var waited = Stopwatch.StartNew();
                 JsonElement closed = session.Tool("status");
-                Check(Failed(closed) && Text(closed) == "Deskweave isn't open. Ask the owner to open Deskweave, then try again."
+                Check(Failed(closed) && Text(closed) == "ARS isn't open. Ask the owner to open ARS, then try again."
                     && waited.Elapsed < TimeSpan.FromSeconds(5),
                     "A tool call while Deskweave is closed is answered in one line within five seconds, and the bridge stays up");
                 WorkspaceRouter.Start();
@@ -99,17 +99,17 @@ internal static class LiveRouter
 
             // Nothing is open: a missing ticket, a ticket from a crash, and one from another version.
             (int code, string errors, string output, TimeSpan took) = Once(ticket, "missing", outputDirectory);
-            Check(code == 1 && errors.Trim() == "Deskweave isn't open. Open Deskweave, then reconnect this MCP server."
+            Check(code == 1 && errors.Trim() == "ARS isn't open. Open ARS, then reconnect this MCP server."
                 && output.Length == 0 && took < TimeSpan.FromSeconds(5),
                 "With no ticket the bridge exits in under five seconds with one line and nothing on the MCP stream");
             File.WriteAllText(ticket, StaleTicket(dead));
             (code, errors, output, took) = Once(ticket, "stale", outputDirectory);
-            Check(code == 1 && errors.Trim() == "Deskweave isn't open. Open Deskweave, then reconnect this MCP server."
+            Check(code == 1 && errors.Trim() == "ARS isn't open. Open ARS, then reconnect this MCP server."
                 && output.Length == 0 && took < TimeSpan.FromSeconds(5),
                 "A ticket naming a pipe nobody serves fails in under five seconds instead of waiting ten on it");
             File.WriteAllText(ticket, "{\"schema\":2}");
             (code, errors, output, took) = Once(ticket, "old-schema", outputDirectory);
-            Check(code == 2 && errors.Trim().StartsWith("This MCP entry doesn't match the Deskweave on this PC.", StringComparison.Ordinal)
+            Check(code == 2 && errors.Trim().StartsWith("This MCP entry doesn't match the ARS on this PC.", StringComparison.Ordinal)
                 && output.Length == 0 && took < TimeSpan.FromSeconds(2),
                 "A ticket from another version says to connect the agent again, at once and not silently");
             File.Delete(ticket);
@@ -128,7 +128,7 @@ internal static class LiveRouter
                 slow.Dispose();
                 bool answered = running.Wait(TimeSpan.FromSeconds(5));
                 Check(answered && Failed(running.Result)
-                    && Text(running.Result) == "Deskweave closed while this was running. Ask the owner to open Deskweave, then try again.",
+                    && Text(running.Result) == "ARS closed while this was running. Ask the owner to open ARS, then try again.",
                     "A tool call in flight when Deskweave closes is answered at once with one line");
             }
             WorkspaceAccessStore.Withdraw("in-flight");

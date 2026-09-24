@@ -51,7 +51,7 @@ public sealed record StoredWorkspace
 
 /// <summary>
 /// The store is the folder tree, not an index file. A stored workspace is a directory under
-/// <c>%LOCALAPPDATA%\Deskweave\agent-workspaces</c> holding its own <c>workspace.json</c>; listing
+/// <c>%LOCALAPPDATA%\ARS\agent-workspaces</c> holding its own <c>workspace.json</c>; listing
 /// them is a directory scan and deleting one is deleting the folder.
 ///
 /// This is the whole of what Milestone 2 has to persist under a desktop object. The original
@@ -368,7 +368,7 @@ public static class WorkspaceStore
     static StoredWorkspace? Read(string folder)
     {
         string id = Path.GetFileName(folder);
-        const string prefix = "Deskweave-";
+        const string prefix = "ARS-";
         if (!id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
         id = id[prefix.Length..];
 

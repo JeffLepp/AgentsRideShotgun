@@ -2,25 +2,25 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-// MCP stdout belongs entirely to Deskweave.WorkspaceBridge. This connector reports
+// MCP stdout belongs entirely to ARS.WorkspaceBridge. This connector reports
 // preflight failures on stderr and proxies the host's stdio streams without JSON changes.
 if (!OperatingSystem.IsWindows() || RuntimeInformation.OSArchitecture != Architecture.X64)
 {
-    Console.Error.WriteLine("Deskweave currently supports Windows x64. See the release page for supported systems.");
+    Console.Error.WriteLine("ARS currently supports Windows x64. See the release page for supported systems.");
     return 2;
 }
 
 string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-string install = Path.Combine(local, "DeskweaveApp", "current");
-string app = Path.Combine(install, "Deskweave.exe");
-string bridge = Path.Combine(install, "Bridge", "Deskweave.WorkspaceBridge.exe");
+string install = Path.Combine(local, "ARSApp", "current");
+string app = Path.Combine(install, "ARS.exe");
+string bridge = Path.Combine(install, "Bridge", "ARS.WorkspaceBridge.exe");
 if (!File.Exists(app) || !File.Exists(bridge))
 {
-    Console.Error.WriteLine("Deskweave is not installed for this Windows user. Install Deskweave from https://github.com/JeffLepp/Deskweave/releases, open it once, then reconnect this MCP server.");
+    Console.Error.WriteLine("ARS is not installed for this Windows user. Install ARS from https://github.com/JeffLepp/Deskweave/releases, open it once, then reconnect this MCP server.");
     return 2;
 }
 
-string ticket = Path.Combine(local, "Deskweave", "agent-workspaces.access", "router.json");
+string ticket = Path.Combine(local, "ARS", "agent-workspaces.access", "router.json");
 var start = new ProcessStartInfo(bridge)
 {
     UseShellExecute = false,
@@ -39,7 +39,7 @@ try
     using Process? child = Process.Start(start);
     if (child is null)
     {
-        Console.Error.WriteLine("Deskweave's MCP bridge could not start. Reinstall Deskweave and reconnect this server.");
+        Console.Error.WriteLine("ARS's MCP bridge could not start. Reinstall ARS and reconnect this server.");
         return 1;
     }
 
@@ -61,6 +61,6 @@ try
 }
 catch (Exception error) when (error is Win32Exception or IOException or UnauthorizedAccessException)
 {
-    Console.Error.WriteLine($"Deskweave's MCP bridge could not start ({error.GetType().Name}). Reinstall Deskweave and reconnect this server.");
+    Console.Error.WriteLine($"ARS's MCP bridge could not start ({error.GetType().Name}). Reinstall ARS and reconnect this server.");
     return 1;
 }

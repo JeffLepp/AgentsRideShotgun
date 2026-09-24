@@ -157,7 +157,7 @@ public partial class SettingsView
 
         _homeRows["accounts"].Row.Visibility = SettingsFeatures.Accounts ? Visibility.Visible : Visibility.Collapsed;
         _homeRows["accounts"].Summary.Text = "Sign-ins for the agent's browser";
-        _homeRows["history"].Summary.Text = "Storage, and deleting Deskweave's data";
+        _homeRows["history"].Summary.Text = "Storage, and deleting ARS's data";
     }
 
     void SlidePageIn()

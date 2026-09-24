@@ -12,11 +12,11 @@ param(
 # -BeforeSnapshot to wait for auto-connection and prove unrelated parsed values survived.
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$exe = Join-Path $root 'out\Deskweave.exe'
-$app = @(Get-Process Deskweave -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
+$exe = Join-Path $root 'out\ARS.exe'
+$app = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
 if ($app.Count -ne 1) { throw 'Expected exactly one running Deskweave from this checkout''s out directory.' }
 $version = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
-$bridge = Join-Path $root 'out\Bridge\Deskweave.WorkspaceBridge.exe'
+$bridge = Join-Path $root 'out\Bridge\ARS.WorkspaceBridge.exe'
 $ticket = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Deskweave\agent-workspaces.access\router.json'
 $userProfile = [Environment]::GetFolderPath('UserProfile')
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw 'Python 3.11 or newer is required for independent JSON/TOML inspection.' }
@@ -47,7 +47,7 @@ report_path = output / 'profiles-report.json'
 checks = []
 report = {
     'schema': 1, 'observedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    'mode': mode, 'app': {'path': str(root / 'out' / 'Deskweave.exe'), 'pid': int(app_pid), 'version': version},
+    'mode': mode, 'app': {'path': str(root / 'out' / 'ARS.exe'), 'pid': int(app_pid), 'version': version},
     'expectedBridge': bridge, 'expectedRouterTicket': ticket,
     'expectedProfileCount': int(count_arg), 'checks': checks,
     'privacy': 'Only paths, counts, match flags and SHA-256 digests are recorded; no configuration values or ticket capabilities.',
@@ -109,9 +109,9 @@ def inspect(target):
         servers = value.get(key, {})
         if not isinstance(servers, dict):
             raise ValueError('MCP configuration is not an object')
-        entry = servers.get('deskweave')
-        result['deskweavePresent'] = 'deskweave' in servers
-        result['entryState'] = 'missing-entry' if not result['deskweavePresent'] else 'stale'
+        entry = servers.get('ars')
+        result['arsPresent'] = 'ars' in servers
+        result['entryState'] = 'missing-entry' if not result['arsPresent'] else 'stale'
         if isinstance(entry, dict):
             arguments = entry.get('args')
             result['bridgeMatches'] = same_path(entry.get('command'), bridge)
@@ -120,7 +120,7 @@ def inspect(target):
             result['stdio'] = entry.get('type', 'stdio') == 'stdio' and 'url' not in entry
             if all(result[key] for key in ('bridgeMatches', 'routerArgumentsMatch', 'enabled', 'stdio')):
                 result['entryState'] = 'current'
-        unrelated = {name: content for name, content in servers.items() if name != 'deskweave'}
+        unrelated = {name: content for name, content in servers.items() if name != 'ars'}
         other_settings = {name: content for name, content in value.items() if name != key}
         result['unrelatedMcpCount'] = len(unrelated)
         result['unrelatedMcpSha256'] = canonical_hash(unrelated)

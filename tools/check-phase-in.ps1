@@ -14,8 +14,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $Out) { $Out = Join-Path $root ("artifacts/phase-in/{0}-{1}" -f $Agent, [DateTime]::Now.ToString('yyyyMMdd-HHmmss')) }
-$bridge = Join-Path $root 'out/Bridge/Deskweave.WorkspaceBridge.exe'
-$ticket = Join-Path $env:LOCALAPPDATA 'Deskweave/agent-workspaces.access/router.json'
+$bridge = Join-Path $root 'out/Bridge/ARS.WorkspaceBridge.exe'
+$ticket = Join-Path $env:LOCALAPPDATA 'ARS/agent-workspaces.access/router.json'
 if (-not (Test-Path -LiteralPath $bridge)) { throw "Publish first: $bridge is missing." }
 New-Item -ItemType Directory -Force $Out | Out-Null
 # This runs from inside other agent tools too; a nested Claude Code refuses to start with this set.
@@ -96,7 +96,7 @@ foreach ($case in $cases) {
         } elseif ($event.item -and $event.type -eq 'item.completed') {
             if ($event.item.type -eq 'mcp_tool_call') {
                 $tools += "mcp__$($event.item.server)__$($event.item.tool)"
-                if ($event.item.server -eq 'deskweave' -and $event.item.status -ne 'failed' -and -not $event.item.error `
+                if ($event.item.server -eq 'ars' -and $event.item.status -ne 'failed' -and -not $event.item.error `
                     -and $event.item.tool -notmatch '^(status|release|acquire)$') { $worked = $true }
             }
             if ($event.item.type -eq 'command_execution') { $tools += 'shell'; $shell += $event.item.command }

@@ -22,7 +22,7 @@ foreach ($size in $sizes) {
     $draw.Dispose()
     $bitmap.Dispose()
 }
-$stream = [System.IO.File]::Create((Join-Path $assetRoot 'Deskweave.ico'))
+$stream = [System.IO.File]::Create((Join-Path $assetRoot 'ARS.ico'))
 $writer = New-Object System.IO.BinaryWriter($stream)
 try {
     $writer.Write([uint16]0)

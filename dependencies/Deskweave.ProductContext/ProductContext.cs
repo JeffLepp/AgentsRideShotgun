@@ -2,12 +2,12 @@ namespace Deskweave.Product;
 
 /// <summary>
 /// Selects this standalone product's data folder before an engine is initialized. The safe
-/// default is Deskweave, including helper and diagnostic processes that omit configuration.
+/// default is ARS, including helper and diagnostic processes that omit configuration.
 /// Provider-owned files and user-selected export folders never pass through this class.
 /// </summary>
 public static class ProductContext
 {
-    public const string DefaultFolderName = "Deskweave";
+    public const string DefaultFolderName = "ARS";
 
     static readonly Lock Gate = new();
     static string _folderName = DefaultFolderName;

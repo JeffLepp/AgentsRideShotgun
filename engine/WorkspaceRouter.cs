@@ -114,7 +114,7 @@ public static class WorkspaceHome
             catch (Exception ex) { failed = ExceptionDispatchInfo.Capture(ex); }
             finally { _probing.Release(); }
         })
-        { IsBackground = true, Name = "Deskweave project folder" };
+        { IsBackground = true, Name = "ARS project folder" };
         probe.Start();
         if (!probe.Join((int)Math.Max(0, until - Environment.TickCount64))) return string.Empty;
         // Whatever it could not read is still the caller's to handle, on the caller's thread.
@@ -373,7 +373,7 @@ internal sealed class WorkspaceRouter : IDisposable
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return (null, "Deskweave could not open a workspace: " + ex.Message);
+            return (null, "ARS could not open a workspace: " + ex.Message);
         }
     }
 
@@ -424,7 +424,7 @@ internal sealed class WorkspaceRouter : IDisposable
                     {
                         protocolVersion = "2025-06-18",
                         capabilities = new { tools = new { } },
-                        serverInfo = new { name = "deskweave", version = "1" },
+                        serverInfo = new { name = "ars", version = "1" },
                         instructions = WorkspaceMcp.RouterInstructions,
                     });
                 case "tools/list":
@@ -439,12 +439,12 @@ internal sealed class WorkspaceRouter : IDisposable
                 return Error(id, -32602, invalid);
             WorkspacePipePeer? peer = Current();
             if (peer is null && tool == "status")
-                return Ok(id, Say("No workspace yet. Deskweave picks one the first time you use a workspace tool."));
+                return Ok(id, Say("No workspace yet. ARS picks one the first time you use a workspace tool."));
             if (peer is null && tool == "release") return Ok(id, Say("Nothing to release."));
             if (peer is null)
             {
                 (peer, string? why) = await Bind(cancel).ConfigureAwait(false);
-                if (peer is null) return Ok(id, Fail(why ?? "Deskweave could not open a workspace."));
+                if (peer is null) return Ok(id, Fail(why ?? "ARS could not open a workspace."));
             }
             return await peer.Handle(body, cancel).ConfigureAwait(false);
         }
@@ -462,7 +462,7 @@ internal sealed class WorkspaceRouter : IDisposable
         async Task<(WorkspacePipePeer?, string?)> Bind(CancellationToken cancel)
         {
             Dispatcher? ui = Application.Current?.Dispatcher;
-            if (ui is null || ui.HasShutdownStarted) return (null, "Deskweave is closing.");
+            if (ui is null || ui.HasShutdownStarted) return (null, "ARS is closing.");
             // A full PC is a wait, not a failure (MVP_SPEC, Sleep): under the 60-second tool timeout.
             (WorkspaceRuntime? runtime, string? why) = (null, null);
             for (long until = Environment.TickCount64 + 45_000; ; await Task.Delay(1500, cancel).ConfigureAwait(false))

@@ -26,7 +26,7 @@ internal static class WorkspacePopOut
     {
         "explorer.exe", "conhost.exe", "OpenConsole.exe", "WindowsTerminal.exe", "dllhost.exe",
         "ApplicationFrameHost.exe", "ShellExperienceHost.exe", "StartMenuExperienceHost.exe",
-        "SearchHost.exe", "TextInputHost.exe", "rundll32.exe", "Deskweave.exe",
+        "SearchHost.exe", "TextInputHost.exe", "rundll32.exe", "ARS.exe", "Deskweave.exe",
     };
 
     /// <summary>What taking this window out would do, or null when it cannot be started again on the

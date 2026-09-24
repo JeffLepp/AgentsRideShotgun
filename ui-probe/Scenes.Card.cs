@@ -9,7 +9,7 @@ namespace Deskweave.UiProbe;
 /// the stack's own 340 x 560. No reference image; these are for review.</summary>
 static class CardScenes
 {
-    static async Task<MainWindow> Stack(SceneContext scene)
+    static async Task<MainWindow> Stack(SceneContext scene, HubEntry[]? recent = null, double height = 560)
     {
         var window = scene.Own(new MainWindow());
         window.Left = SceneContext.OffScreen.X;
@@ -20,13 +20,14 @@ static class CardScenes
         [
             new HubEntry("shop") { Name = "shop", Working = true, AgentText = "Claude Code", Preview = scene.Site("shop") },
         ],
+        recent ??
         [
             new HubEntry("api") { Name = "api", Age = "yesterday", SidebarAge = "Yesterday", Preview = scene.Site("term") },
             new HubEntry("scratch") { Name = "Scratch", Age = "Mon", SidebarAge = "Monday", Preview = scene.Site("term") },
         ]);
         window.ShowStack();
         window.Width = 340;
-        window.Height = 560;
+        window.Height = height;
         await scene.Settle();
         return window;
     }
@@ -86,6 +87,30 @@ static class CardScenes
             ["api"] = new([2, 0, 7, 11, 3, 5, 0], 0, DateTime.Now.AddDays(-1), "Running a command"),
             ["scratch"] = new([0, 0, 0, 0, 0, 0, 0], 0, null, null),
         });
+        await scene.Settle();
+        return window;
+    }
+
+    /// <summary>The README picture: the live stack with a fuller Recent list, a week of bars on each.</summary>
+    [Scene("card-stack-readme", "")]
+    static async Task<FrameworkElement> Readme(SceneContext scene)
+    {
+        (string id, string name, string age, string day, int[] week)[] recent =
+        [
+            ("api", "api", "yesterday", "Yesterday", [2, 0, 7, 11, 3, 5, 0]),
+            ("docs", "docs-site", "yesterday", "Yesterday", [0, 4, 2, 0, 6, 9, 0]),
+            ("dashboard", "dashboard", "Mon", "Monday", [3, 8, 5, 12, 7, 0, 0]),
+            ("mobile", "mobile-app", "Mon", "Monday", [0, 0, 3, 1, 9, 0, 0]),
+            ("landing", "landing-page", "Sun", "Sunday", [5, 2, 0, 8, 0, 0, 0]),
+            ("scratch", "Scratch", "Sat", "Saturday", [1, 0, 2, 0, 0, 0, 0]),
+        ];
+        MainWindow window = await Stack(scene,
+            [.. recent.Select(r => new HubEntry(r.id) { Name = r.name, Age = r.age, SidebarAge = r.day, Preview = scene.Site("term") })],
+            680);
+        var activity = recent.ToDictionary(r => r.id, r => new WorkspaceActivity(r.week, 0,
+            DateTime.Now.AddDays(-(6 - Array.FindLastIndex(r.week, n => n > 0))), null));
+        activity["shop"] = new([4, 12, 9, 20, 15, 30, 41], 6, DateTime.Now.AddSeconds(-3), "Clicking");
+        window.Hub.ApplyActivity(activity);
         await scene.Settle();
         return window;
     }

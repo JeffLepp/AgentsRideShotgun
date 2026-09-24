@@ -269,7 +269,7 @@ public partial class MainWindow : Window, IDisposable
         ThemeButton.Visibility = Visibility.Visible;
         TitleMark.Visibility = Visibility.Visible;
         CardBackButton.Visibility = Visibility.Collapsed;
-        TitleText.Text = "Deskweave";
+        TitleText.Text = "ARS";
         double width = StackRoot.ActualWidth > 0 ? StackRoot.ActualWidth : ActualWidth;
         if (animate)
         {

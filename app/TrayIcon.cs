@@ -72,7 +72,7 @@ internal sealed class TrayIcon : IDisposable
         var data = Data(1 | 2 | 4 | 0x80); // MESSAGE, ICON, TIP, SHOWTIP, and GUID
         data.Callback = CallbackMessage;
         data.Icon = _icon.Handle;
-        data.Tip = "Deskweave";
+        data.Tip = "ARS";
         // A duplicate ADD is rejected, then MODIFY refreshes that same entry. Always identify both
         // operations by GUID so recovery cannot accumulate entries with new callback-window handles.
         bool present = Send(0, data) || Send(1, data);

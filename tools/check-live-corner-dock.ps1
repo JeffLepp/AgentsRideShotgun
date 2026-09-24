@@ -10,9 +10,9 @@ if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringCo
 [IO.Directory]::CreateDirectory($output) | Out-Null
 $project = Join-Path $output 'Corner dock fixture'
 [IO.Directory]::CreateDirectory((Join-Path $project '.git')) | Out-Null
-$exe = Join-Path $root 'out/Deskweave.exe'
-$app = @(Get-Process Deskweave -ErrorAction SilentlyContinue | Where-Object Path -eq $exe)
-if ($app.Count -ne 1) { throw 'Expected one running out/Deskweave.exe.' }
+$exe = Join-Path $root 'out/ARS.exe'
+$app = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object Path -eq $exe)
+if ($app.Count -ne 1) { throw 'Expected one running out/ARS.exe.' }
 $app = $app[0]
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
 Add-Type -TypeDefinition @'
@@ -79,8 +79,8 @@ $failure = $null
 try {
     $module = $app.Modules | Where-Object ModuleName -eq 'Deskweave.AgentWorkspaces.dll' | Select-Object -First 1
     Check ($module.FileName -eq (Join-Path $root 'out/Deskweave.AgentWorkspaces.dll')) 'The live app uses this checkout''s published engine'
-    $ticket = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Deskweave/agent-workspaces.access/router.json'
-    $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'out/Bridge/Deskweave.WorkspaceBridge.exe'))
+    $ticket = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS/agent-workspaces.access/router.json'
+    $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'out/Bridge/ARS.WorkspaceBridge.exe'))
     $start.UseShellExecute = $false; $start.CreateNoWindow = $true; $start.WorkingDirectory = $project
     $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
     $start.ArgumentList.Add('--workspace'); $start.ArgumentList.Add($ticket)

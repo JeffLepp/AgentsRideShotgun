@@ -13,7 +13,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'Version m
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $source = Join-Path $root 'mcp-bundle\Connector\Deskweave.McpConnector.csproj'
 $release = Join-Path $root ("artifacts\mcp-bundle\$Version")
-$bundle = Join-Path $release ("Deskweave-MCP-win-x64-$Version.mcpb")
+$bundle = Join-Path $release ("ARS-MCP-win-x64-$Version.mcpb")
 if (Test-Path -LiteralPath $bundle) { throw "Bundle already exists: $bundle. Released versions are immutable." }
 if (-not $McpbCli) {
     $found = Get-Command mcpb -ErrorAction SilentlyContinue
@@ -34,7 +34,7 @@ $server = Join-Path $stage 'server'
 New-Item -ItemType Directory -Force -Path $publish,$server | Out-Null
 & dotnet publish $source -c Release -r win-x64 -o $publish
 if ($LASTEXITCODE -ne 0) { throw 'MCP connector publish failed.' }
-$exe = Join-Path $publish 'Deskweave.McpConnector.exe'
+$exe = Join-Path $publish 'ARS.McpConnector.exe'
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Self-contained MCP connector exe is missing.' }
 $payloadExe = $exe
 if ($Sign) {
@@ -66,15 +66,15 @@ if ($Sign) {
     if ((Get-AuthenticodeSignature -LiteralPath $exe).Status -ne 'Valid') { throw 'MCP connector signature is not valid.' }
     $payloadExe = $exe
 }
-Copy-Item -LiteralPath $payloadExe -Destination (Join-Path $server 'Deskweave.McpConnector.exe')
+Copy-Item -LiteralPath $payloadExe -Destination (Join-Path $server 'ARS.McpConnector.exe')
 Copy-Item -LiteralPath (Join-Path $root 'mcp-bundle\README.md') -Destination (Join-Path $stage 'README.md')
 $manifest = [ordered]@{
     manifest_version = '0.3'
-    name = 'deskweave'
-    display_name = 'Deskweave'
+    name = 'ars'
+    display_name = 'ARS'
     version = $Version
-    description = 'Connect an AI agent to the installed Deskweave Windows desktop app.'
-    long_description = 'Windows x64 only. Install Deskweave first. This bundle connects an MCP client to its local bridge and does not install a second app.'
+    description = 'Connect an AI agent to the installed ARS Windows desktop app.'
+    long_description = 'Windows x64 only. Install ARS first. This bundle connects an MCP client to its local bridge and does not install a second app.'
     author = [ordered]@{ name = 'Jefferson Kline' }
     repository = [ordered]@{ type = 'git'; url = 'https://github.com/JeffLepp/Deskweave' }
     homepage = 'https://github.com/JeffLepp/Deskweave'
@@ -83,8 +83,8 @@ $manifest = [ordered]@{
     compatibility = [ordered]@{ platforms = @('win32') }
     server = [ordered]@{
         type = 'binary'
-        entry_point = 'server/Deskweave.McpConnector.exe'
-        mcp_config = [ordered]@{ command = '${__dirname}/server/Deskweave.McpConnector.exe'; args = @() }
+        entry_point = 'server/ARS.McpConnector.exe'
+        mcp_config = [ordered]@{ command = '${__dirname}/server/ARS.McpConnector.exe'; args = @() }
     }
 }
 $manifestPath = Join-Path $stage 'manifest.json'
@@ -98,7 +98,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Official MCPB could not read the packed bundle
 $unpacked = Join-Path $work 'unpacked'
 & $McpbCli unpack $bundle $unpacked
 if ($LASTEXITCODE -ne 0) { throw 'Official MCPB could not unpack the packed bundle.' }
-$unpackedExe = Join-Path $unpacked 'server\Deskweave.McpConnector.exe'
+$unpackedExe = Join-Path $unpacked 'server\ARS.McpConnector.exe'
 if ((Get-FileHash -LiteralPath $unpackedExe -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $payloadExe -Algorithm SHA256).Hash) {
     throw 'Packed connector differs from the tested build.'
 }

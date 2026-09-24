@@ -135,12 +135,12 @@ internal static class Program
         }, null, TimeSpan.FromSeconds(240), Timeout.InfiniteTimeSpan);
         try
         {
-            Check(ProductContext.FolderName == "Deskweave", "Copied product context defaults to Deskweave");
-            Check(Path.GetFileName(ProductContext.LocalRoot) == "Deskweave"
-                && Path.GetFileName(ProductContext.RoamingRoot) == "Deskweave", "Local and roaming product roots are Deskweave's own");
+            Check(ProductContext.FolderName == "ARS", "Copied product context defaults to ARS");
+            Check(Path.GetFileName(ProductContext.LocalRoot) == "ARS"
+                && Path.GetFileName(ProductContext.RoamingRoot) == "ARS", "Local and roaming product roots are ARS's own");
             Check(WorkspaceStore.Root == ProductContext.Local("agent-workspaces"), "Production workspace root is owned by Deskweave");
-            Check(File.Exists(bridge) && Path.GetFileName(bridge) == "Deskweave.WorkspaceBridge.exe", "Deskweave bridge is packaged beside the copied engine");
-            Check(AgentDesktop.NameFor("probe") == "Deskweave-probe", "Desktop namespace is Deskweave's own");
+            Check(File.Exists(bridge) && Path.GetFileName(bridge) == "ARS.WorkspaceBridge.exe", "Deskweave bridge is packaged beside the copied engine");
+            Check(AgentDesktop.NameFor("probe") == "ARS-probe", "Desktop namespace is ARS's own");
             using var scope = WorkspaceStore.UseRootForTests(Path.Combine(fixture, "w"));
             // The connection checks change consent and switches; they did that in the owner's own settings.
             using var settings = AppSettingsStore.UseFileForTests(Path.Combine(fixture, "settings.json"));
@@ -164,8 +164,8 @@ internal static class Program
             Check(first.Name == named + new string('+', 32), "Concurrent workspace updates retain all 32 independent changes");
             first = WorkspaceStore.Update(first.Id, current => current with { Name = named })!;
             string config = JsonSerializer.Serialize(WorkspaceConnections.Configuration(first.Id));
-            Check(WorkspaceConnections.Name(first.Id) == "deskweave_workspace_" + first.Id
-                && config.Contains("Deskweave.WorkspaceBridge.exe", StringComparison.Ordinal)
+            Check(WorkspaceConnections.Name(first.Id) == "ars_workspace_" + first.Id
+                && config.Contains("ARS.WorkspaceBridge.exe", StringComparison.Ordinal)
                 && config.Contains("--workspace", StringComparison.Ordinal), "Generated MCP connection names the Deskweave bridge and its workspace ticket");
 
             WorkspaceRuntime one = WorkspaceRuntime.Start(first);

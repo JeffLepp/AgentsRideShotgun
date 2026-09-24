@@ -10,8 +10,8 @@ namespace Deskweave.AgentWorkspaces;
 internal static class WorkspaceConnections
 {
     internal static string Bridge => Path.Combine(Path.GetDirectoryName(typeof(WorkspaceMcp).Assembly.Location)!,
-        "Bridge", "Deskweave.WorkspaceBridge.exe");
-    internal static string Name(string id) => "deskweave_workspace_" + id;
+        "Bridge", "ARS.WorkspaceBridge.exe");
+    internal static string Name(string id) => "ars_workspace_" + id;
     internal static object Configuration(string id) => new
     {
         mcpServers = new Dictionary<string, object>
@@ -31,7 +31,10 @@ internal static class WorkspaceConnections
     }
 
     /// <summary>The single entry an agent app gets. Every workspace is reached through it.</summary>
-    internal const string AppName = "deskweave";
+    internal const string AppName = "ars";
+
+    /// <summary>The entry from before ARS was renamed. It only ever comes out.</summary>
+    internal const string FormerAppName = "deskweave";
 
     internal enum AgentApp { ClaudeCode, Codex }
 
@@ -129,7 +132,7 @@ internal static class WorkspaceConnections
     /// </summary>
     internal enum Entry { None, Current, Stale, Disabled, Unreadable }
 
-    static Entry ReadEntry(AgentProfile target, bool ignoreDisabled = false)
+    static Entry ReadEntry(AgentProfile target, bool ignoreDisabled = false, string name = AppName)
     {
         try
         {
@@ -145,7 +148,7 @@ internal static class WorkspaceConnections
                     if (trimmed.StartsWith('[') && trimmed.IndexOf(']') is >= 0 and var end)
                     {
                         string header = trimmed[..(end + 1)];
-                        inside = header is "[mcp_servers.deskweave]" or "[mcp_servers.\"deskweave\"]" or "[mcp_servers.'deskweave']";
+                        inside = header == $"[mcp_servers.{name}]" || header == $"[mcp_servers.\"{name}\"]" || header == $"[mcp_servers.'{name}']";
                         found |= inside;
                         continue;
                     }
@@ -166,7 +169,7 @@ internal static class WorkspaceConnections
             using var document = JsonDocument.Parse(stream);
             if (document.RootElement.ValueKind != JsonValueKind.Object) return Entry.Unreadable;
             if (!document.RootElement.TryGetProperty("mcpServers", out JsonElement servers)
-                || servers.ValueKind != JsonValueKind.Object || !servers.TryGetProperty(AppName, out JsonElement entry)) return Entry.None;
+                || servers.ValueKind != JsonValueKind.Object || !servers.TryGetProperty(name, out JsonElement entry)) return Entry.None;
             string? command = entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("command", out JsonElement c)
                 && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
             List<string> args = entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("args", out JsonElement a)
@@ -245,7 +248,7 @@ internal static class WorkspaceConnections
     static string? RememberResult(AgentApp app, string? why)
     {
         if (why is null) Failures.TryRemove(app, out _);
-        else { Failures[app] = why; Trace.TraceWarning("Deskweave connection: {0}", why); }
+        else { Failures[app] = why; Trace.TraceWarning("ARS connection: {0}", why); }
         return why;
     }
 
@@ -253,7 +256,7 @@ internal static class WorkspaceConnections
     {
         string? cli = Locate(app);
         if (cli is null) return RememberResult(app, DisplayName(app) + " isn't installed on this PC.");
-        if (connect && !File.Exists(Bridge)) return RememberResult(app, "Deskweave's workspace bridge is missing. Reinstall Deskweave.");
+        if (connect && !File.Exists(Bridge)) return RememberResult(app, "ARS's workspace bridge is missing. Reinstall ARS.");
         using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         bound.CancelAfter(TimeSpan.FromSeconds(30));
         bool automatic = AutomaticChange.Value;
@@ -306,12 +309,19 @@ internal static class WorkspaceConnections
         Entry entry = ReadEntry(profile);
         if (entry == Entry.Unreadable) return $"{name} configuration could not be read. No change was requested.";
         if (permitted?.Invoke() == false) return null;
+        // The entry from before the rename runs a bridge that is gone, so it comes out either way.
+        if (ReadEntry(profile, true, FormerAppName) is not Entry.None and not Entry.Unreadable)
+        {
+            await Run(cli, ["mcp", "remove", .. scope, FormerAppName], cancel, profile.Root, profile.App, true).ConfigureAwait(false);
+            if (ReadEntry(profile, true, FormerAppName) != Entry.None)
+                return $"{name} kept its old Deskweave entry. Remove it in the provider's MCP settings.";
+        }
         bool had = entry != Entry.None;
         if (had)
         {
             await Run(cli, ["mcp", "remove", .. scope, AppName], cancel, profile.Root, profile.App, true).ConfigureAwait(false);
             if (ReadEntry(profile) != Entry.None)
-                return $"{name} kept its Deskweave entry. Its launcher may use a different configuration profile; remove it in the provider's MCP settings.";
+                return $"{name} kept its ARS entry. Its launcher may use a different configuration profile; remove it in the provider's MCP settings.";
         }
         if (!connect) return null;
         if (permitted?.Invoke() == false) return null;
@@ -323,7 +333,7 @@ internal static class WorkspaceConnections
         return had
             // The old entry came out for the replacement and the new one did not go in. Saying
             // nothing changed would be a lie, and it would hide a connection that is gone.
-            ? $"{name} did not accept the connection, and its earlier Deskweave entry came out with it. Connect it again in Settings."
+            ? $"{name} did not accept the connection, and its earlier ARS entry came out with it. Connect it again in Settings."
             : $"{name} did not accept the connection in the intended profile. Its launcher may use another configuration profile. No unrelated entries were requested to change.";
     }
 
@@ -420,7 +430,7 @@ internal static class WorkspaceConnections
         // answer, and a probe that stands in for it must stand in for this too.
         string? cli = Locate(AgentApp.Codex);
         if (cli is null) return "Codex is not installed in a supported local location. You can still copy the MCP connection for another agent.";
-        if (!File.Exists(Bridge)) return "The packaged workspace bridge is missing. Reinstall Deskweave.";
+        if (!File.Exists(Bridge)) return "The packaged workspace bridge is missing. Reinstall ARS.";
         using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         bound.CancelAfter(TimeSpan.FromSeconds(20));
         var listed = await Run(cli, ["mcp", "list", "--json"], bound.Token, profileRoot).ConfigureAwait(false);
@@ -431,7 +441,7 @@ internal static class WorkspaceConnections
             .Where(e => e.TryGetProperty("name", out var name) && name.GetString() == Name(id))
             .Select(e => (JsonElement?)e).FirstOrDefault();
         if (existing is { } entry && !IsOwned(entry, id))
-            return "That connection name is already used by another configuration. Deskweave left it unchanged.";
+            return "That connection name is already used by another configuration. ARS left it unchanged.";
         if (connect && existing is not null) return "Already connected. Start this workspace, then restart its MCP connection in Codex settings.";
         if (!connect && existing is null) return "This workspace has no Codex connection to remove.";
         string[] arguments = connect

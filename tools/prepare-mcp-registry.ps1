@@ -13,7 +13,7 @@ if (-not $ReleaseTag) { $ReleaseTag = "v$Version" }
 if ($ReleaseTag -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') { throw 'Invalid GitHub release tag.' }
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $folder = Join-Path $root ("artifacts\mcp-bundle\$Version")
-$name = "Deskweave-MCP-win-x64-$Version.mcpb"
+$name = "ARS-MCP-win-x64-$Version.mcpb"
 $bundle = Join-Path $folder $name
 if (-not (Test-Path -LiteralPath $bundle -PathType Leaf)) { throw "Build the exact MCPB first: $bundle" }
 $inspection = Join-Path $folder ("inspect-" + [Guid]::NewGuid().ToString('N') + '.exe')
@@ -21,15 +21,15 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::OpenRead($bundle)
 try {
     $manifestEntry = $archive.GetEntry('manifest.json')
-    $connectorEntry = $archive.GetEntry('server/Deskweave.McpConnector.exe')
+    $connectorEntry = $archive.GetEntry('server/ARS.McpConnector.exe')
     if ($null -eq $manifestEntry -or $null -eq $connectorEntry) { throw 'MCPB is missing its manifest or connector.' }
     $reader = [IO.StreamReader]::new($manifestEntry.Open())
     try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json }
     finally { $reader.Dispose() }
-    if ($manifest.name -cne 'deskweave' -or $manifest.version -cne $Version -or
-        $manifest.server.type -cne 'binary' -or $manifest.server.entry_point -cne 'server/Deskweave.McpConnector.exe' -or
-        $manifest.server.mcp_config.command -cne '${__dirname}/server/Deskweave.McpConnector.exe') {
-        throw 'MCPB manifest does not match the requested Deskweave version and connector.'
+    if ($manifest.name -cne 'ars' -or $manifest.version -cne $Version -or
+        $manifest.server.type -cne 'binary' -or $manifest.server.entry_point -cne 'server/ARS.McpConnector.exe' -or
+        $manifest.server.mcp_config.command -cne '${__dirname}/server/ARS.McpConnector.exe') {
+        throw 'MCPB manifest does not match the requested ARS version and connector.'
     }
     [IO.Compression.ZipFileExtensions]::ExtractToFile($connectorEntry, $inspection)
 }
@@ -45,11 +45,11 @@ finally { Remove-Item -LiteralPath $inspection -ErrorAction SilentlyContinue }
 $url = "https://github.com/JeffLepp/Deskweave/releases/download/$ReleaseTag/$name"
 if ($VerifyPublicDownload) {
     $installerFolder = Join-Path $root ("artifacts\installer\" + $Version)
-    $installer = Join-Path $installerFolder 'Deskweave-Setup.exe'
+    $installer = Join-Path $installerFolder 'ARS-Setup.exe'
     $evidencePath = Join-Path $installerFolder 'package-evidence.json'
     if (-not (Test-Path -LiteralPath $installer -PathType Leaf) -or
         -not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) {
-        throw 'The matching signed Deskweave installer and package evidence must exist before registry publication.'
+        throw 'The matching signed ARS installer and package evidence must exist before registry publication.'
     }
     $evidence = Get-Content -Raw -LiteralPath $evidencePath | ConvertFrom-Json
     $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -70,7 +70,7 @@ if ($VerifyPublicDownload) {
         if ($remoteHash -ne $hash) { throw "Public download SHA-256 differs from the local bundle: $url" }
     }
     finally { Remove-Item -LiteralPath $download -ErrorAction SilentlyContinue }
-    $installerUrl = "https://github.com/JeffLepp/Deskweave/releases/download/$ReleaseTag/Deskweave-Setup.exe"
+    $installerUrl = "https://github.com/JeffLepp/Deskweave/releases/download/$ReleaseTag/ARS-Setup.exe"
     $installerDownload = Join-Path $folder ("verify-installer-" + [Guid]::NewGuid().ToString('N') + '.exe')
     try {
         Invoke-WebRequest -Uri $installerUrl -MaximumRedirection 10 -OutFile $installerDownload
@@ -83,9 +83,9 @@ if ($VerifyPublicDownload) {
 }
 $metadata = [ordered]@{
     '$schema' = 'https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json'
-    name = 'io.github.JeffLepp/deskweave'
-    title = 'Deskweave'
-    description = 'Connect agents to a second Windows desktop. Requires the Deskweave app on Windows x64.'
+    name = 'io.github.JeffLepp/ars'
+    title = 'ARS'
+    description = 'Connect agents to a second Windows desktop. Requires the ARS app on Windows x64.'
     repository = [ordered]@{ url = 'https://github.com/JeffLepp/Deskweave'; source = 'github' }
     version = $Version
     packages = @([ordered]@{

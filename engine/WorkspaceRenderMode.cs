@@ -268,7 +268,7 @@ internal static class WorkspaceRenderMode
     {
         const string KeyPath = @"SOFTWARE\Microsoft\Avalon.Graphics";
         const string ValueName = "DisableHWAcceleration";
-        static readonly string Root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deskweave");
+        static readonly string Root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Deskweave.Product.ProductContext.DefaultFolderName);
         static readonly string JournalPath = Path.Combine(Root, "renderer-state.json");
         static readonly string LegacyPath = Path.Combine(Root, "agent-workspaces.access", "renderer.json");
         static readonly string MutexName = @"Global\Deskweave.WpfRenderer." + WindowsIdentity.GetCurrent().User!.Value;
@@ -359,7 +359,7 @@ internal static class WorkspaceRenderMode
 
         public bool LegacyOwnerMayBeAlive()
         {
-            foreach (string name in new[] { "Deskweave", "Deskweave.Probe", "Deskweave.UiProbe" })
+            foreach (string name in new[] { "ARS", "Deskweave", "Deskweave.Probe", "Deskweave.UiProbe" })
                 foreach (Process process in Process.GetProcessesByName(name))
                     using (process) if (process.Id != Environment.ProcessId) return true;
             return false;

@@ -12,10 +12,10 @@ public static class DeskweaveSurfaceCapture {
 }
 '@
 $deskweaveRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$executable = Join-Path $deskweaveRoot 'out/Deskweave.exe'
+$executable = Join-Path $deskweaveRoot 'out/ARS.exe'
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
 [System.IO.Directory]::CreateDirectory($output) | Out-Null
-$process = @(Get-Process Deskweave -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable })
+$process = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable })
 if ($process.Count -ne 1) { throw 'Expected one running Deskweave from this private publish folder.' }
 $process = $process[0]
 $process.Refresh()

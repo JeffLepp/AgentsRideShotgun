@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'presentation-state.ps1')
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $Installer) {
-    $Installer = Get-ChildItem (Join-Path $root 'artifacts\installer') -Recurse -Filter 'Deskweave-Setup.exe' |
+    $Installer = Get-ChildItem (Join-Path $root 'artifacts\installer') -Recurse -Filter 'ARS-Setup.exe' |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not (Test-Path -LiteralPath $Installer)) { throw "No installer: $Installer" }
@@ -34,7 +34,7 @@ if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringCo
 if (Test-Path -LiteralPath $output) { throw 'Use a new output folder for each run; old results must never count as a fresh pass.' }
 $setupDir = Join-Path $output 'installer'; $results = Join-Path $output 'results'
 New-Item -ItemType Directory -Force $setupDir, $results | Out-Null
-Copy-Item -LiteralPath $Installer -Destination (Join-Path $setupDir 'Deskweave-Setup.exe') -Force
+Copy-Item -LiteralPath $Installer -Destination (Join-Path $setupDir 'ARS-Setup.exe') -Force
 if ($PreviousInstaller) {
     if (-not (Test-Path -LiteralPath $PreviousInstaller -PathType Leaf)) { throw "No previous installer: $PreviousInstaller" }
     Copy-Item -LiteralPath $PreviousInstaller -Destination (Join-Path $setupDir 'Deskweave-Previous-Setup.exe')

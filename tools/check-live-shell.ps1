@@ -24,7 +24,7 @@ public static class ShellCheckWindow {
         EnumWindows((hwnd, _) => { uint pid; GetWindowThreadProcessId(hwnd, out pid);
             if (pid != process || !IsWindowVisible(hwnd)) return true;
             var title = new System.Text.StringBuilder(256); GetWindowText(hwnd, title, title.Capacity);
-            if (title.ToString() != "Deskweave") return true;
+            if (title.ToString() != "ARS") return true;
             found = hwnd; return false;
         }, IntPtr.Zero);
         return found;
@@ -52,8 +52,8 @@ public static class ShellCheckWindow {
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
 }
 '@
-$exe = Join-Path $root 'out\Deskweave.exe'
-$app = @(Get-Process Deskweave -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
+$exe = Join-Path $root 'out\ARS.exe'
+$app = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
 if ($app.Count -ne 1) { throw 'Expected one running published Deskweave instance.' }
 $app = $app[0]
 $checks = [Collections.Generic.List[string]]::new()
@@ -162,7 +162,7 @@ try {
     Check ([ShellCheckWindow]::IsWindowVisible($window)) 'A tray selection reopens the published strip'
     Invoke 'Close Deskweave'
     }
-    foreach ($file in @('Deskweave.exe', 'Deskweave.dll', 'Deskweave.AgentWorkspaces.dll')) {
+    foreach ($file in @('ARS.exe', 'ARS.dll', 'Deskweave.AgentWorkspaces.dll')) {
         $report[$file + 'Sha256'] = (Get-FileHash -LiteralPath (Join-Path $root ('out\' + $file))).Hash
     }
 } catch { $failure = $_.ToString() }

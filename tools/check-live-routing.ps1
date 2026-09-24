@@ -7,8 +7,8 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Validation output must be inside this Deskweave checkout.'
 }
-if (Get-Process Deskweave -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before running this isolated live check.' }
-$product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Deskweave'
+if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before running this isolated live check.' }
+$product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS'
 $settings = Join-Path $product 'settings.json'
 if ((Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).FirstRunDone) {
     throw 'This check requires unanswered first launch so startup cannot change the owner''s Start with Windows setting.'
@@ -30,7 +30,7 @@ $trader = Join-Path $projects 'Trader'
 foreach ($folder in @((Join-Path $project '.git'), (Join-Path $project 'src'), (Join-Path $trader '.git'))) {
     [IO.Directory]::CreateDirectory($folder) | Out-Null
 }
-$start = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'out\Deskweave.exe'))
+$start = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'out\ARS.exe'))
 $start.UseShellExecute = $false
 $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
 $start.ArgumentList.Add('--background')
@@ -59,9 +59,9 @@ try {
     $report.pid = $app.Id
     Start-Sleep -Seconds 2
     Check (-not $app.HasExited) 'The published app starts in the background'
-    $report.exeSha256 = Hash (Join-Path $root 'out\Deskweave.exe')
+    $report.exeSha256 = Hash (Join-Path $root 'out\ARS.exe')
     $report.engineSha256 = Hash (Join-Path $root 'out\Deskweave.AgentWorkspaces.dll')
-    $report.bridgeSha256 = Hash (Join-Path $root 'out\Bridge\Deskweave.WorkspaceBridge.dll')
+    $report.bridgeSha256 = Hash (Join-Path $root 'out\Bridge\ARS.WorkspaceBridge.dll')
     if ($BrowserOnly) {
         $browser = Run-Session 'browser' $project $false $true
         Check ($browser.sessions.Count -eq 2 -and @($browser.sessions | Where-Object { -not $_.browserVerified }).Count -eq 0) 'Both configured providers can open, click and observe a real local browser page'
