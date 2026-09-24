@@ -38,7 +38,7 @@ $exe = Join-Path $publish 'Deskweave.McpConnector.exe'
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Self-contained MCP connector exe is missing.' }
 $payloadExe = $exe
 if ($Sign) {
-    foreach ($name in @('AZURE_CLIENT_ID','AZURE_CLIENT_SECRET','AZURE_TENANT_ID','HIVEMIND_SIGN_ACCOUNT','HIVEMIND_SIGN_ENDPOINT','HIVEMIND_SIGN_PROFILE')) {
+    foreach ($name in @('AZURE_CLIENT_ID','AZURE_CLIENT_SECRET','AZURE_TENANT_ID','DESKWEAVE_SIGN_ACCOUNT','DESKWEAVE_SIGN_ENDPOINT','DESKWEAVE_SIGN_PROFILE')) {
         if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Azure signing needs $name in the environment." }
     }
     if (-not $SignTool) {
@@ -49,9 +49,9 @@ if ($Sign) {
     if (-not $SigningDlib -or -not (Test-Path -LiteralPath $SigningDlib -PathType Leaf)) { throw 'Azure Artifact Signing dlib is required for -Sign. Pass -SigningDlib with its x64 Azure.CodeSigning.Dlib.dll path.' }
     $signMetadata = Join-Path $work 'azure-sign-metadata.json'
     $signConfig = [ordered]@{
-        Endpoint = $env:HIVEMIND_SIGN_ENDPOINT
-        CodeSigningAccountName = $env:HIVEMIND_SIGN_ACCOUNT
-        CertificateProfileName = $env:HIVEMIND_SIGN_PROFILE
+        Endpoint = $env:DESKWEAVE_SIGN_ENDPOINT
+        CodeSigningAccountName = $env:DESKWEAVE_SIGN_ACCOUNT
+        CertificateProfileName = $env:DESKWEAVE_SIGN_PROFILE
         ExcludeCredentials = @('ManagedIdentityCredential','WorkloadIdentityCredential','SharedTokenCacheCredential','VisualStudioCredential','VisualStudioCodeCredential','AzureCliCredential','AzurePowerShellCredential','AzureDeveloperCliCredential','InteractiveBrowserCredential')
     }
     [IO.File]::WriteAllText($signMetadata,($signConfig | ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))

@@ -585,15 +585,15 @@ public sealed class WorkspaceMcp : IDisposable
     string AskOwnerText(string program, string? arguments, string reason, bool takeOver)
     {
         if (!_external.Policy.DesktopRequests)
-            return "The owner set this workspace to workspace-only, so nothing in here can reach his desktop."
-                + " Ask him in your answer instead.";
+            return "The owner set this workspace to workspace-only, so nothing in here can reach their desktop."
+                + " Ask them in your answer instead.";
         try
         {
             WorkspaceHandoff request = _external.RequestProgram(_client, program, arguments, reason, takeOver);
             return (takeOver
-                ? "The owner now has one click in Deskweave to close his copy and start it in here instead"
-                : "The owner now has one click in Deskweave to open it on his own desktop")
-                + $" (request {request.Id}). Nothing has opened yet; check status for his answer.";
+                ? "The owner now has one click in Deskweave to close their copy and start it in here instead"
+                : "The owner now has one click in Deskweave to open it on their own desktop")
+                + $" (request {request.Id}). Nothing has opened yet; check status for their answer.";
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
@@ -612,8 +612,8 @@ public sealed class WorkspaceMcp : IDisposable
             : arguments is null && WorkspaceHandoffs.IsDocument(trimmed) ? "file" : null;
         if (kind is null) return Say(AskOwnerText(target, arguments, reason, takeOver: false));
         if (!_external.Policy.DesktopRequests)
-            return Say("The owner set this workspace to workspace-only, so nothing in here can reach his desktop."
-                + " Ask him in your answer instead.");
+            return Say("The owner set this workspace to workspace-only, so nothing in here can reach their desktop."
+                + " Ask them in your answer instead.");
         // A web link for the owner is something the agent could open from its own shell anyway, so
         // Deskweave does not stand between them: it opens in his browser now, no click. Programs and
         // documents still ask, since those reach past the agent's own sandbox.
@@ -629,8 +629,8 @@ public sealed class WorkspaceMcp : IDisposable
         try
         {
             WorkspaceHandoff request = _external.RequestDesktop(_client, kind, trimmed, reason);
-            return Say("The owner now has one click in Deskweave to open it on his own desktop"
-                + $" (request {request.Id}). Nothing has opened yet; check status for his answer.");
+            return Say("The owner now has one click in Deskweave to open it on their own desktop"
+                + $" (request {request.Id}). Nothing has opened yet; check status for their answer.");
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException
             or UnauthorizedAccessException)

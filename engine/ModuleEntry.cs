@@ -103,7 +103,7 @@ public static class ModuleEntry
     }
 
     /// <summary>Optional uninstall/storage-inventory contract. This root contains only workspaces
-    /// created by this private app, their records/evidence, and transient setup staging.</summary>
+    /// created by Deskweave, their records/evidence, and transient setup staging.</summary>
     public static string[] GetDataPaths() => [WorkspaceStore.Root, WorkspaceAccessStore.Root];
 
     /// <summary>Uninstall: stops everything this install is running and takes its bridge out of the

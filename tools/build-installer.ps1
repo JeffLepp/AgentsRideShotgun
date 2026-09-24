@@ -38,19 +38,18 @@ $staging = Join-Path $root ('artifacts\installer-staging\' + [DateTime]::UtcNow.
 
 # The install id is not "Deskweave" on purpose: Velopack installs to %LOCALAPPDATA%\<id> and its
 # uninstall deletes that whole folder, while the owner's workspaces live in %LOCALAPPDATA%\Deskweave.
-# A technical floor for this private candidate, matching its oldest observed test guest.
-# Edition/lifecycle support is narrower and is stated in the launch notes; a build number cannot encode it.
+# A technical floor, matching the oldest Windows build it was tested on.
 $packageRuntime = 'win10.0.19041-x64'
 $signing = @()
 if ($Sign) {
     # Azure Artifact Signing through the service principal already in the environment; the
     # metadata file holds no secret and is deleted after packing.
-    foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'HIVEMIND_SIGN_ACCOUNT', 'HIVEMIND_SIGN_ENDPOINT', 'HIVEMIND_SIGN_PROFILE')) {
+    foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'DESKWEAVE_SIGN_ACCOUNT', 'DESKWEAVE_SIGN_ENDPOINT', 'DESKWEAVE_SIGN_PROFILE')) {
         if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Signing needs $name in the environment." }
     }
     $signMetadata = Join-Path ([IO.Path]::GetTempPath()) ('deskweave-sign-' + [Guid]::NewGuid().ToString('N') + '.json')
     $signJson = [ordered]@{
-        Endpoint = $env:HIVEMIND_SIGN_ENDPOINT; CodeSigningAccountName = $env:HIVEMIND_SIGN_ACCOUNT; CertificateProfileName = $env:HIVEMIND_SIGN_PROFILE
+        Endpoint = $env:DESKWEAVE_SIGN_ENDPOINT; CodeSigningAccountName = $env:DESKWEAVE_SIGN_ACCOUNT; CertificateProfileName = $env:DESKWEAVE_SIGN_PROFILE
         ExcludeCredentials = @('ManagedIdentityCredential', 'WorkloadIdentityCredential', 'SharedTokenCacheCredential', 'VisualStudioCredential', 'VisualStudioCodeCredential', 'AzureCliCredential', 'AzurePowerShellCredential', 'AzureDeveloperCliCredential', 'InteractiveBrowserCredential')
     } | ConvertTo-Json
     # No byte-order mark: the signing library fails on one with only "SignerSign() failed".

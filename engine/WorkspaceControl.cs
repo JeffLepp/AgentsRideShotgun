@@ -604,7 +604,7 @@ public sealed partial class WorkspaceControl : IDisposable
     {
         started = exe;
         if (_requiredLease.Value is { } expected && (expected == 0 || Ticket != expected)) return 0;
-        // "hivemind" or "chrome" is what a person types into Start; CreateProcess wants the file.
+        // "notepad" or "chrome" is what a person types into Start; CreateProcess wants the file.
         (exe, arguments) = WorkspacePrograms.Resolve(exe, arguments);
         started = exe;
         if (WorkspacePrograms.ShellOnly(exe))

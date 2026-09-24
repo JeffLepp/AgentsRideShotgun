@@ -137,12 +137,10 @@ internal static class Program
         {
             Check(ProductContext.FolderName == "Deskweave", "Copied product context defaults to Deskweave");
             Check(Path.GetFileName(ProductContext.LocalRoot) == "Deskweave"
-                && Path.GetFileName(ProductContext.RoamingRoot) == "Deskweave", "Local and roaming product roots are independent of HiveMind");
+                && Path.GetFileName(ProductContext.RoamingRoot) == "Deskweave", "Local and roaming product roots are Deskweave's own");
             Check(WorkspaceStore.Root == ProductContext.Local("agent-workspaces"), "Production workspace root is owned by Deskweave");
             Check(File.Exists(bridge) && Path.GetFileName(bridge) == "Deskweave.WorkspaceBridge.exe", "Deskweave bridge is packaged beside the copied engine");
-            string originalName = "HiveMind-";
-            Check(AgentDesktop.NameFor("probe") == "Deskweave-probe"
-                && !AgentDesktop.NameFor("probe").StartsWith(originalName), "Desktop namespace is independent of HiveMind");
+            Check(AgentDesktop.NameFor("probe") == "Deskweave-probe", "Desktop namespace is Deskweave's own");
             using var scope = WorkspaceStore.UseRootForTests(Path.Combine(fixture, "w"));
             // The connection checks change consent and switches; they did that in the owner's own settings.
             using var settings = AppSettingsStore.UseFileForTests(Path.Combine(fixture, "settings.json"));

@@ -1,0 +1,28 @@
+name: Bug
+description: Something Deskweave did that it should not have, or did not do
+body:
+  - type: textarea
+    attributes:
+      label: What happened
+      description: What you or the agent asked for, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Deskweave version
+      description: Settings > General shows it.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Windows version
+      description: Run `winver`.
+  - type: dropdown
+    attributes:
+      label: Agent
+      options: [Claude Code, Codex, Other]
+  - type: textarea
+    attributes:
+      label: Log lines
+      description: The relevant lines from the workspace's evidence folder (Settings > General > Open Deskweave data). Check them for anything private first.
+      render: text
