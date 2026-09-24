@@ -6,7 +6,7 @@
 
     <!-- Light values until AppearanceManager paints the chosen theme over them. Always bind
          colors with DynamicResource: the theme replaces these at run time. Token names and
-         values are in design/MVP_SPEC.md and AppearanceManager.cs. -->
+         values are in AppearanceManager.cs. -->
     <SolidColorBrush x:Key="WindowBrush" Color="#F7F8FA"/>
     <SolidColorBrush x:Key="SidebarBrush" Color="#F1F3F6"/>
     <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF"/>

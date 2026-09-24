@@ -26,12 +26,23 @@ node_modules/
 # Local experiments, trial runs and throwaway checks.
 /scratch/
 
-# Launch art scratch: rendered previews and contact sheets.
-launch/_*
-launch/assets/_*
-
 # Private planning notes, old logs and review rounds (kept on the owner's machine).
 /.local-notes/
+
+# Internal docs, design sources, launch art and the portable prototype (kept on the owner's machine).
+/AGENTS.md
+/BACKPORTS.md
+/DESIGN.md
+/PRODUCT.md
+/map.md
+/upstream-baseline.json
+/Start Deskweave.cmd
+/docs/
+/design/
+/launch/
+/portable/
+/tools/compare-upstream.ps1
+/tools/design/
 
 # Signing material and local secrets. Never committed.
 *.pfx

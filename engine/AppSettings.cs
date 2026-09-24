@@ -15,8 +15,8 @@ public enum ScreenshotMode { KeySteps, Continuous, Off }
 public enum PreviewSmoothness { Balanced, BatterySaver }
 
 /// <summary>
-/// Every choice in Settings, with the defaults the MVP spec gives it (design/MVP_SPEC.md,
-/// Surfaces 4). One file for the whole app, owned by the owner: it sits in Deskweave's own local
+/// Every choice in Settings, with the defaults the design spec gives it.
+/// One file for the whole app, owned by the owner: it sits in Deskweave's own local
 /// folder, never in a workspace folder an agent can write to. Per-workspace records keep their
 /// own values; these are the app's behavior and the defaults new workspaces start from.
 /// </summary>

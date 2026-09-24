@@ -10,7 +10,7 @@ namespace Deskweave.UiProbe;
 
 /// <summary>
 /// One state of the real app, photographed in light and dark and set beside the same crop of its
-/// reference image (design/reference/{light,dark}/{Reference}.png at x, y, width, height). Put it
+/// reference image (ui-probe/reference/{light,dark}/{Reference}.png at x, y, width, height). Put it
 /// on a static method in a Scenes.*.cs file: the method gets a <see cref="SceneContext"/>, builds
 /// the state, and returns the window or element to photograph at its real size. A Reference of ""
 /// photographs a state no reference image covers.
@@ -227,8 +227,8 @@ static class Mvp
     internal static string References()
     {
         for (var folder = new DirectoryInfo(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
-            if (Directory.Exists(Path.Combine(folder.FullName, "design", "reference")))
-                return Path.Combine(folder.FullName, "design", "reference");
-        throw new DirectoryNotFoundException("design/reference was not found above " + AppContext.BaseDirectory);
+            if (Directory.Exists(Path.Combine(folder.FullName, "ui-probe", "reference")))
+                return Path.Combine(folder.FullName, "ui-probe", "reference");
+        throw new DirectoryNotFoundException("ui-probe/reference was not found above " + AppContext.BaseDirectory);
     }
 }

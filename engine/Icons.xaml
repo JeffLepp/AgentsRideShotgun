@@ -1,7 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- The one icon family (design/deskweave-screens.html sprite): 16 DIP grid, 1.5 stroke,
+    <!-- The one icon family: 16 DIP grid, 1.5 stroke,
          round caps and joins, drawn in the current foreground. Use a Path with Style="{StaticResource Icon}"
          and Data="{StaticResource Icon.Pin}". Icon13 / Icon14 / Icon15 scale the whole drawing,
          stroke included, the way the reference's smaller icons do. Mark and Arrow are filled. -->

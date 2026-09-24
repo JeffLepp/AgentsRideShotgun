@@ -11,7 +11,7 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave;
 
 /// <summary>
-/// First launch (design/MVP_SPEC.md, Surfaces 5; reference 07-first-launch.png). It shows what
+/// First launch (reference 07-first-launch.png). It shows what
 /// Deskweave does before it asks for anything, lists the supported agents found on this PC with
 /// their switches already on, and has one button. Nothing reaches an agent's own configuration
 /// until Start is pressed: closing the window connects nothing, and there is no second prompt

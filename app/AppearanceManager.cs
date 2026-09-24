@@ -7,7 +7,7 @@ using Microsoft.Win32;
 namespace Deskweave;
 
 /// <summary>
-/// Light and dark, with the exact tokens from design/MVP_SPEC.md. Follows Windows' app theme
+/// Light and dark, with the design spec's exact tokens. Follows Windows' app theme
 /// unless Settings > General > Theme forces one. Every brush is replaced in the application
 /// resources, so anything bound with DynamicResource repaints in place; no window, workspace or
 /// agent restarts.

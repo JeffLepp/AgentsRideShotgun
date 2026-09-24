@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// What first launch does outside its own window (design/MVP_SPEC.md, Surfaces 5 and Behavior):
+/// What first launch does outside its own window:
 /// detecting the supported agents, connecting them on Start, keeping exactly one entry each across
 /// repeated launches, picking up an agent installed later, and doing none of it without consent.
 ///
