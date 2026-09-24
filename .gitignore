@@ -25,6 +25,7 @@ node_modules/
 
 # Local experiments and throwaway checks.
 /scratch/
+/launch/
 
 # Signing material and local secrets. Never committed.
 *.pfx
