@@ -70,6 +70,7 @@ Installers:
   - Architecture: x64
     InstallerUrl: __URL__
     InstallerSha256: __HASH__
+    ProductCode: ARSApp
 ManifestType: installer
 ManifestVersion: 1.12.0
 '@
