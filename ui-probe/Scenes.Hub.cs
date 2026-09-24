@@ -8,7 +8,7 @@ using Deskweave.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
 
-/// <summary>Hub (Stack) and a workspace in full: references 03, 04.</summary>
+/// <summary>Hub (Stack) and a workspace in full.</summary>
 static class HubScenes
 {
     static IReadOnlyList<HubEntry> Working(SceneContext scene) =>
@@ -20,12 +20,12 @@ static class HubScenes
     static IReadOnlyList<HubEntry> Recent(SceneContext scene) =>
     [
         new HubEntry("landing-page") { Name = "landing-page", Age = "2h", SidebarAge = "2h ago", Preview = scene.Site("docs") },
-        // Reference 04's sidebar shows api and Scratch as dimmed terminal frames, not blank.
+        // The sidebar shows api and Scratch as dimmed terminal frames, not blank.
         new HubEntry("api") { Name = "api", Age = "yesterday", SidebarAge = "Yesterday", Preview = scene.Site("term") },
         new HubEntry("scratch") { Name = "Scratch", Age = "Mon", SidebarAge = "Monday", Preview = scene.Site("term") },
     ];
 
-    [Scene("hub", "")]
+    [Scene("hub")]
     static async Task<FrameworkElement> Hub(SceneContext scene)
     {
         var window = scene.Own(new MainWindow());
@@ -43,7 +43,7 @@ static class HubScenes
 
     /// <summary>The app's own question before something that cannot be undone, as deleting a
     /// workspace asks it. Its content is what is photographed; Windows draws the frame.</summary>
-    [Scene("question-delete", "")]
+    [Scene("question-delete")]
     static async Task<FrameworkElement> DeleteQuestion(SceneContext scene)
     {
         Window dialog = scene.Own(Question.Build(null, "Delete shop?",
@@ -55,7 +55,7 @@ static class HubScenes
     }
 
     /// <summary>The tray menu, drawn by its own renderer off-screen and shown as a picture.</summary>
-    [Scene("tray-menu", "")]
+    [Scene("tray-menu")]
     static async Task<FrameworkElement> TrayMenuScene(SceneContext scene)
     {
         await scene.Settle(50);
@@ -80,7 +80,7 @@ static class HubScenes
         return image;
     }
 
-    [Scene("hub-long-names", "")]
+    [Scene("hub-long-names")]
     static async Task<FrameworkElement> LongNames(SceneContext scene)
     {
         var window = (MainWindow)await Hub(scene);
@@ -97,7 +97,7 @@ static class HubScenes
         return window;
     }
 
-    [Scene("workspace-full", "04-workspace-full", 120, 20, 1200, 826)]
+    [Scene("workspace-full")]
     static async Task<FrameworkElement> WorkspaceFull(SceneContext scene)
     {
         var window = scene.Own(new MainWindow());
@@ -113,7 +113,7 @@ static class HubScenes
             [("Claude Code", true), ("Codex waiting", false)],
             scene.Site("shop"),
             [
-                // Reference 04's "What it did" rows each carry a 44-wide thumbnail (a live screenshot
+                // The "What it did" rows each carry a 44-wide thumbnail (a live screenshot
                 // in production, when one exists); the scene stands in with the workspace's own site.
                 ("10:41:52", "Opened ", "localhost:5173", scene.Site("shop")),
                 ("10:42:03", "Clicked Add to cart", "", scene.Site("shop")),

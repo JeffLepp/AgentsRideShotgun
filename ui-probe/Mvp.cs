@@ -9,18 +9,14 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave.UiProbe;
 
 /// <summary>
-/// One state of the real app, photographed in light and dark and set beside the same crop of its
-/// reference image (ui-probe/reference/{light,dark}/{Reference}.png at x, y, width, height). Put it
-/// on a static method in a Scenes.*.cs file: the method gets a <see cref="SceneContext"/>, builds
-/// the state, and returns the window or element to photograph at its real size. A Reference of ""
-/// photographs a state no reference image covers.
+/// One state of the real app, photographed in light and dark. Put it on a static method in a
+/// Scenes.*.cs file: the method gets a <see cref="SceneContext"/>, builds the state, and returns
+/// the window or element to photograph at its real size.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method)]
-sealed class SceneAttribute(string name, string reference, int x = 0, int y = 0, int width = 0, int height = 0) : Attribute
+sealed class SceneAttribute(string name) : Attribute
 {
     public string Name => name;
-    public string Reference => reference;
-    public Int32Rect Crop => new(x, y, width, height);
 }
 
 /// <summary>What a scene can use. Windows it <see cref="Own"/>s and workspaces it makes are gone when it ends.</summary>
@@ -43,7 +39,7 @@ sealed class SceneContext(string references) : IDisposable
         return workspace;
     }
 
-    /// <summary>One of the reference's mini websites (shop, blog, docs, term), 1280x800, to stand in
+    /// <summary>One of the mini websites in ui-probe/reference/sites (shop, blog, docs, term), 1280x800, to stand in
     /// for a workspace's screen. Views must take a frame from a model a scene can fill, so no
     /// scene needs a running desktop.</summary>
     public BitmapSource Site(string name)
@@ -62,9 +58,8 @@ sealed class SceneContext(string references) : IDisposable
 }
 
 /// <summary>
-/// The reference-screen harness. For every scene, in light then
-/// dark: {name}.png is the real app, {name}.compare.png is reference | app over gray | difference
-/// (red is different), and mvp-report.json gives the size error and how much differs.
+/// The screen harness. For every scene, in light then dark, {name}.png is the real app, and
+/// mvp-report.json lists each picture's size.
 /// </summary>
 static class Mvp
 {
@@ -103,18 +98,14 @@ static class Mvp
                 await context.Settle();
                 BitmapSource shot = Photograph(element, scale);
                 Save(shot, Path.Combine(folder, scene!.Name + ".png"));
-                // A scaled shot is for sharp README pictures, not for comparing with a 1x reference.
-                rows.Add(scene.Reference.Length == 0 || scale != 1
-                    ? new { scene = scene.Name, theme = name, captured = new { width = shot.PixelWidth, height = shot.PixelHeight } }
-                    : Compare(scene, name, shot, Path.Combine(references, name, scene.Reference + ".png"),
-                        Path.Combine(folder, scene.Name + ".compare.png")));
+                rows.Add(new { scene = scene.Name, theme = name, captured = new { width = shot.PixelWidth, height = shot.PixelHeight } });
             }
         }
         File.WriteAllText(Path.Combine(output, "mvp-report.json"),
             JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    /// <summary>At 96 DPI, so one DIP is one pixel and sizes compare directly with the references.
+    /// <summary>At 96 DPI, so one DIP is one pixel.
     /// A <paramref name="scale"/> above 1 keeps the DIPs and adds device pixels, which is what a
     /// 125% or 150% monitor does with the same layout (Scenes.Scaling.cs).</summary>
     internal static BitmapSource Photograph(FrameworkElement element, double scale = 1)
@@ -134,75 +125,6 @@ static class Mvp
         }
         image.Freeze();
         return image;
-    }
-
-    static object Compare(SceneAttribute scene, string theme, BitmapSource shot, string referencePath, string comparePath)
-    {
-        Int32Rect crop = scene.Crop;
-        int width = crop.Width, height = crop.Height;
-        BitmapSource reference = new FormatConvertedBitmap(new CroppedBitmap(Load(referencePath), crop), PixelFormats.Pbgra32, null, 0);
-        // The app over neutral gray, never over the reference: a capture that came out transparent
-        // must show as different, not as a perfect match. Rounded corners cost a few gray pixels.
-        var over = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        var layer = new DrawingVisual();
-        using (DrawingContext context = layer.RenderOpen())
-        {
-            context.DrawRectangle(new SolidColorBrush(Color.FromRgb(128, 128, 128)), null, new Rect(0, 0, width, height));
-            context.DrawImage(shot, new Rect(0, 0, shot.PixelWidth, shot.PixelHeight));
-        }
-        over.Render(layer);
-        byte[] expected = Pixels(reference), actual = Pixels(over);
-        var heat = new byte[expected.Length];
-        double total = 0;
-        int changed = 0;
-        for (int i = 0; i < expected.Length; i += 4)
-        {
-            int d = (Math.Abs(expected[i] - actual[i]) + Math.Abs(expected[i + 1] - actual[i + 1])
-                + Math.Abs(expected[i + 2] - actual[i + 2])) / 3;
-            total += d;
-            if (d > 24) changed++;
-            byte fade = (byte)(255 - Math.Min(255, d * 3));
-            heat[i] = fade; heat[i + 1] = fade; heat[i + 2] = 255; heat[i + 3] = 255;
-        }
-        const int gap = 16;
-        var sheet = new RenderTargetBitmap(width * 3 + gap * 2, height, 96, 96, PixelFormats.Pbgra32);
-        var page = new DrawingVisual();
-        using (DrawingContext context = page.RenderOpen())
-        {
-            context.DrawRectangle(Brushes.White, null, new Rect(0, 0, sheet.PixelWidth, height));
-            context.DrawImage(reference, new Rect(0, 0, width, height));
-            context.DrawImage(over, new Rect(width + gap, 0, width, height));
-            context.DrawImage(BitmapSource.Create(width, height, 96, 96, PixelFormats.Pbgra32, null, heat, width * 4),
-                new Rect(2 * (width + gap), 0, width, height));
-        }
-        sheet.Render(page);
-        Save(sheet, comparePath);
-        double pixels = width * height;
-        byte[] own = Pixels(shot);
-        int clear = 0;
-        for (int i = 3; i < own.Length; i += 4) if (own[i] < 250) clear++;
-        return new
-        {
-            scene = scene.Name,
-            theme,
-            reference = Path.GetFileName(referencePath),
-            crop = new { crop.X, crop.Y, crop.Width, crop.Height },
-            captured = new { width = shot.PixelWidth, height = shot.PixelHeight },
-            sizeOff = new { width = shot.PixelWidth - width, height = shot.PixelHeight - height },
-            // Mean of the per-pixel mean RGB difference, as a share of 255.
-            meanDifferencePercent = Math.Round(total / pixels / 255 * 100, 2),
-            // Share of pixels whose mean RGB difference is over 24 of 255 (about 9%).
-            pixelsOver24Percent = Math.Round(changed / pixels * 100, 2),
-            // Share of the app's own pixels that are not fully opaque (rounded corners, or a defect).
-            transparentPixelsPercent = Math.Round(clear * 100.0 / Math.Max(1, own.Length / 4), 2),
-        };
-    }
-
-    static byte[] Pixels(BitmapSource image)
-    {
-        var pixels = new byte[image.PixelWidth * image.PixelHeight * 4];
-        image.CopyPixels(pixels, image.PixelWidth * 4, 0);
-        return pixels;
     }
 
     internal static BitmapSource Load(string path)

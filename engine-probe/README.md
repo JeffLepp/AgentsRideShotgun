@@ -15,10 +15,10 @@ dotnet build engine-probe/Deskweave.EngineProbe.csproj -c Release
 Launch as a hidden desktop process, with a new absolute output directory each run:
 
 ```powershell
-$deskweaveProbeExe = (Resolve-Path -LiteralPath 'engine-probe/bin/Release/net10.0-windows/Deskweave.Probe.exe').Path
-$deskweaveProbeOutput = [IO.Path]::GetFullPath((Join-Path $PWD ('artifacts/engine-probe-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))))
-$deskweaveProbeProcess = Start-Process -FilePath $deskweaveProbeExe -ArgumentList ('"' + $deskweaveProbeOutput + '"') -WindowStyle Hidden -PassThru
-$deskweaveProbeProcess.Id
+$probeExe = (Resolve-Path -LiteralPath 'engine-probe/bin/Release/net10.0-windows/Deskweave.Probe.exe').Path
+$probeOutput = [IO.Path]::GetFullPath((Join-Path $PWD ('artifacts/engine-probe-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))))
+$probeProcess = Start-Process -FilePath $probeExe -ArgumentList ('"' + $probeOutput + '"') -WindowStyle Hidden -PassThru
+$probeProcess.Id
 ```
 
 Read `progress.log` for completed assertions and `report.json` for the final result, exact

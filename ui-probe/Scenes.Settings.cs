@@ -95,16 +95,16 @@ static class SettingsScenes
         return view;
     }
 
-    [Scene("settings-agents", "05-settings-agents", 121, 61, 1198, 784)]
+    [Scene("settings-agents")]
     static Task<FrameworkElement> Agents(SceneContext scene) => Page(scene, "agents");
 
-    [Scene("settings-accounts", "06-settings-accounts", 121, 61, 1198, 784)]
+    [Scene("settings-accounts")]
     static Task<FrameworkElement> Accounts(SceneContext scene) => Page(scene, "accounts");
 
-    [Scene("settings-storage", "15-settings-storage", 121, 61, 1198, 784)]
+    [Scene("settings-storage")]
     static Task<FrameworkElement> Storage(SceneContext scene) => Page(scene, "history");
 
-    [Scene("settings-general", "")]
+    [Scene("settings-general")]
     static Task<FrameworkElement> General(SceneContext scene) => Page(scene, "general");
 
     internal static async Task Gate()

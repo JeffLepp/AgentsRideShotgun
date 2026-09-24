@@ -1,4 +1,4 @@
-Deskweave includes the following third-party software.
+ARS includes the following third-party software.
 
 .NET Runtime, Windows Presentation Foundation (WPF) and Windows Forms
 https://github.com/dotnet/runtime  https://github.com/dotnet/wpf  https://github.com/dotnet/winforms

@@ -8,12 +8,12 @@ using Deskweave.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
 
-/// <summary>Corner window states: references 02 and 08-14. Every
+/// <summary>Corner window states. Every
 /// scene fixtures a <see cref="WorkspacePeekWindow"/> directly through its internal methods, off
 /// screen - no running desktop, no real workspace.</summary>
 static partial class CornerScenes
 {
-    [Scene("corner-working", "08-corner-working", 60, 43, 344, 215)]
+    [Scene("corner-working")]
     static async Task<FrameworkElement> Working(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
@@ -29,7 +29,7 @@ static partial class CornerScenes
 
     /// <summary>Open on my desktop over the window the pointer is on. No reference: new with the
     /// pop-out, checked by eye in both themes.</summary>
-    [Scene("corner-pop-out", "", 60, 43, 344, 215)]
+    [Scene("corner-pop-out")]
     static async Task<FrameworkElement> PopOut(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
@@ -46,7 +46,7 @@ static partial class CornerScenes
         return window.PhotographCard();
     }
 
-    [Scene("corner-finished", "09-corner-finished", 60, 43, 344, 215)]
+    [Scene("corner-finished")]
     static async Task<FrameworkElement> Finished(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
@@ -62,7 +62,7 @@ static partial class CornerScenes
         return window.PhotographCard();
     }
 
-    [Scene("corner-two", "10-corner-two", 60, 28, 344, 230)]
+    [Scene("corner-two")]
     static async Task<FrameworkElement> Two(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
@@ -77,7 +77,7 @@ static partial class CornerScenes
         return window.PhotographCard();
     }
 
-    [Scene("corner-drop", "11-corner-drop", 60, 43, 344, 215)]
+    [Scene("corner-drop")]
     static async Task<FrameworkElement> Drop(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
@@ -92,7 +92,7 @@ static partial class CornerScenes
         return window.PhotographCard();
     }
 
-    [Scene("corner-needs-you", "12-corner-needs-you", 60, 43, 344, 215)]
+    [Scene("corner-needs-you")]
     static async Task<FrameworkElement> NeedsYou(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
@@ -107,7 +107,7 @@ static partial class CornerScenes
         return window.PhotographCard();
     }
 
-    [Scene("corner-you-use-it", "13-corner-you-use-it", 60, 43, 344, 215)]
+    [Scene("corner-you-use-it")]
     static async Task<FrameworkElement> YouUseIt(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
@@ -122,7 +122,7 @@ static partial class CornerScenes
         return window.PhotographCard();
     }
 
-    [Scene("corner-grown", "02-corner-grown", 656, 361, 760, 475)]
+    [Scene("corner-grown")]
     static async Task<FrameworkElement> Grown(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());
@@ -138,7 +138,7 @@ static partial class CornerScenes
         return window.PhotographCard();
     }
 
-    [Scene("corner-paused", "14-corner-paused", 60, 43, 344, 215)]
+    [Scene("corner-paused")]
     static async Task<FrameworkElement> Paused(SceneContext scene)
     {
         var window = scene.Own(new WorkspacePeekWindow());

@@ -6,7 +6,7 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave.UiProbe;
 
 /// <summary>Settings inside the hub's card: its home and each page, at
-/// the stack's own 340 x 560. No reference image; these are for review.</summary>
+/// the stack's own 340 x 560.</summary>
 static class CardScenes
 {
     static async Task<MainWindow> Stack(SceneContext scene, HubEntry[]? recent = null, double height = 560)
@@ -77,7 +77,7 @@ static class CardScenes
 
     /// <summary>The stack with a week of made-up activity: the Today strip, the live line and the
     /// bars on Recent.</summary>
-    [Scene("card-stack-live", "")]
+    [Scene("card-stack-live")]
     static async Task<FrameworkElement> Live(SceneContext scene)
     {
         MainWindow window = await Stack(scene);
@@ -92,7 +92,7 @@ static class CardScenes
     }
 
     /// <summary>The README picture: the live stack with a fuller Recent list, a week of bars on each.</summary>
-    [Scene("card-stack-readme", "")]
+    [Scene("card-stack-readme")]
     static async Task<FrameworkElement> Readme(SceneContext scene)
     {
         (string id, string name, string age, string day, int[] week)[] recent =
@@ -115,15 +115,15 @@ static class CardScenes
         return window;
     }
 
-    [Scene("card-home", "")]
+    [Scene("card-home")]
     static Task<FrameworkElement> Home(SceneContext scene) => Page(scene, null);
 
-    [Scene("card-general", "")]
+    [Scene("card-general")]
     static Task<FrameworkElement> General(SceneContext scene) => Page(scene, "general");
 
-    [Scene("card-agents", "")]
+    [Scene("card-agents")]
     static Task<FrameworkElement> Agents(SceneContext scene) => Page(scene, "agents");
 
-    [Scene("card-history", "")]
+    [Scene("card-history")]
     static Task<FrameworkElement> History(SceneContext scene) => Page(scene, "history");
 }

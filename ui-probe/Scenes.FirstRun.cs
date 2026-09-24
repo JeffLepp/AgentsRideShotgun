@@ -8,13 +8,13 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave.UiProbe;
 
 /// <summary>
-/// First launch: reference 07. Every check here goes through the
+/// First launch. Every check here goes through the
 /// engine fields first launch, Settings and the keep-up loop all share (<see cref="Program.AgentSeams"/>),
 /// so the gate never reaches a real agent's command or the owner's own configuration.
 /// </summary>
 static class FirstRunScenes
 {
-    [Scene("first-launch", "07-first-launch", 240, 44, 520, 520)]
+    [Scene("first-launch")]
     static async Task<FrameworkElement> FirstLaunch(SceneContext scene)
     {
         using IDisposable seams = Program.AgentSeams();

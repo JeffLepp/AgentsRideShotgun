@@ -5,13 +5,13 @@ namespace Deskweave.UiProbe;
 /// <summary>Settings in the real wide window, including its title bar.</summary>
 static class WindowScenes
 {
-    [Scene("window-settings-agents", "05-settings-agents", 120, 20, 1200, 826)]
+    [Scene("window-settings-agents")]
     static Task<FrameworkElement> Agents(SceneContext scene) => Open(scene, "agents");
 
-    [Scene("window-settings-accounts", "06-settings-accounts", 120, 20, 1200, 826)]
+    [Scene("window-settings-accounts")]
     static Task<FrameworkElement> Accounts(SceneContext scene) => Open(scene, "accounts");
 
-    [Scene("window-settings-storage", "15-settings-storage", 120, 20, 1200, 826)]
+    [Scene("window-settings-storage")]
     static Task<FrameworkElement> Storage(SceneContext scene) => Open(scene, "history");
 
     static async Task<FrameworkElement> Open(SceneContext scene, string category)
