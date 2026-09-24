@@ -65,6 +65,7 @@ InstallerSwitches:
   Silent: --silent
   SilentWithProgress: --silent
 UpgradeBehavior: install
+ReleaseDate: __DATE__
 Installers:
   - Architecture: x64
     InstallerUrl: __URL__
@@ -79,21 +80,35 @@ PackageVersion: __VERSION__
 PackageLocale: en-US
 Publisher: Jefferson Kline
 PublisherUrl: https://github.com/JeffLepp
+PublisherSupportUrl: __PACKAGE_URL__/issues
+Author: Jefferson Kline
 PackageName: Deskweave
 PackageUrl: __PACKAGE_URL__
 License: MIT
-ShortDescription: Desktop workspaces for connected AI agents.
+LicenseUrl: __PACKAGE_URL__/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Jefferson Kline
+ShortDescription: Give your AI coding agent a Windows desktop of its own.
+Description: |-
+  Deskweave gives coding agents like Claude Code and Codex a second Windows desktop, so they can
+  open apps, click and test while your mouse, keyboard and windows stay yours. A small corner
+  window shows what the agent is doing. Everything runs locally.
 Moniker: deskweave
 Tags:
   - ai
+  - agent
+  - claude-code
+  - codex
+  - computer-use
   - desktop
   - mcp
+  - virtual-desktop
+ReleaseNotesUrl: __PACKAGE_URL__/releases/tag/__TAG__
 ManifestType: defaultLocale
 ManifestVersion: 1.12.0
 '@
 $versionManifest = $versionManifest.Replace('__VERSION__', $Version)
-$installerManifest = $installerManifest.Replace('__VERSION__', $Version).Replace('__URL__', $installerUrl).Replace('__HASH__', $hash)
-$localeManifest = $localeManifest.Replace('__VERSION__', $Version).Replace('__PACKAGE_URL__', $packageUrl)
+$installerManifest = $installerManifest.Replace('__VERSION__', $Version).Replace('__URL__', $installerUrl).Replace('__HASH__', $hash).Replace('__DATE__', [DateTime]::UtcNow.ToString('yyyy-MM-dd'))
+$localeManifest = $localeManifest.Replace('__VERSION__', $Version).Replace('__PACKAGE_URL__', $packageUrl).Replace('__TAG__', $ReleaseTag)
 $utf8 = [Text.UTF8Encoding]::new($false)
 [IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.Deskweave.yaml'), $versionManifest + [Environment]::NewLine, $utf8)
 [IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.Deskweave.installer.yaml'), $installerManifest + [Environment]::NewLine, $utf8)
