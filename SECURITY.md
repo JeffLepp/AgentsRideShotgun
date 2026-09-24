@@ -10,9 +10,11 @@ security prompts are handed to you rather than typed by the agent.
 
 ## How it works
 
-ARS is a native Windows app written in C# and WPF on .NET 10. Each workspace uses a Windows desktop object and a job object. Programs started through ARS tools, along with those tools' clicks and keystrokes, stay on that desktop; closing a workspace ends its owned processes. Claude Code and Codex connect through a small stdio MCP bridge that talks to the app over a local named pipe. An agent's first workspace tool call routes it to its project folder. The agent uses screenshots and Windows UI Automation, while Edge or Chrome runs with a separate workspace profile and a pipe-based browser control connection.
+ARS is a native Windows app (C#, WPF, .NET 10). Each workspace is a Windows desktop object with a job object, so programs started through ARS tools, and their clicks and keystrokes, stay on that desktop, and closing the workspace ends them. Claude Code and Codex connect through a small stdio MCP bridge that talks to the app over a local named pipe. Agents see the workspace through screenshots and UI Automation, and Edge or Chrome runs with its own workspace profile.
 
-Workspaces share your Windows account and permissions. Programs launched outside ARS tools may still open on your desktop, and your AI provider may receive screenshots or tool results.
+Workspace programs run with your account's rights and never more. ARS does not run as administrator: a copy started with Run as administrator restarts as your normal user, because programs your agent starts would otherwise get administrator rights too. With UAC turned off, every program has full rights, ARS included.
+
+Programs launched outside ARS tools may still open on your desktop, and your AI provider may receive screenshots or tool results.
 
 ## Reporting a problem
 

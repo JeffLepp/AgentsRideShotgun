@@ -52,6 +52,11 @@ static class Program
             if (args.Any(arg => arg.StartsWith("--veloapp-", StringComparison.OrdinalIgnoreCase))) return 1;
         }
 
+        if (NotElevated.Handle(args)) return 0;
+        // The installer's shortcuts carry this ID. Without it a copy started any other way (at sign-in,
+        // after an update) gets a taskbar button of its own next to a pinned ARS.
+        SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+
         var app = new App();
         app.InitializeComponent();
         return app.Run();
@@ -70,6 +75,12 @@ static class Program
         running.Dispose();
         return false;
     }
+
+    /// <summary>Velopack's shortcut ID, velopack. plus the --packId in tools/build-installer.ps1.</summary>
+    internal const string AppUserModelId = "velopack.ARSApp";
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 
     static void Cleanup(string step, Action cleanup)
     {
