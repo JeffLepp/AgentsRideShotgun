@@ -18,22 +18,22 @@ namespace Deskweave;
 internal static class SettingsFeatures
 {
     /// <summary>Accounts > Signed in: the account list with each account's scope, Add account and
-    /// Sign out - the whole Accounts category, which leaves the nav while this is off. Wave 2 slice
-    /// E, when it reads the agent browser's profile and fills <see cref="SettingsActions.Accounts"/>,
+    /// Sign out - the whole Accounts category, which leaves the nav while this is off. On once
+    /// ARS reads the agent browser's profile and fills <see cref="SettingsActions.Accounts"/>,
     /// <see cref="SettingsActions.AddAccount"/> and <see cref="SettingsActions.SignOut"/>.</summary>
     internal static bool Accounts;
 
-    /// <summary>History &amp; privacy > Screenshots > Save screenshots. Wave 2 slice F, when it
+    /// <summary>History &amp; privacy > Screenshots > Save screenshots. On once ARS
     /// writes screenshots by this setting. Storage, Clear and Delete all data already read the real
     /// evidence store, so they stay shown either way.</summary>
     internal static bool History;
 
-    /// <summary>History &amp; privacy > Storage > Agent browser: Deskweave has no reliable way to
-    /// measure the agent browser profile yet. Wave 2 slice E, alongside the account list above.</summary>
+    /// <summary>History &amp; privacy > Storage > Agent browser: ARS has no reliable way to
+    /// measure the agent browser profile yet.</summary>
     internal static bool BrowserData;
 
-    /// <summary>History &amp; privacy > Storage > Made by agents in your projects: Deskweave has no
-    /// reliable way to find a workspace's project folder yet. Wave 2 slice F.</summary>
+    /// <summary>History &amp; privacy > Storage > Made by agents in your projects: ARS has no
+    /// reliable way to find a workspace's project folder yet.</summary>
     internal static bool ProjectFiles;
 
     /// <summary>Turns every flag above on, for the length of one <c>using</c> block, and puts each
@@ -64,19 +64,19 @@ internal sealed record SettingsAccount(string Site, string Name, Color Tile)
 }
 
 /// <summary>One project workspace's own files, shown under "Made by agents in your projects"
-/// (reference 15) while <see cref="SettingsFeatures.ProjectFiles"/> is on. <see cref="Bytes"/> is
-/// null until Wave 2 can measure a real project folder; a scene supplies fixture rows instead.</summary>
+/// while <see cref="SettingsFeatures.ProjectFiles"/> is on. <see cref="Bytes"/> is
+/// null until ARS can measure a real project folder; a scene supplies fixture rows instead.</summary>
 internal sealed record ProjectStorageEntry(string Name, string Path, long? Bytes);
 
-/// <summary>One kind of data Deskweave keeps, shown as a row in the Storage group (reference 15) and
+/// <summary>One kind of data ARS keeps, shown as a row in the Storage group and
 /// a segment of its meter, in this order. <see cref="Measure"/> is null-safe: null means the size is
 /// not known yet, drawn as a placeholder dash and left out of the total and the meter. <see cref="Clear"/>
-/// is a field on <see cref="SettingsActions"/>, so the gate can swap it for a harmless stand-in.</summary>
+/// is a field on <see cref="SettingsActions"/>, so the UI probe can swap it for a harmless stand-in.</summary>
 internal sealed record StorageKind(string Label, string? Hint, string ClearNoun, Func<long?> Measure,
     Func<bool> Visible, Func<bool> CanClear, string? DisabledTooltip, Action Clear,
     string MeterBrush, double MeterOpacity);
 
-/// <summary>The Storage group's model: the four kinds Deskweave can size today, in
+/// <summary>The Storage group's model: the four kinds ARS can size today, in
 /// meter order, and the per-project rows below them.</summary>
 internal static class SettingsStorage
 {
@@ -101,8 +101,8 @@ internal static class SettingsStorage
 
 /// <summary>
 /// What Settings does outside its own view: the Run key, agent configurations, the clipboard,
-/// Explorer, deleting Deskweave's data, and measuring and clearing what it keeps. Each is a field so
-/// the UI gate can stand in for it, and nothing the gate runs reaches the owner's registry, agents,
+/// Explorer, deleting ARS's data, and measuring and clearing what it keeps. Each is a field so
+/// the UI probe can stand in for it, and nothing the probe runs reaches the owner's registry, agents,
 /// real files or a real quit.
 /// </summary>
 internal static class SettingsActions
@@ -119,7 +119,7 @@ internal static class SettingsActions
         : WorkspaceConnections.IsConnected(app) ? AgentState.Connected : AgentState.Found;
 
     /// <summary>The owner asked for this agent, by a switch here or on first launch: remember the
-    /// answer, so nothing connects one he turned off, then do it. Null, or why it could not.</summary>
+    /// answer, so nothing connects one they turned off, then do it. Null, or why it could not.</summary>
     internal static Task<string?> Connect(WorkspaceConnections.AgentApp app, bool on)
     {
         WorkspaceConnections.Remember(app, on);
@@ -140,8 +140,8 @@ internal static class SettingsActions
     internal static Action? AddAccount;
     internal static Action<SettingsAccount>? SignOut;
 
-    /// <summary>Made by agents in your projects (Wave 2 slice F fills this in with real project
-    /// folders); a scene overrides it with fixture rows.</summary>
+    /// <summary>Made by agents in your projects, empty until ARS can find real project
+    /// folders; a scene overrides it with fixture rows.</summary>
     internal static Func<IReadOnlyList<ProjectStorageEntry>> Projects = () => [];
 
     internal static Action<IReadOnlyList<string>> DeleteAllData = folders => DeleteEverything(folders, null);
@@ -152,14 +152,14 @@ internal static class SettingsActions
         && Path.GetDirectoryName(Path.GetDirectoryName(exe)) is { } root
         && File.Exists(Path.Combine(root, "Update.exe")) ? Path.Combine(root, "Update.exe") : null;
 
-    /// <summary>Delete all Deskweave data, then remove the program too. Update.exe runs the same
-    /// uninstall as Apps &amp; features, which takes Deskweave out of the agents' configs.</summary>
+    /// <summary>Delete all ARS data, then remove the program too. Update.exe runs the same
+    /// uninstall as Apps &amp; features, which takes ARS out of the agents' configs.</summary>
     internal static Action Uninstall = () => DeleteEverything(DataFolders, Uninstaller);
 
-    /// <summary>Deskweave's two data folders: local (workspaces, settings, logs) and roaming.</summary>
+    /// <summary>ARS's two data folders: local (workspaces, settings, logs) and roaming.</summary>
     internal static IReadOnlyList<string> DataFolders => [ProductContext.LocalRoot, ProductContext.RoamingRoot];
 
-    /// <summary>What another agent pastes into its MCP settings: the one Deskweave entry every
+    /// <summary>What another agent pastes into its MCP settings: the one ARS entry every
     /// workspace is reached through.</summary>
     internal static string SetupText() => JsonSerializer.Serialize(WorkspaceConnections.AppConfiguration,
         new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
@@ -180,7 +180,7 @@ internal static class SettingsActions
 
     /// <summary>Clears the screenshots and step logs kept for every workspace, but keeps their
     /// folders, so a workspace that is running goes on writing its log and screenshots where it was.
-    /// A field, so the gate can swap it for a harmless stand-in.</summary>
+    /// A field, so the UI probe can swap it for a harmless stand-in.</summary>
     internal static Action ClearHistory = ClearHistoryReal;
 
     static void ClearHistoryReal()
@@ -206,12 +206,12 @@ internal static class SettingsActions
         return files;
     }
 
-    /// <summary>Deskweave has no reliable source for the agent browser profile's size yet (Wave 2
-    /// slice E); a scene overrides this with a fixture number.</summary>
+    /// <summary>ARS has no reliable source for the agent browser profile's size yet;
+    /// a scene overrides this with a fixture number.</summary>
     internal static Func<long?> BrowserDataBytes = () => null;
 
-    /// <summary>A field, so the gate can swap it for a harmless stand-in; Wave 2 slice E fills in the
-    /// real clear once it owns the agent browser.</summary>
+    /// <summary>A field, so the UI probe can swap it for a harmless stand-in; the real clear comes once ARS
+    /// owns the agent browser.</summary>
     internal static Action ClearBrowserData = () => { };
 
     // The Scratch workspace's own folder holds its sandbox redirects (appdata, local, temp,
@@ -236,7 +236,7 @@ internal static class SettingsActions
     internal static Func<bool> ScratchRunning = () =>
         ScratchWorkspace() is { } scratch && WorkspaceRuntime.Of(scratch.Id) is not null;
 
-    /// <summary>A field, so the gate can swap it for a harmless stand-in.</summary>
+    /// <summary>A field, so the UI probe can swap it for a harmless stand-in.</summary>
     internal static Action ClearScratch = ClearScratchReal;
 
     static void ClearScratchReal()
@@ -259,7 +259,7 @@ internal static class SettingsActions
 
     internal static Func<long> LogsBytes = () => EntryBytes(ProductContext.Local("logs"));
 
-    /// <summary>A field, so the gate can swap it for a harmless stand-in.</summary>
+    /// <summary>A field, so the UI probe can swap it for a harmless stand-in.</summary>
     internal static Action ClearLogs = ClearLogsReal;
 
     static void ClearLogsReal()
@@ -291,7 +291,7 @@ internal static class SettingsActions
     }
 
     /// <summary>The recursive byte count of one file or folder. Never throws: a folder Windows will
-    /// not let Deskweave read counts as empty rather than failing the whole total.</summary>
+    /// not let ARS read counts as empty rather than failing the whole total.</summary>
     static long EntryBytes(string entry)
     {
         try
@@ -334,7 +334,7 @@ internal static class SettingsActions
     static void Remove(string folder)
     {
         if (!Directory.Exists(folder)) return;
-        // Deskweave may be installed inside its own local folder; its program files stay.
+        // ARS may be installed inside its own local folder; its program files stay.
         string? program = Environment.ProcessPath is { } exe ? Path.GetDirectoryName(exe) + Path.DirectorySeparatorChar : null;
         foreach (string entry in Directory.EnumerateFileSystemEntries(folder).ToArray())
         {

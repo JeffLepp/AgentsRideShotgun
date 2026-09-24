@@ -6,8 +6,8 @@ using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Whether a workspace browser that starts again on the same profile brings back the tabs of its
-/// last run. Found 2026-09-22: a workspace browser had gathered ten tabs over days of sessions,
-/// four of them blank. Chrome is started on a hidden workspace desktop, with two tabs, killed the
+/// last run. Without this, a workspace browser can gather tabs over days of sessions, many of
+/// them blank. Chrome is started on a hidden workspace desktop, with two tabs, killed the
 /// way a sleeping workspace kills it, then started again with the given flags; its DevTools list
 /// says what came back.
 ///

@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// What an agent's screen shows behind its windows. Full desktop (the default): the soft wall the
-/// reference mockups use, two radial glows over a base, in the app's light or dark theme, so the
+/// What an agent's screen shows behind its windows. Full desktop (the default): a soft wall,
+/// two radial glows over a base, in the app's light or dark theme, so the
 /// corner shows something that looks like a PC rather than a flat fill. Simple: the flat fill.
 /// Computed once per screen size and theme off the capture path, then copied under every whole-screen
 /// frame; there is no timer and no extra process. The owner's own wallpaper is deliberately not used: agents send
@@ -81,7 +81,7 @@ internal static class WorkspaceWall
     }
 
     /// <summary>
-    /// The mockups' <c>--a-wall</c>: a glow at 16%/18% (1100x700 at a 1440-wide screen) and one at
+    /// The wall: a glow at 16%/18% (1100x700 at a 1440-wide screen) and one at
     /// 88%/86% (900x700), each fading to nothing at 60% of its radius, over a base colour.
     /// </summary>
     internal static byte[] Pixels(int width, int height, bool dark)

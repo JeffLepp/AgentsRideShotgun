@@ -21,9 +21,8 @@ public sealed record WorkspaceElement(int Id, string Type, string Name, string A
 
 /// <summary>
 /// Layer 1 of the control plane: the controls an application publishes on the separate workspace
-/// desktop. Deskweave stays on the owner's desktop while the launched app uses the owner's normal
-/// token and file permissions. The desktop-affine UIA route was measured first on 2026-08-23; see
-/// AGENT_WORKSPACES_TECHNICAL_REPORT.md for that historical run and the current supersession.
+/// desktop. ARS stays on the owner's desktop while the launched app uses the owner's normal
+/// token and file permissions.
 ///
 /// This class is only ever layer 1. It never falls back to pixels: composing layer 1 with the frame
 /// and message path is <see cref="WorkspaceControl"/>'s job, so that the fallback is visible in one
@@ -98,7 +97,7 @@ public sealed class WorkspaceTree : IDisposable
     ];
 
     /// <summary>
-    /// What one window publishes. One window, never the whole desktop: measured 2026-08-23, every
+    /// What one window publishes. One window, never the whole desktop: measured, every
     /// tree on a four-application desktop together costs more than a picture of that desktop, and a
     /// single window's tree costs a fifth of one.
     /// </summary>
@@ -117,8 +116,7 @@ public sealed class WorkspaceTree : IDisposable
     /// <summary>
     /// Like <see cref="Read(nint, bool, string?)"/>, but also says whether the read stopped at its
     /// time budget with more of the tree left unread. A busy window used to mean CheckDeadline threw
-    /// and the agent got nothing at all - see AGENT_WORKSPACES_TECHNICAL_REPORT.md and
-    /// the app-testing friction review, item 6. What was collected before the clock ran
+    /// and the agent got nothing at all. What was collected before the clock ran
     /// out is worth more than an exception, every time.
     /// </summary>
     public IReadOnlyList<WorkspaceElement> Read(nint window, bool everything, string? nameContains, out bool partial)
@@ -280,8 +278,8 @@ public sealed class WorkspaceTree : IDisposable
         // already registered"). Choose the existing validated point route BEFORE invoking.
         // Never reinterpret a provider exception as permission to replay a possible action.
         // The same holds for a task dialog's buttons - Notepad's "Save changes?" prompt, every
-        // TaskDialog - which are comctl32's CCPushButton under a DirectUI provider (measured
-        // 2026-09-22: Invoke refused, the prompt stayed up, and an agent could not answer it).
+        // TaskDialog - which are comctl32's CCPushButton under a DirectUI provider (measured:
+        // Invoke refused, the prompt stayed up, and an agent could not answer it).
         var now = element.Current;
         if (now.ControlType == ControlType.Button && now.NativeWindowHandle != 0
             && (now.FrameworkId == "Win32" && now.ClassName == "Button"
@@ -305,7 +303,7 @@ public sealed class WorkspaceTree : IDisposable
     }));
 
     /// <summary>
-    /// Puts text into an element. Measured 2026-08-23: Notepad's document publishes Text and Scroll
+    /// Puts text into an element. Measured: Notepad's document publishes Text and Scroll
     /// and no ValuePattern, so this returns false for the commonest editor on Windows and the caller
     /// types the text through layer 2 instead. That is the normal case, not the failure case.
     /// </summary>
@@ -433,7 +431,7 @@ public sealed class WorkspaceTree : IDisposable
         // The walk stops at its own deadline and hands back what it collected, but it can only do
         // that if it is given less time than the caller waits: with one budget for both, the walk
         // returned its partial list at the same instant this thread gave up on it, and the caller
-        // lost that race and threw the list away. Measured 2026-09-21: a read of a busy window
+        // lost that race and threw the list away. Measured: a read of a busy window
         // failed with the exception below while the elements it had were sitting in a list nobody
         // read. The remaining wait is what it always was - protection against a provider call that
         // has wedged the COM thread, where there is nothing to hand back.

@@ -9,7 +9,7 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 $installerPath = [IO.Path]::GetFullPath($Installer)
 foreach ($path in @($output, $installerPath)) {
     if (-not $path.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Security-check inputs and output must stay inside this Deskweave checkout.'
+        throw 'Security-check inputs and output must stay inside this ARS checkout.'
     }
 }
 if (Test-Path -LiteralPath $output) { throw 'Use a new output folder for each security scan.' }

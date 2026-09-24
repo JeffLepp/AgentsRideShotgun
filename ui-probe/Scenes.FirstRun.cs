@@ -71,7 +71,7 @@ static class FirstRunScenes
                 Program.Check(Descendants<TextBox>(open.Window).Count() == 0 && Descendants<ComboBox>(open.Window).Count() == 0,
                     "First launch asks for no workspace, folder, account or sign-in");
                 Program.Check(Words(open.Window).Contains(FirstRunWindow.LocalLine),
-                    "First launch says Deskweave runs only on this PC");
+                    "First launch says ARS runs only on this PC");
             }
 
             // Closing it changes nothing at all, and it is not asked again.
@@ -168,7 +168,7 @@ static class FirstRunScenes
                 && WorkspaceMcp.Scope.Contains("stay in your own tools", StringComparison.Ordinal)
                 && WorkspaceMcp.RouterInstructions.Contains(WorkspaceMcp.Scope, StringComparison.Ordinal)
                 && WorkspaceMcp.RouterInstructions.Length < 2000,
-                "Connecting scopes agent GUI testing to Deskweave, preserves explicit owner desktop requests, and excludes code and builds");
+                "Connecting scopes agent GUI testing to ARS, preserves explicit owner desktop requests, and excludes code and builds");
             await Task.Delay(50);
         }
         finally

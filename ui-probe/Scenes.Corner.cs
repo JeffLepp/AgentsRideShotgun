@@ -459,7 +459,7 @@ static partial class CornerScenes
                 && !File.Exists(Path.Combine(folder, "notes (3).txt")),
                 "A drop that cannot be copied is told on the card, off the UI thread, naming the file and the workspace");
 
-            // Alerts (MVP_SPEC): with the corner off, an agent's question becomes one Windows notification.
+            // Alerts: with the corner off, an agent's question becomes one Windows notification.
             var heard = new List<(string Title, string Text, string Workspace, string Request)>();
             Action<string, string, string, string> listen = (title, text, workspace, request) => heard.Add((title, text, workspace, request));
             ModuleEntry.AttentionNeeded += listen;
@@ -492,7 +492,7 @@ static partial class CornerScenes
             }
             finally { ModuleEntry.AttentionNeeded -= listen; }
 
-            // Results out (MVP_SPEC): once an agent's run ends, the chip offers the file that run made.
+            // Results out: once an agent's run ends, the chip offers the file that run made.
             AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Always });
             InvokeHost("Driven", stored.Id, Driver.Agent);
             await Task.Delay(100);
@@ -606,7 +606,7 @@ static partial class CornerScenes
         typeof(WorkspacePeekWindow).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, args);
 
     /// <summary>
-    /// Fade timing (items 4 and 15's hover/pinned claims, and item 4's hotkey fix) against the real
+    /// Fade timing (hover, pinned, and the hotkey) against the real
     /// host and a real window - not the pure policy function WantedChecks already covers. One real
     /// fixture workspace, waiting beyond the fixed five-second fade for each timing claim.
     /// </summary>
@@ -692,7 +692,7 @@ static partial class CornerScenes
             Program.Check(!window.Watching && window.Docked && EdgeTab(window) is { IsVisible: true },
                 "Letting go of hover tucks the window into a reachable edge tab after five quiet seconds");
 
-            // Pinned stays up idle no matter how long the workspace has been quiet (item 15's "pinned stays" claim).
+            // Pinned stays up idle no matter how long the workspace has been quiet.
             InvokeHost("StirFrom", stored.Id);
             AppSettingsStore.Update(s => s with { CornerPinned = true });
             await Task.Delay(5800);
@@ -718,7 +718,7 @@ static partial class CornerScenes
             await Task.Delay(5800);
             Program.Check(!window.Watching, "The tray summon fades after five quiet seconds");
 
-            // Hidden while ModuleEntry.HubShowing, on the real host (item 15's "HubShowing hides it" claim).
+            // Hidden while ModuleEntry.HubShowing, on the real host.
             AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Always });
             await Task.Delay(300);
             Program.Check(GateWindow() is { Watching: true }, "Always keeps the real window up with a workspace running");
@@ -729,7 +729,7 @@ static partial class CornerScenes
             await Task.Delay(300);
             Program.Check(GateWindow() is { Watching: true }, "Hiding the hub again brings the real corner window back");
 
-            // Hide/dismiss (item 15): gone until the next activity, through the real Hide button's own
+            // Hide/dismiss: gone until the next activity, through the real Hide button's own
             // click handler rather than the host's internal dismissed flag set directly.
             window = GateWindow();
             InvokeWindow(window!, "HideButton_Click", null, new RoutedEventArgs());
@@ -753,8 +753,8 @@ static partial class CornerScenes
     }
 
     /// <summary>
-    /// Item 5's fix: a second Pause press hands back only the workspaces Pause itself took, never one
-    /// the owner already held before he pressed it. Driven through the real host's own hotkey handler
+    /// A second Pause press hands back only the workspaces Pause itself took, never one
+    /// the owner already held before they pressed it. Driven through the real host's own hotkey handler
     /// against two real workspaces - one already owner-driven, one free.
     /// </summary>
     static void PauseReleaseChecks()
@@ -820,7 +820,7 @@ static partial class CornerScenes
     }
 
     /// <summary>
-    /// Item 7's fix: the result chip's own file-picking method, on the real host via reflection
+    /// The result chip's own file-picking method, on the real host via reflection
     /// (there is no way to reach MissionState.Done here without a real agent process, which the gate
     /// may not run) - a file made before the run offers no chip, one made during it does.
     /// </summary>
@@ -862,7 +862,7 @@ static partial class CornerScenes
 
     /// <summary>
     /// A competing real registration makes the owner's chosen Pause shortcut unavailable. The host
-    /// keeps his choice in Settings and reports the refusal there, rather than saving a fallback over it.
+    /// keeps their choice in Settings and reports the refusal there, rather than saving a fallback over it.
     /// </summary>
     static async Task ReportShortcutsChecks()
     {
@@ -877,7 +877,7 @@ static partial class CornerScenes
             await Task.Delay(300);
             Program.Check(AppSettingsStore.Current.PauseHotkey == "Ctrl+Alt+Shift+F11"
                 && ModuleEntry.PauseShortcutTaken,
-                "When Windows refuses the owner's chosen Pause key, his choice stays saved and Settings is told it is taken");
+                "When Windows refuses the owner's chosen Pause key, their choice stays saved and Settings is told it is taken");
         }
         finally
         {

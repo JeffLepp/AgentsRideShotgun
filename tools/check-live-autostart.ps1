@@ -1,15 +1,15 @@
 param([Parameter(Mandatory)][string]$OutputDirectory)
-# Run with PowerShell 7 while Deskweave is closed and first launch is unanswered. The published
+# Run with PowerShell 7 while ARS is closed and first launch is unanswered. The published
 # bridge, pointed at the real router ticket, must start the published app in the background and
-# answer the agent; nothing may open on screen and nothing outside Deskweave's data may change.
+# answer the agent; nothing may open on screen and nothing outside ARS's data may change.
 # No model calls. Stops only the instance this check caused.
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Validation output must be inside this Deskweave checkout.'
+    throw 'Validation output must be inside this ARS checkout.'
 }
-if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before running this check.' }
+if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit ARS before running this check.' }
 $product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS'
 $settings = Join-Path $product 'settings.json'
 if ((Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).FirstRunDone) {
@@ -61,7 +61,7 @@ public delegate bool EnumProc(System.IntPtr h, System.IntPtr l);
 public static int Visible(uint pid) { int n = 0; EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid && IsWindowVisible(h)) n++; return true; }, System.IntPtr.Zero); return n; }
 public static uint Foreground() { uint p; GetWindowThreadProcessId(GetForegroundWindow(), out p); return p; }
 '@
-# Every Deskweave process seen with a visible window, and every process that held the foreground.
+# Every ARS process seen with a visible window, and every process that held the foreground.
 $script:shownBy = @(); $script:foreground = @(); $script:pids = @()
 function Watch-Screen {
     foreach ($p in @(Get-Process ARS -ErrorAction SilentlyContinue)) {
@@ -79,32 +79,32 @@ try {
     $init = Ask $bridge 1 'initialize' $hello
     $twinInit = Ask $twin 1 'initialize' $hello
     $report.coldStartSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
-    Check ($init.result.serverInfo.name -eq 'ars') "With Deskweave closed, the agent's bridge starts it and initializes ($($report.coldStartSeconds) s)"
+    Check ($init.result.serverInfo.name -eq 'ars') "With ARS closed, the agent's bridge starts it and initializes ($($report.coldStartSeconds) s)"
     Check ($report.coldStartSeconds -lt 10) 'The first answer arrives inside Codex''s default 10 s MCP startup timeout'
     Check ($twinInit.result.serverInfo.name -eq 'ars') 'A second session starting at the same moment connects too'
     $twin.StandardInput.Close()
     foreach ($i in 1..15) { Watch-Screen; Start-Sleep -Milliseconds 100 }   # keep watching while it settles
     $twin.WaitForExit(5000) | Out-Null
     $app = @(Get-Process ARS)
-    Check ($app.Count -eq 1) 'Exactly one Deskweave is running'
+    Check ($app.Count -eq 1) 'Exactly one ARS is running'
     $app = $app[0]
     $command = (Get-CimInstance Win32_Process -Filter "ProcessId = $($app.Id)").CommandLine
     Check ($command -like '*--background*') 'It was started in the background, the way Windows starts it at sign-in'
     foreach ($i in 1..10) { Watch-Screen; Start-Sleep -Milliseconds 200 }
     $report.foregroundSamples = $script:foreground.Count
-    Check ($script:shownBy.Count -eq 0 -and @($script:foreground | Where-Object { $script:pids -contains $_ }).Count -eq 0) 'From the first moment of startup, nothing opened on the owner''s screen and focus never moved to Deskweave'
+    Check ($script:shownBy.Count -eq 0 -and @($script:foreground | Where-Object { $script:pids -contains $_ }).Count -eq 0) 'From the first moment of startup, nothing opened on the owner''s screen and focus never moved to ARS'
     $status = Ask $bridge 2 'tools/call' @{ name = 'status'; arguments = @{} }
     Check ($status.result.content[0].text -like 'No workspace yet*') 'A status call answers without starting a workspace'
     $bridge.StandardInput.Close()
     Check ($bridge.WaitForExit(5000) -and $bridge.ExitCode -eq 0) 'The agent closing its end ends the bridge'
     Start-Sleep -Milliseconds 500
-    Check (-not $app.HasExited) 'Deskweave keeps running after the session that started it ends'
+    Check (-not $app.HasExited) 'ARS keeps running after the session that started it ends'
 
     $clock.Restart()
     $again = Start-Bridge
     $init = Ask $again 1 'initialize' $hello
     $report.warmStartSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 2)
-    Check ($init.result.serverInfo.name -eq 'ars' -and @(Get-Process ARS).Count -eq 1) "A second session joins the running Deskweave without starting another ($($report.warmStartSeconds) s)"
+    Check ($init.result.serverInfo.name -eq 'ars' -and @(Get-Process ARS).Count -eq 1) "A second session joins the running ARS without starting another ($($report.warmStartSeconds) s)"
     $again.StandardInput.Close(); $again.WaitForExit(5000) | Out-Null
 
     $second = Start-Process -FilePath (Join-Path $root 'out\ARS.exe') -ArgumentList '--background' -PassThru

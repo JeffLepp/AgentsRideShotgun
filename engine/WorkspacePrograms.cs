@@ -8,7 +8,7 @@ namespace Deskweave.AgentWorkspaces;
 /// <summary>
 /// Turns what an agent calls a program into something CreateProcess can start. A person opens a
 /// program by pressing Start and typing its name; an agent given only "the plain name of an
-/// installed program" could open notepad and nothing that was not on PATH. Measured 2026-09-06:
+/// installed program" could open notepad and nothing that was not on PATH. Measured:
 /// asked to open a large WPF app, the agent spent its first turns hunting for the executable and settled
 /// on reading a Start Menu shortcut by hand.
 ///
@@ -185,7 +185,7 @@ internal static class WorkspacePrograms
         return best;
     }
 
-    // Reading every Start Menu shell link over COM measured 7.4 s on this PC, and `open` blocks the
+    // Reading every Start Menu shell link over COM measured 7.4 s on a test PC, and `open` blocks the
     // agent's turn while it happens. The menu changes when something is installed, which is not
     // during a mission, so one scan is kept and reused.
     static readonly Lock Cached = new();

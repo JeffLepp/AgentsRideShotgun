@@ -16,11 +16,11 @@ $executable = Join-Path $deskweaveRoot 'out/ARS.exe'
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
 [System.IO.Directory]::CreateDirectory($output) | Out-Null
 $process = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable })
-if ($process.Count -ne 1) { throw 'Expected one running Deskweave from this private publish folder.' }
+if ($process.Count -ne 1) { throw 'Expected one running ARS from this private publish folder.' }
 $process = $process[0]
 $process.Refresh()
 $hwnd = $process.MainWindowHandle
-if ($hwnd -eq 0) { throw 'Deskweave has no visible window to inspect.' }
+if ($hwnd -eq 0) { throw 'ARS has no visible window to inspect.' }
 $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
 
 function Get-DeskControl([string]$name) {
@@ -43,20 +43,20 @@ function Save-DeskSurface([string]$name) {
     try { $captured = [DeskweaveSurfaceCapture]::PrintWindow($hwnd, $dc, 2) }
     finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
     try {
-        if (-not $captured) { throw 'Deskweave could not be captured.' }
+        if (-not $captured) { throw 'ARS could not be captured.' }
         $bitmap.Save((Join-Path $output $name), [System.Drawing.Imaging.ImageFormat]::Png)
     }
     finally { $bitmap.Dispose() }
 }
 
-$required = @('Create a workspace', 'All workspaces', 'Toggle compact monitor', 'Collapse or expand Deskweave', 'Hide Deskweave to notification area')
+$required = @('Create a workspace', 'All workspaces', 'Toggle compact monitor', 'Collapse or expand ARS', 'Hide ARS to notification area')
 $controls = foreach ($name in $required) {
     $control = Get-DeskControl $name
     [pscustomobject]@{ Name = $name; Enabled = $control.Current.IsEnabled; Bounds = $control.Current.BoundingRectangle.ToString() }
 }
 $module = $process.Modules | Where-Object { $_.ModuleName -eq 'Deskweave.AgentWorkspaces.dll' } | Select-Object -First 1
 if ($null -eq $module -or $module.FileName -ne (Join-Path $deskweaveRoot 'out/Deskweave.AgentWorkspaces.dll')) {
-    throw 'Deskweave did not load its own published engine.'
+    throw 'ARS did not load its own published engine.'
 }
 Save-DeskSurface 'live-overview.png'
 $checks = [System.Collections.Generic.List[string]]::new()
@@ -66,11 +66,11 @@ if ($ExerciseLifecycle) {
     Invoke-DeskControl 'Toggle compact monitor'
     Start-Sleep -Milliseconds 400
     Save-DeskSurface 'live-compact.png'
-    Invoke-DeskControl 'Collapse or expand Deskweave'
+    Invoke-DeskControl 'Collapse or expand ARS'
     Start-Sleep -Milliseconds 300
     Save-DeskSurface 'live-collapsed.png'
     $checks.Add('Packaged compact and collapsed modes were invoked and captured')
-    Invoke-DeskControl 'Hide Deskweave to notification area'
+    Invoke-DeskControl 'Hide ARS to notification area'
     Start-Sleep -Milliseconds 300
     if ([DeskweaveSurfaceCapture]::IsWindowVisible($hwnd) -or $process.HasExited) { throw 'Hide-to-tray did not retain a hidden live process.' }
     $checks.Add('Close hides the actual window and keeps the process alive')

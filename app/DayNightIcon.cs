@@ -11,7 +11,7 @@ namespace Deskweave;
 /// <summary>
 /// The title bar's day and night glyph, 16 DIP like the app's other icons: a sun by day, a crescent
 /// by night. Switching tucks the rays in and slides a shadow over the sun's core, so the button
-/// shows which one is on and turns into the other when clicked (owner's pick, 2026-09-22).
+/// shows which one is on and turns into the other when clicked.
 /// </summary>
 internal sealed class DayNightIcon : Canvas
 {

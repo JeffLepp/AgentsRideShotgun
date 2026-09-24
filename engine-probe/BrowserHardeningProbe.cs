@@ -5,7 +5,7 @@ using System.Text.Json;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Three review findings on the workspace browser, each checked on a hidden workspace desktop:
+/// Three guarantees of the workspace browser, each checked on a hidden workspace desktop:
 /// a url that looks like a Chrome switch stays a url on a cold start, sound from the workspace
 /// browser stays silent (it runs in its own job, which the workspace's audio sweep never reaches),
 /// and the browser's window is the browser's own even when another Chromium window from a

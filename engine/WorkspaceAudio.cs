@@ -17,7 +17,7 @@ static class WorkspaceAudio
         {
             var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
             // Render only: nothing in a workspace should be playing, and a microphone is an input
-            // the owner may still be using himself.
+            // the owner may still be using themselves.
             if (enumerator.GetDefaultAudioEndpoint(0 /* eRender */, 1 /* eMultimedia */, out IMMDevice device) != 0)
                 return 0;
 

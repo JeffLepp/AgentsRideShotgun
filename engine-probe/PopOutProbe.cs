@@ -162,7 +162,7 @@ static class PopOutProbe
             check(owner.RootElement.GetProperty("desktop").GetString() == "Default"
                 && owner.RootElement.GetProperty("label").GetString() == Spaced
                 && string.Equals(owner.RootElement.GetProperty("folder").GetString(), workspaceFolder, StringComparison.OrdinalIgnoreCase),
-                "The owner's copy runs on his own desktop with the same arguments, spaces intact, in the same folder");
+                "The owner's copy runs on their own desktop with the same arguments, spaces intact, in the same folder");
         }
         check(Until(() => said.Count > 0, 20) && said[0].Contains("stays here", StringComparison.Ordinal),
             "A copy that closes straight away on the owner's desktop leaves the workspace's copy where it was, and says so");

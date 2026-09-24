@@ -6,7 +6,7 @@ using System.Windows.Media;
 namespace Deskweave;
 
 /// <summary>
-/// An uppercase, letter-spaced group label (reference .grp, +0.07em). WPF has no letter-spacing
+/// An uppercase, letter-spaced group label (+0.07em). WPF has no letter-spacing
 /// property; this draws each glyph on its own with the gap added between them, rather than faking
 /// it with plain spaces.
 /// </summary>

@@ -159,7 +159,7 @@ static class HubScenes
             Program.Check(!VisibleWords(window).Contains("asleep", StringComparison.OrdinalIgnoreCase),
                 "No visible word, tooltip or accessible name in the stack says asleep");
 
-            // --- fix list item 9: the relative-age refresh runs only while the window is visible ---
+            // --- the relative-age refresh runs only while the window is visible ---
             Program.Check(window.Hub.AgingActive, "The relative-age refresh timer runs while the hub window is visible");
             window.Hide();
             await Task.Delay(100);
@@ -219,7 +219,7 @@ static class HubScenes
             Program.Check(raised && window.SelectedWorkspaceId == recentOne.Id,
                 "The corner window's open-in-hub opens that workspace in the wide window");
 
-            // --- brief A.3: opening a recent workspace starts nothing; its More menu is exactly
+            // --- opening a recent workspace starts nothing; its More menu is exactly
             // Rename, Delete (Stop/Start computer and Who can use it are gone) -------------------
             WorkspaceFullView moreView = window.OpenWorkspaceView!;
             Program.Check(WorkspaceRuntime.Of(recentOne.Id) is null,
@@ -234,7 +234,7 @@ static class HubScenes
             Program.Check(WorkspaceRuntime.Of(recentOne.Id) is null,
                 "...and the More menu itself never starts that workspace's computer");
 
-            // --- fix list item 6: store/attention events off the UI thread; dispose vs a queued refresh
+            // --- store/attention events off the UI thread; dispose vs a queued refresh
             Exception? crossThreadFailure = null;
             StoredWorkspace? bgWorkspace = null;
             await Task.Run(() =>
@@ -267,7 +267,7 @@ static class HubScenes
         }
         finally { window.Close(); }
 
-        // --- fix list item 4: preview loop rules, on a fresh window with fixture working cards -----
+        // --- preview loop rules, on a fresh window with fixture working cards -----
         var previewWindow = new MainWindow { ShowActivated = false, Left = TestScreen.Work.Left + 20, Top = TestScreen.Work.Top + 20 };
         try
         {
@@ -316,7 +316,7 @@ static class HubScenes
             await Task.Delay(300);
             Program.Check(previewWindow.PreviewLoopRunning, "...and returning from Settings to the stack starts it again");
 
-            // Not a fixed second any more: the loop slows to 2.5x on battery rather than stopping,
+            // Not a fixed second: the loop slows to 2.5x on battery rather than stopping,
             // so a probe run on an unplugged laptop reads 2.5s and is just as right.
             Program.Check(previewWindow.PreviewLoopInterval == HubPreview.Interval(),
                 "The stack picks the preview interval the power state calls for");
@@ -355,7 +355,7 @@ static class HubScenes
     }
 
     /// <summary>
-    /// Fix list item 2 (a running workspace cannot be seen, stopped, or understood): a running
+    /// A running workspace can be seen, stopped and understood: a running
     /// workspace nobody is using reads as idle rather than the same dot as one mid-task; the Sleep
     /// control stops it in one click and the hub moves it to Recent; a sleeping workspace shows its
     /// last picture dimmed, built on the existing Last seen pill, and takes no further captures; and
@@ -422,10 +422,10 @@ static class HubScenes
             await Task.Delay(300);
             WorkspaceFullView drivenView = window.OpenWorkspaceView!;
             Program.Check(drivenView.ControlToast.Visibility == Visibility.Collapsed,
-                "Nothing claims the owner has control before he has taken it");
+                "Nothing claims the owner has control before they have taken it");
             drivenView.ScreenInput!.SimulateClickForTests();
             Program.Check(drivenView.ControlToast.Visibility == Visibility.Visible && drivenRuntime.Plane!.Driving == Driver.Owner,
-                "Pressing the live picture shows he has control the moment he takes it");
+                "Pressing the live picture shows they have control the moment they take it");
             Program.Check(
                 drivenView.ControlToastText.Text.Contains(((int)WorkspaceScreenInput.LeaveDelay.TotalSeconds).ToString())
                 && drivenView.ControlToastText.Text.Contains(((int)WorkspaceScreenInput.StayDelay.TotalSeconds).ToString()),
@@ -497,7 +497,7 @@ static class HubScenes
                 && QuitQuestion.QuitLabel == "Quit" && QuitQuestion.CancelLabel == "Cancel",
                 "The quit question uses plain words and Quit/Cancel buttons");
             QuitQuestion.ConfirmForTests = () => false;
-            Program.Check(!QuitQuestion.Ask(null), "Cancel keeps Deskweave running");
+            Program.Check(!QuitQuestion.Ask(null), "Cancel keeps ARS running");
             QuitQuestion.ConfirmForTests = () => true;
             Program.Check(QuitQuestion.Ask(null), "Quit accepts the confirmation");
         }

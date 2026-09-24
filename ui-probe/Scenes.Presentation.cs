@@ -43,7 +43,7 @@ internal static class PresentationScenes
             Monitor = secondary, WorkArea = secondaryWork }]).Length == 2
             && WorkspacePresentation.VisibleFullscreenMonitors([game with { NormalMaximized = true }]).Length == 0
             && WorkspacePresentation.VisibleFullscreenMonitors([game with { OwnProcess = true }]).Length == 0,
-            "Both fullscreen monitors are protected, while normal maximized and Deskweave windows do not create suppression");
+            "Both fullscreen monitors are protected, while normal maximized and ARS windows do not create suppression");
         bool Wanted(bool explicitRequest, bool dismissed = false) => WorkspacePeekPolicy.Wanted(CornerShow.Always,
             true, false, dismissed, explicitRequest, true, true, true, TimeSpan.Zero, TimeSpan.FromSeconds(5),
             presentation: true, explicitlyRequested: explicitRequest);

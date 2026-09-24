@@ -1,4 +1,4 @@
-# Deskweave engine probe
+# ARS engine probe
 
 This desktop executable exercises the engine and its packaged MCP bridge with two
 disposable workspaces. It does not call a model, write provider configuration, inject global

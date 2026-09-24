@@ -38,7 +38,7 @@ internal static class WorkspaceConnections
 
     internal enum AgentApp { ClaudeCode, Codex }
 
-    /// <summary>The agent apps Deskweave connects by itself, in the order first launch lists them.</summary>
+    /// <summary>The agent apps ARS connects by itself, in the order first launch lists them.</summary>
     internal static readonly AgentApp[] Supported = Enum.GetValues<AgentApp>();
 
     internal static string DisplayName(AgentApp app) => app == AgentApp.ClaudeCode ? "Claude Code" : "Codex";
@@ -116,17 +116,17 @@ internal static class WorkspaceConnections
 
     internal static bool IsInstalled(AgentApp app) => Locate(app) is not null;
 
-    /// <summary>Whether the app's own configuration has a working Deskweave entry in it. A field for
+    /// <summary>Whether the app's own configuration has a working ARS entry in it. A field for
     /// the same reason <see cref="Locate"/> is one: first launch, Settings and <see cref="KeepUp"/> all
     /// read through it, so a probe answers for every one of them at once. Only the intended
     /// profiles' own files can establish a connection; a wrapper's other root cannot vouch for it.</summary>
     internal static Func<AgentApp, bool> IsConnected = app => ProfileCounts(app) is var counts && counts.Total > 0 && counts.Connected == counts.Total;
 
-    /// <summary>Whether the app's configuration has anything under Deskweave's name, working or not.</summary>
+    /// <summary>Whether the app's configuration has anything under ARS's name, working or not.</summary>
     internal static bool HasEntry(AgentApp app) => Profiles(app).Any(profile => ReadEntry(profile) != Entry.None);
 
     /// <summary>
-    /// What an agent app's configuration holds under Deskweave's name. Stale is an entry that runs
+    /// What an agent app's configuration holds under ARS's name. Stale is an entry that runs
     /// some other bridge or ticket: an older install, a moved folder, a test build. Counting one as
     /// connected left the agent pointed at a pipe nobody serves, with nothing ever replacing it.
     /// </summary>
@@ -180,7 +180,7 @@ internal static class WorkspaceConnections
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { return Entry.Unreadable; }
     }
 
-    /// <summary>Whether an entry runs this Deskweave's bridge against its one router ticket.</summary>
+    /// <summary>Whether an entry runs this ARS's bridge against its one router ticket.</summary>
     static bool Runs(string? command, IReadOnlyList<string> args) =>
         command is not null && SamePath(command, Bridge) && args.Count == 2 && args[0] == "--workspace"
         && SamePath(args[1], WorkspaceAccessStore.RouterTicket);
@@ -234,7 +234,7 @@ internal static class WorkspaceConnections
     }
 
     /// <summary>
-    /// Adds or removes Deskweave in one agent app's configuration, through that app's own command.
+    /// Adds or removes ARS in one agent app's configuration, through that app's own command.
     /// Returns why it could not, or null. The one call that writes an agent's configuration, and a
     /// field so a probe stands in for every caller at once: first launch, Settings and the keep-up
     /// loop all come through here. No model runs and nothing else in the configuration moves.
@@ -304,7 +304,7 @@ internal static class WorkspaceConnections
     {
         string name = DisplayName(profile.App) + " (" + profile.Name + ")";
         string[] scope = profile.App == AgentApp.ClaudeCode ? ["--scope", "user"] : [];
-        // Replace, never duplicate: an entry from an older Deskweave, working or stale, comes out first.
+        // Replace, never duplicate: an entry from an older ARS, working or stale, comes out first.
         // A stale one left in place would make the add below refuse the name.
         Entry entry = ReadEntry(profile);
         if (entry == Entry.Unreadable) return $"{name} configuration could not be read. No change was requested.";
@@ -354,7 +354,7 @@ internal static class WorkspaceConnections
     /// <summary>
     /// The owner's answer for one agent, from a switch on first launch or in Settings. Off is what
     /// is kept: everything supported is connected once Start was pressed, so the only thing worth
-    /// remembering is an agent he said no to, and nothing connects that one behind his back.
+    /// remembering is an agent they said no to, and nothing connects that one behind their back.
     /// </summary>
     internal static void Remember(AgentApp app, bool on) => AppSettingsStore.Update(s => s with
     {
@@ -376,7 +376,7 @@ internal static class WorkspaceConnections
 
     /// <summary>
     /// The owner pressed Start once, so an agent installed later is connected without being asked
-    /// again (MVP_SPEC, Behavior). Keeps its inexpensive ten-minute check after existing profiles
+    /// again. Keeps its inexpensive ten-minute check after existing profiles
     /// are connected, so another local profile created later is found too. Off the UI thread.
     /// Does nothing without consent, and never touches an agent the owner turned off.
     /// </summary>
@@ -508,10 +508,10 @@ internal static class WorkspaceConnections
     /// Where an agent's command is, looked for once. <see cref="IsInstalled"/> is read while a
     /// window is being built - first launch's card, and twice over on every Settings render - and
     /// the answer walks PATH, the registry and a list of folders, so it is paid for one time. A
-    /// command that was found does not move while Deskweave is running.
+    /// command that was found does not move while ARS is running.
     ///
     /// Finding nothing is remembered only briefly, for the reason <see cref="WorkspaceBrowser"/>
-    /// forgets a missing browser: Deskweave starts with Windows and sits in the tray while the
+    /// forgets a missing browser: ARS starts with Windows and sits in the tray while the
     /// owner installs an agent, and the keep-up loop is waiting for exactly that agent.
     /// </summary>
     static string? Discover(AgentApp app)
@@ -535,12 +535,12 @@ internal static class WorkspaceConnections
     }
 
     /// <summary>
-    /// Claude Code's own command. Until 2026-09-19 this was four hardcoded paths and no PATH lookup
-    /// at all, so a Node under nvm-windows, fnm or Volta, anyone who had run `npm config set
-    /// prefix`, a machine-wide install, and the winget, scoop and chocolatey shims were every one of
-    /// them told "No supported agent found on this PC" - with no override anywhere in Settings, so
-    /// the product did nothing for them. The four paths are still asked, last, so no PC this already
-    /// found is worse off.
+    /// Claude Code's own command. Four hardcoded paths and no PATH lookup would miss a Node under
+    /// nvm-windows, fnm or Volta, anyone who had run `npm config set prefix`, a machine-wide
+    /// install, and the winget, scoop and chocolatey shims, and every one of them would be told
+    /// "No supported agent found on this PC" - with no override anywhere in Settings, so the
+    /// product would do nothing for them. The four paths are still asked, last, so no PC they
+    /// cover is worse off.
     /// </summary>
     static string? FindClaude()
     {
@@ -587,7 +587,7 @@ internal static class WorkspaceConnections
     /// global prefix, and the shim folders winget, scoop, chocolatey, Volta, pnpm, Yarn and Bun
     /// keep, beside where the agents' own installers put a command.
     ///
-    /// PATH as it is now is read here too. Deskweave starts with Windows and stays in the tray, so
+    /// PATH as it is now is read here too. ARS starts with Windows and stays in the tray, so
     /// an agent installed during the session put its folder on a PATH this process will never be
     /// handed; the registry is where that installer actually wrote it.
     /// </summary>
@@ -615,7 +615,7 @@ internal static class WorkspaceConnections
 
     /// <summary>
     /// Where npm puts a global command: its per-user default, a machine-wide Node's own folder, and
-    /// the prefix the owner set for himself, which covers `npm config set prefix` and what
+    /// the prefix the owner set for themselves, which covers `npm config set prefix` and what
     /// nvm-windows, fnm and Volta leave behind. Read from the environment and ~/.npmrc, never by
     /// running npm, because this is answered while a window is being built.
     /// </summary>

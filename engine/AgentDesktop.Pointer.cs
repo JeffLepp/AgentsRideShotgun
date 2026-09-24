@@ -5,7 +5,7 @@ enum FrameGrip { None, Move, Left, Right, Top, Bottom, TopLeft, TopRight, Bottom
 
 public sealed partial class AgentDesktop
 {
-    // One gesture at a time: there is one owner and he has one pointer. An agent's own input goes
+    // One gesture at a time: there is one owner and they have one pointer. An agent's own input goes
     // through Click, DoubleClick and Pointer, which complete inside a single call and never touch
     // any of this.
     nint _gestureWindow;          // the window the press landed on, kept for the whole gesture
@@ -93,7 +93,7 @@ public sealed partial class AgentDesktop
     /// <summary>
     /// The owner's pointer moved. Mid-gesture it goes to the window that took the press, the way a
     /// real capture does; otherwise it is a hover, which is what makes a button, a menu or a tab
-    /// light up under the pointer and is how the owner can tell what he is about to press on a
+    /// light up under the pointer and is how the owner can tell what they are about to press on a
     /// desktop drawn a few hundred pixels wide.
     /// </summary>
     public bool PointerMove(int x, int y, long lease = 0) => Run(() =>
@@ -204,7 +204,7 @@ public sealed partial class AgentDesktop
     internal bool FrameHeld => _grip != FrameGrip.None;
 
     /// <summary>The window the owner is dragging by its title bar right now, or 0. Read by the view
-    /// while a drag is under way, to tell when he has pulled it off the picture altogether.</summary>
+    /// while a drag is under way, to tell when they have pulled it off the picture altogether.</summary>
     internal nint MovingWindow => _grip == FrameGrip.Move ? _gestureRoot : 0;
 
     /// <summary>Where that window was, and where on the screen the owner took hold of it.</summary>

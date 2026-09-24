@@ -108,7 +108,7 @@ public sealed partial class WorkspaceControl : IDisposable
     /// <summary>
     /// The owner takes the workspace. Instant: it never waits for an agent action to finish, and
     /// input the agent had already queued is dropped on the desktop pump rather than landing under
-    /// his hands.
+    /// their hands.
     /// </summary>
     public void OwnerTakes()
     {
@@ -229,7 +229,7 @@ public sealed partial class WorkspaceControl : IDisposable
     public IReadOnlyList<AgentWindow> Windows() => _desktop.Windows();
 
     /// <summary>
-    /// Layer 1. One window's controls. Deliberately not the whole desktop: measured 2026-08-23, all
+    /// Layer 1. One window's controls. Deliberately not the whole desktop: measured, all
     /// the trees on a four-application desktop together cost more than a picture of that desktop.
     /// </summary>
     public IReadOnlyList<WorkspaceElement> Elements(nint window, bool everything = false)
@@ -289,7 +289,7 @@ public sealed partial class WorkspaceControl : IDisposable
     /// The workspace screen, or the last one it had. A capture is bounded now, so it can come back
     /// with nothing when an application has stopped pumping. Handing back null in that case would
     /// blank the panel and tell an agent the workspace was empty, which is false; the last picture
-    /// with an honest stale label is the truthful answer and the owner's chosen one.
+    /// with an honest stale label is the truthful answer.
     /// </summary>
     BitmapSource? Screen(bool record = true)
     {
@@ -393,7 +393,7 @@ public sealed partial class WorkspaceControl : IDisposable
     }
 
     /// <summary>
-    /// Puts text into an element. Measured 2026-08-23: Notepad's document publishes no way to be
+    /// Puts text into an element. Measured: Notepad's document publishes no way to be
     /// written to, so this focuses it through the tree and types through layer 2. That is the
     /// ordinary case on Windows, not the exception.
     /// </summary>
@@ -626,14 +626,14 @@ public sealed partial class WorkspaceControl : IDisposable
     /// the owner's session: a second launch hands its command line to the copy already running and
     /// exits within milliseconds. From in here that is indistinguishable from a program that
     /// started and crashed, and an agent told only "it exited" goes looking for a bug in the
-    /// application. Measured 2026-09-07: asked to open a large WPF app while the owner's was running, the
+    /// application. Measured: asked to open a large WPF app while the owner's was running, the
     /// agent spent its whole mission on that theory and reported the app as broken.
     /// </summary>
     /// <summary>
-    /// The owner's one click when a copy of the program he is testing is already running on his own
-    /// desktop: his copy is asked to close, and the program then starts in this workspace, which is
+    /// The owner's one click when a copy of the program they are testing is already running on their own
+    /// desktop: their copy is asked to close, and the program then starts in this workspace, which is
     /// the only way a one-copy-per-session application can be driven in here at all. Nothing closes
-    /// until he clicks - this runs from the approval, never from the agent's call. Null when the
+    /// until they click - this runs from the approval, never from the agent's call. Null when the
     /// workspace has it; one sentence when it does not.
     /// </summary>
     public string? TakeOver(string program, string? arguments)
@@ -665,7 +665,7 @@ public sealed partial class WorkspaceControl : IDisposable
         finally { foreach (Process other in running) other.Dispose(); }
         // This runs on the owner's click, so it is deliberately short: an application that has
         // nothing to ask about is gone in a few hundred milliseconds, and one that is still up
-        // after three seconds is showing him a dialog, which is his to answer, not ours to wait on.
+        // after three seconds is showing them a dialog, which is theirs to answer, not ours to wait on.
         for (int waited = 0; waited < 3000; waited += 100)
         {
             if (RunningOutside(exe) is null) return true;
@@ -695,7 +695,7 @@ public sealed partial class WorkspaceControl : IDisposable
                 // on where it was installed, so a copy running from another folder takes the launch
                 // just the same. The same file is the certain answer and is taken first; a different
                 // one is still reported, with its path, because the owner has to be told which copy
-                // he is actually looking at.
+                // they are actually looking at.
                 if (file.Length > 0 && file.Equals(exe, StringComparison.OrdinalIgnoreCase))
                     return new WorkspaceCopy(other.Id, file, true);
                 elsewhere ??= new WorkspaceCopy(other.Id, file, false);
@@ -720,10 +720,10 @@ public sealed partial class WorkspaceControl : IDisposable
 
     /// <summary>
     /// May the agent act, and on which ticket. The ticket is taken once, here, and carried through
-    /// the whole action. Re-reading it later is the bug Milestone 4's exit gate found: the owner can
+    /// the whole action. Re-reading it later is a bug: the owner can
     /// take the workspace between the check and the message, <see cref="Ticket"/> then answers zero,
     /// and zero means "the owner's own input, never discard it" - so the agent's action landed under
-    /// his hands, which is the one thing the lease exists to prevent.
+    /// their hands, which is the one thing the lease exists to prevent.
     /// </summary>
     bool Allowed(string action, string detail, out long ticket)
     {
@@ -832,7 +832,7 @@ public sealed partial class WorkspaceControl : IDisposable
         try
         {
             if (_disposed || _browser is not null) return;
-            // Warm only a browser this workspace actually uses. Measured 2026-09-20: waking a
+            // Warm only a browser this workspace actually uses. Measured: waking a
             // workspace started Chrome every time, even for one that had never browsed, and that
             // was the largest single part of the ~6s wake - paid for a browser nobody opens. The
             // first browse still starts one lazily and leaves the mark, so the next wake warms it.
@@ -903,8 +903,8 @@ public sealed partial class WorkspaceControl : IDisposable
     /// <summary>The workspace browser's own process, whose windows are pages; 0 while there is none.</summary>
     internal int BrowserProcessId => _browser is { Alive: true } browser ? browser.ProcessId : 0;
 
-    // What the owner did that an agent would otherwise find out by surprise - he took one of its
-    // windows out onto his own desktop - handed to each connected agent with its next tool reply.
+    // What the owner did that an agent would otherwise find out by surprise - they took one of its
+    // windows out onto their own desktop - handed to each connected agent with its next tool reply.
     readonly List<(long Number, string Text)> _notes = [];
     long _lastNote;
 

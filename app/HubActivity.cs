@@ -16,7 +16,7 @@ internal sealed record WorkspaceActivity(IReadOnlyList<int> Week, int Commands, 
 }
 
 /// <summary>
-/// The hub's live line, Today strip and activity bars (owner's pick, 2026-09-22), all read from the
+/// The hub's live line, Today strip and activity bars, all read from the
 /// action log every workspace already keeps (engine/WorkspaceEvidence.cs, evidence/actions.log:
 /// UTC time, action, detail, outcome, tab separated). Each log is read once and then only its new
 /// lines, so a glance every couple of seconds costs a stat call per workspace. Nothing new is

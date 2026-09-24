@@ -7,7 +7,7 @@
     <RootNamespace>Deskweave.Product</RootNamespace>
     <AssemblyName>Deskweave.ProductContext</AssemblyName>
     <AssemblyTitle>Deskweave product context</AssemblyTitle>
-    <Description>Process-local product data roots shared by Deskweave app engines.</Description>
+    <Description>Process-local product data roots shared by ARS app engines.</Description>
   </PropertyGroup>
 
 </Project>

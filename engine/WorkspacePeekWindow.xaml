@@ -139,7 +139,7 @@
                                Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeDashArray="4,3"/>
                     <!-- On its own accent pill: the overlay is see-through, and the page under it is the
                          agent's, light or dark whatever the app's theme - dark ink on a white page was
-                         fine and white ink on it all but vanished (2026-09-22). -->
+                         fine and white ink on it all but vanished. -->
                     <Border HorizontalAlignment="Center" VerticalAlignment="Center" CornerRadius="8" Padding="12,6"
                             Background="{DynamicResource AccentBrush}">
                         <TextBlock x:Name="DropText" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource OnAccentBrush}"/>
@@ -155,7 +155,7 @@
                         MouseWheel="MoveBar_MouseWheel" MouseEnter="MoveBar_MouseEnter"
                         LostMouseCapture="MoveBar_LostMouseCapture"/>
 
-                <!-- Open on my desktop: over the workspace window under the pointer, when Deskweave can
+                <!-- Open on my desktop: over the workspace window under the pointer, when ARS can
                      start that window again on the owner's own desktop. Dragging the window's title
                      bar off the card does the same. -->
                 <Button x:Name="PopOutButton" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top"
@@ -258,7 +258,7 @@
                     </StackPanel>
                 </Border>
 
-                <!-- The one fixed color the reference itself fixes: the dark toast, both themes. -->
+                <!-- The one fixed color: the dark toast, both themes. -->
                 <Border x:Name="Toast" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom"
                         Margin="0,0,0,10" Background="#15181D" CornerRadius="7" Padding="10,4">
                     <StackPanel Orientation="Horizontal">

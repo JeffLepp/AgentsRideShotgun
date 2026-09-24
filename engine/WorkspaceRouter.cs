@@ -191,7 +191,7 @@ public static class WorkspaceHome
 }
 
 /// <summary>
-/// One MCP connection for every outside agent. An agent app is connected once, and Deskweave picks
+/// One MCP connection for every outside agent. An agent app is connected once, and ARS picks
 /// the workspace the first time its agent uses one: never on connect, because every session of a
 /// connected agent connects and most of them never open a window.
 /// </summary>
@@ -222,7 +222,7 @@ internal sealed class WorkspaceRouter : IDisposable
     /// Keeps the router's ticket, and each running workspace's, naming a pipe that answers for as long
     /// as the app is open. Runs at start and whenever something in the ticket folder changes; only
     /// while a write keeps failing does it try again on a clock. A ticket that went missing while
-    /// the app was open used to stay missing, and every agent was told Deskweave was not running.
+    /// the app was open used to stay missing, and every agent was told ARS was not running.
     /// </summary>
     void Keep()
     {
@@ -287,7 +287,7 @@ internal sealed class WorkspaceRouter : IDisposable
     internal static void Start()
     {
         if (_current is not null) return;
-        // A Deskweave that crashed or was killed left tickets naming pipes nobody serves.
+        // An ARS that crashed or was killed left tickets naming pipes nobody serves.
         WorkspaceAccessStore.SweepStale();
         try { _current = new WorkspaceRouter(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
@@ -463,7 +463,7 @@ internal sealed class WorkspaceRouter : IDisposable
         {
             Dispatcher? ui = Application.Current?.Dispatcher;
             if (ui is null || ui.HasShutdownStarted) return (null, "ARS is closing.");
-            // A full PC is a wait, not a failure (MVP_SPEC, Sleep): under the 60-second tool timeout.
+            // A full PC is a wait, not a failure: under the 60-second tool timeout.
             (WorkspaceRuntime? runtime, string? why) = (null, null);
             for (long until = Environment.TickCount64 + 45_000; ; await Task.Delay(1500, cancel).ConfigureAwait(false))
             {

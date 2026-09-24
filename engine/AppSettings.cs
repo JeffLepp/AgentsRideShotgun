@@ -15,8 +15,8 @@ public enum ScreenshotMode { KeySteps, Continuous, Off }
 public enum PreviewSmoothness { Balanced, BatterySaver }
 
 /// <summary>
-/// Every choice in Settings, with the defaults the design spec gives it.
-/// One file for the whole app, owned by the owner: it sits in Deskweave's own local
+/// Every choice in Settings, with its default.
+/// One file for the whole app, owned by the owner: it sits in ARS's own local
 /// folder, never in a workspace folder an agent can write to. Per-workspace records keep their
 /// own values; these are the app's behavior and the defaults new workspaces start from.
 /// </summary>
@@ -27,12 +27,12 @@ public sealed record AppSettings
     // General
     public bool StartWithWindows { get; init; } = true;
     public ThemeChoice Theme { get; init; } = ThemeChoice.FollowWindows;
-    // Check for updates and Send crash reports arrive with a release channel (MVP_SPEC, out of scope).
+    // Check for updates and Send crash reports arrive with a release channel.
     /// <summary>The first-launch window was answered, by Start or by closing it. It is never shown again.</summary>
     public bool FirstRunDone { get; init; }
 
     /// <summary>
-    /// Start was pressed on first launch. It is the owner's consent to write Deskweave into an
+    /// Start was pressed on first launch. It is the owner's consent to write ARS into an
     /// agent's own configuration, and it keeps: a supported agent installed later is connected
     /// without asking again. Closing first launch leaves it false and nothing is ever written.
     /// </summary>
@@ -57,7 +57,7 @@ public sealed record AppSettings
     // Corner window
     public CornerShow CornerShow { get; init; } = CornerShow.ComesAndGoes;
     public bool CornerPinned { get; init; }
-    /// <summary>Where the owner left it and how wide he grew it, in DIPs. Null until he moves or
+    /// <summary>Where the owner left it and how wide they grew it, in DIPs. Null until they move or
     /// resizes it.</summary>
     public double? CornerLeft { get; init; }
     public double? CornerTop { get; init; }
@@ -170,7 +170,7 @@ public static class AppSettingsStore
             if (!System.IO.File.Exists(File)) return new AppSettings().Sane();
             if (new FileInfo(File).Length > MaxBytes) return Unusable();
             AppSettings? read = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(File), Json);
-            // A newer Deskweave's file is the owner's choices in a shape this build does not know.
+            // A newer ARS's file is the owner's choices in a shape this build does not know.
             // Kept aside like an unusable one, so going back to that build can put them back.
             if (read is { Schema: > 1 }) return Unusable("settings.newer.json");
             return read is { Schema: 1 } ? read.Sane() : new AppSettings().Sane();

@@ -84,7 +84,7 @@ public partial class App : Application
 
     /// <summary>
     /// Setup connects agents, then opens the hub either way, so a fresh install shows where
-    /// Deskweave lives instead of vanishing into the tray.
+    /// ARS lives instead of vanishing into the tray.
     /// </summary>
     void ShowFirstRun(MainWindow hub)
     {
@@ -110,11 +110,11 @@ public partial class App : Application
     static string UserKey() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
         Environment.UserDomainName + "\\" + Environment.UserName)))[..20];
 
-    /// <summary>The one-per-account lock a running Deskweave holds.</summary>
+    /// <summary>The one-per-account lock a running ARS holds.</summary>
     internal static string InstanceName => InstancePrefix + UserKey();
 
     /// <summary>
-    /// Takes the one-per-account lock. A Deskweave already running is shown, unless this is a
+    /// Takes the one-per-account lock. An ARS already running is shown, unless this is a
     /// background start (Windows at sign-in, or an agent's bridge) that only wanted it running, and
     /// this launch ends. One that is quitting has stopped listening but keeps the lock until its
     /// cleanup is done, so the launch waits a moment for it and then starts normally.
@@ -236,7 +236,7 @@ public partial class App : Application
 
     /// <summary>
     /// Raises Exit with the one-per-account lock still held. "Delete all data" and Uninstall remove
-    /// the data folders there, and a launch or an agent's bridge must not start a new Deskweave
+    /// the data folders there, and a launch or an agent's bridge must not start a new ARS
     /// into a folder being deleted.
     /// </summary>
     internal static void ExitHoldingInstance(Action raiseExit, Mutex? instance, bool owns)
@@ -299,7 +299,7 @@ internal static class QuitQuestion
 /// The app's one way to ask before something that cannot be taken back: the app's own font, colours
 /// and buttons, in its theme down to the title bar. Deleting a workspace used the Windows message
 /// box instead - grey system chrome, Yes/No and a warning sign - in the middle of an app that
-/// otherwise never shows one (2026-09-22).
+/// otherwise never shows one.
 /// </summary>
 internal static class Question
 {

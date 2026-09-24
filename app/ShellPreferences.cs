@@ -124,7 +124,7 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
     /// <summary>
     /// The home monitor's work area in native pixels and its device name. Screen.PrimaryScreen is
     /// nullable and is null on a session with no display and on some RDP and headless paths, where
-    /// dereferencing it threw inside window construction and the owner got "Deskweave couldn't open."
+    /// dereferencing it threw inside window construction and the owner got "ARS couldn't open."
     /// with a null-reference message. Screen has no public constructor and AllScreens can be empty,
     /// so there is no Screen to fall back to: the work area comes from WPF instead, with an empty
     /// device name - the lookup in <see cref="Restore"/> already falls through when nothing matches.
@@ -140,7 +140,7 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
             string.Empty);
     }
 
-    /// <summary>Where the reference puts the stack by default: 24 from the top and right of the
+    /// <summary>Where the stack goes by default: 24 from the top and right of the
     /// primary monitor's work area, 340 wide, the work area's height minus 48.</summary>
     internal static ShellPlacement DefaultStack()
     {

@@ -1,5 +1,5 @@
 # Read-only host observation shared by validation scripts. This deliberately does not load
-# Deskweave's implementation: a live check must independently establish why UI should be quiet.
+# ARS's implementation: a live check must independently establish why UI should be quiet.
 if (-not ('DeskweaveValidationPresentation' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;

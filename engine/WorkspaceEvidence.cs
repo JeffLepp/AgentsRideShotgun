@@ -11,7 +11,7 @@ namespace Deskweave.AgentWorkspaces;
 /// workspace deletes its evidence and nothing outside the folder is ever written.
 ///
 /// The log is text and is never dropped. Frames are capped at 1 GB per workspace, oldest first,
-/// which is the owner's decision of 2026-08-22, and kept 7 days (MVP_SPEC, History). Settings >
+/// and kept 7 days. Settings >
 /// History &amp; privacy > Save screenshots Off keeps the log and no frames.
 /// </summary>
 public sealed class WorkspaceEvidence : IDisposable
@@ -119,7 +119,7 @@ public sealed class WorkspaceEvidence : IDisposable
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return string.Empty; }
 
-        // ponytail: SHA256 over the raw pixels, about 8 ms for a 1280x800 frame. A perceptual hash
+        // SHA256 over the raw pixels, about 8 ms for a 1280x800 frame. A perceptual hash
         // would also skip a frame that only changed by a blinking caret; swap it in if the frame
         // count ever becomes the problem.
         byte[] hash = SHA256.HashData(pixels);

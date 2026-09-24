@@ -4,9 +4,8 @@ using System.Text;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Which engine step, if any, takes the foreground from the owner. Found 2026-09-22: during the UI
-/// gate the foreground went to a window titled DeskweaveClipboardBroker for six seconds as the
-/// first workspace started. Logs the foreground window around each step.
+/// Which engine step, if any, takes the foreground from the owner, such as a window titled
+/// DeskweaveClipboardBroker taking it as the first workspace starts. Logs the foreground window around each step.
 ///
 /// Run: Deskweave.Probe.exe --focus "C:\absolute\output"
 /// </summary>

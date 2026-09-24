@@ -46,7 +46,7 @@ internal sealed class WorkspacePipeServer : IDisposable
 
     /// <summary>
     /// Whether a pipe by this name is served right now, without connecting to it. A connection
-    /// ticket naming a pipe that is gone belongs to a Deskweave that stopped without withdrawing it.
+    /// ticket naming a pipe that is gone belongs to an ARS that stopped without withdrawing it.
     /// </summary>
     internal static bool Exists(string name)
     {
@@ -196,7 +196,7 @@ internal sealed class WorkspacePipeServer : IDisposable
         }
         // InvalidDataException is a SystemException, not an IOException: a malformed length prefix or
         // an oversized response ends this connection, as it does for the bridge, and never faults the
-        // handler task - an unobserved fault here closed the pipe and told the agent Deskweave had
+        // handler task - an unobserved fault here closed the pipe and told the agent ARS had
         // closed while its request was running, about an app that was running perfectly well.
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException
             or ObjectDisposedException or InvalidDataException or System.Text.DecoderFallbackException) { }

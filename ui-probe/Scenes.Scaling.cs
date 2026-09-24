@@ -14,7 +14,7 @@ namespace Deskweave.UiProbe;
 
 /// <summary>
 /// 100%, 125% and 150%, every surface at its minimum size, plus the keyboard and reduced-motion
-/// passes MVP_SPEC's "Done means" asks for and earlier validation rounds deferred three times.
+/// passes.
 ///
 /// The lever is <see cref="VisualTreeHelper.SetRootDpi"/>: it hands the whole tree the DPI a real
 /// 125% or 150% monitor gives it, so layout rounding, glyph metrics and the device-pixel grid are
@@ -101,8 +101,8 @@ static class ScalingScenes
             // claimed: at the 320 minimum a long name pushes the card's own Sleep control off the
             // right of the card, because WorkingCardTemplate's name column (app/MainWindow.xaml,
             // about line 169) is Auto with no MaxWidth, so its CharacterEllipsis never engages and
-            // the star column after it has nothing left to give. That file belongs to another
-            // session this round; when its owner caps the name, assert becomes true here.
+            // the star column after it has nothing left to give. Once that column caps the name,
+            // assert becomes true here.
             Load(window, "a-rather-long-workspace-name");
             window.ShowStack();
             await AtEveryScale(window, window, "hub-stack-long-name", 320, 480, sheets, assert: false);
@@ -465,7 +465,7 @@ static class ScalingScenes
 
     /// <summary>
     /// Tab from the top until it comes back round, against every action on the surface. "Every
-    /// action reachable" is the bar (MVP_SPEC, "Done means"), so what is counted is what the owner
+    /// action reachable" is the bar, so what is counted is what the owner
     /// can do something with - press, type in, choose from - and not a read-only list that is a tab
     /// stop by WPF's defaults and a dead end to anyone who lands on it.
     /// </summary>
@@ -579,8 +579,8 @@ static class ScalingScenes
             Program.Check(knob.RenderTransform is TranslateTransform { HasAnimatedProperties: false, X: 0 },
                 "With reduced motion, the knob is simply where the switch says, with nothing sliding it there");
 
-            // The corner window's own arrival, read and not touched: engine/WorkspacePeek* belongs
-            // to another session, so this asks it a question rather than changing it. The hub has to
+            // The corner window's own arrival, read and not touched: this asks engine/WorkspacePeek* a
+            // question rather than changing it. The hub has to
             // be out of the way first, the same as the corner gate itself does.
             window.Hide();
             await Task.Delay(200);

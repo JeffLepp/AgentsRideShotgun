@@ -19,7 +19,7 @@ try {
     if ($env:USERNAME -ne 'WDAGUtilityAccount') { throw 'This check only runs inside Windows Sandbox.' }
     $report.windows = (Get-CimInstance Win32_OperatingSystem).Caption
     $app = Join-Path $env:LOCALAPPDATA 'ARSApp\current\ARS.exe'
-    if (Test-Path -LiteralPath $app) { throw 'This Windows user already has Deskweave installed.' }
+    if (Test-Path -LiteralPath $app) { throw 'This Windows user already has ARS installed.' }
     $setupLog = Join-Path $results 'setup.log'
     Mark 'starting installer'
     $process = Start-Process -FilePath $installer -ArgumentList ('--silent --log "' + $setupLog + '"') -PassThru -WindowStyle Hidden

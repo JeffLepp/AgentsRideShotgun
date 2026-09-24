@@ -7,7 +7,7 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Validation output must be inside this checkout.'
 }
-if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before this check. Existing work was not stopped.' }
+if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit ARS before this check. Existing work was not stopped.' }
 $product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS'
 $settings = Join-Path $product 'settings.json'
 if ((Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).FirstRunDone) {
@@ -101,7 +101,7 @@ $failure = $null
 try {
     $app = Start-Owned
     Wait-Tray $app
-    Check ([TrayProbe]::Exists($identity)) 'Published Deskweave registers its persistent tray identity'
+    Check ([TrayProbe]::Exists($identity)) 'Published ARS registers its persistent tray identity'
     foreach ($batch in 1..5) {
         $duplicates = @(foreach ($i in 1..8) { Start-Owned })
         foreach ($p in $duplicates) {
@@ -116,7 +116,7 @@ try {
         Wait-Tray $app
         Check (@(Get-Process ARS).Count -eq 1 -and [TrayProbe]::Windows($app.Id, $true) -eq 1 -and [TrayProbe]::Exists($identity)) "Abrupt-stop recovery ${cycle}: one owner reclaims the same tray identity"
     }
-    Check ([TrayProbe]::Windows($app.Id, $false) -eq 0 -and [TrayProbe]::Foreground() -ne $app.Id) 'Repeated background launches leave the hub hidden and do not leave Deskweave in the foreground'
+    Check ([TrayProbe]::Windows($app.Id, $false) -eq 0 -and [TrayProbe]::Foreground() -ne $app.Id) 'Repeated background launches leave the hub hidden and do not leave ARS in the foreground'
     foreach ($file in $protected) { if ((Hash $file) -ne $before[$file]) { throw "Protected configuration changed: $file" } }
     Check $true 'Owner settings, shell preferences and checked provider configurations are unchanged'
 }
@@ -126,7 +126,7 @@ finally {
         if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit(10000) | Out-Null }
     }
     # The abrupt-exit test intentionally bypassed disposal. Clean up only this test's published
-    # icon, only after every validation process exited, and never if another Deskweave appeared.
+    # icon, only after every validation process exited, and never if another ARS appeared.
     if (-not (Get-Process ARS -ErrorAction SilentlyContinue)) { [TrayProbe]::Remove($identity) }
     $report.validationInstancesExited = @($children | Where-Object { -not $_.HasExited }).Count -eq 0
     $report.trayEntryRemoved = -not [TrayProbe]::Exists($identity)

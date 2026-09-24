@@ -23,9 +23,9 @@ static class Program
                 .SetAutoApplyOnStartup(ApplyUpdateOnStart(args, App.InstanceName))
                 .OnBeforeUninstallFastCallback(_ =>
                 {
-                    // While our files still exist: take Deskweave out of the agents' configs, or
+                    // While our files still exist: take ARS out of the agents' configs, or
                     // every agent session afterwards tries a bridge that is gone. The owner's
-                    // workspaces and settings stay; Settings has Delete all Deskweave data.
+                    // workspaces and settings stay; Settings has Delete all ARS data.
                     // Velopack ends this after 30 s, so the quick part goes first.
                     Cleanup("startup registration", () =>
                     {
@@ -59,7 +59,7 @@ static class Program
 
     /// <summary>
     /// Velopack applies a downloaded update at startup unless told not to, and applying stops every
-    /// running copy and restarts. Only a start the owner made applies it, with no Deskweave already
+    /// running copy and restarts. Only a start the owner made applies it, with no ARS already
     /// running: an agent's bridge starts it with --background (as Windows does at sign-in), and a
     /// running copy may have an agent at work.
     /// </summary>

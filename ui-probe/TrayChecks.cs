@@ -84,7 +84,7 @@ internal static class TrayChecks
         tray.Register();
         available = true;
         await Task.Delay(2300);
-        Program.Check(entries.Count == 1, "A temporarily unavailable notification area recovers without restarting Deskweave");
+        Program.Check(entries.Count == 1, "A temporarily unavailable notification area recovers without restarting ARS");
         int healthyCalls = calls.Count;
         await Task.Delay(2300);
         Program.Check(calls.Count == healthyCalls, "A healthy tray has no background retry polling");

@@ -273,9 +273,9 @@ internal sealed class WorkspaceExternalAccess : IDisposable
 
     /// <summary>
     /// Where a program opens follows who it is for. <paramref name="takeOver"/> false is the owner's
-    /// own desktop, for something he asked for and will use himself; true moves a copy he already
+    /// own desktop, for something they asked for and will use themselves; true moves a copy they already
     /// has open into this workspace, which is the only way a one-copy-per-session application can be
-    /// driven in here. Both are one click for him and neither happens until he clicks.
+    /// driven in here. Both are one click for them and neither happens until they click.
     /// </summary>
     internal WorkspaceHandoff RequestProgram(Guid client, string program, string? arguments, string reason, bool takeOver)
     {
@@ -288,16 +288,16 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         return Handoffs.Request(takeOver ? "takeover" : "program", program, reason, arguments);
     }
 
-    /// <summary>The owner clicked. Only Decide reaches this, and only for a request he approved.
-    /// It runs the program and arguments the request was made with, the same ones his card showed.</summary>
+    /// <summary>The owner clicked. Only Decide reaches this, and only for a request they approved.
+    /// It runs the program and arguments the request was made with, the same ones their card showed.</summary>
     string? Carry(WorkspaceHandoff request)
     {
         (string Program, string? Arguments) what = (request.Target, request.Arguments);
         if (request.Kind == "takeover") return _control.TakeOver(what.Program, what.Arguments);
         try
         {
-            // ShellExecute, exactly as if the owner had typed it into Start: his shell resolves the
-            // name, so Store apps, file associations and App Paths all behave the way they do for him.
+            // ShellExecute, exactly as if the owner had typed it into Start: their shell resolves the
+            // name, so Store apps, file associations and App Paths all behave the way they do for them.
             using var started = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(what.Program)
             { UseShellExecute = true, Arguments = what.Arguments ?? "" });
             return null;

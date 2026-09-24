@@ -52,17 +52,17 @@ internal static class FirstRunConnections
                 && !File.Exists(claudeFile) && !File.Exists(codexFile),
                 "Connecting an agent that is not installed writes no configuration and says why in one line");
 
-            // Both installed: one press connects both, each pointed at Deskweave's one ticket.
+            // Both installed: one press connects both, each pointed at ARS's one ticket.
             WorkspaceConnections.Locate = _ => Environment.ProcessPath;
             Check(Connect().Count == 0 && WorkspaceConnections.Supported.All(WorkspaceConnections.IsConnected),
                 "One Start connects every supported agent found on this PC");
             Check(Pointed(claudeFile) && Pointed(codexFile),
-                "A connected agent is pointed at Deskweave's own bridge and its one router ticket");
+                "A connected agent is pointed at ARS's own bridge and its one router ticket");
 
             // Repeated launches: still one entry each, never a second.
             for (int again = 0; again < 3; again++) Connect();
             Check(Entries(claudeFile) == 1 && Entries(codexFile) == 1,
-                "Four launches leave exactly one Deskweave entry in each agent's configuration");
+                "Four launches leave exactly one ARS entry in each agent's configuration");
 
             // A replacement that fails: the old entry is already out, so the one line has to say
             // so. Claiming nothing changed would hide a connection the owner no longer has.
@@ -107,9 +107,9 @@ internal static class FirstRunConnections
                 "Disconnecting is confirmed against the actual intended profile file");
             Set(WorkspaceConnections.AgentApp.ClaudeCode, true);
 
-            // An entry under Deskweave's name that runs something else: an older install, a moved
-            // folder, a probe build. The owner's own configuration had one pointing at a gate's
-            // fixture, and Settings called it connected while every agent call failed.
+            // An entry under ARS's name that runs something else: an older install, a moved
+            // folder, a probe build. Counting it as connected would leave Settings saying connected
+            // while every agent call failed.
             WriteStale(claudeFile, codexFile, root);
             Check(WorkspaceConnections.Supported.All(app => WorkspaceConnections.HasEntry(app)
                     && !WorkspaceConnections.IsConnected(app) && WorkspaceConnections.Missing(app)),
@@ -118,7 +118,7 @@ internal static class FirstRunConnections
                 && Entries(claudeFile) == 1 && Entries(codexFile) == 1 && Pointed(claudeFile) && Pointed(codexFile)
                 && File.ReadAllText(claudeFile).Contains("another.exe", StringComparison.Ordinal)
                 && File.ReadAllText(codexFile).Contains("[mcp_servers.another]", StringComparison.Ordinal),
-                "Connecting replaces a stale entry with one for this Deskweave and leaves the agent's other servers alone");
+                "Connecting replaces a stale entry with one for this ARS and leaves the agent's other servers alone");
             // The entry an install from before the rename left, under the old name.
             WriteStale(claudeFile, codexFile, root, WorkspaceConnections.FormerAppName);
             Check(WorkspaceConnections.Supported.All(app => !WorkspaceConnections.HasEntry(app))
@@ -228,7 +228,7 @@ internal static class FirstRunConnections
             Check(Until(() => WorkspaceConnections.IsConnected(WorkspaceConnections.AgentApp.Codex)) && Entries(codexFile) == 1,
                 "After Start, an agent installed later is connected by itself, once, with no second prompt");
 
-            // The loop mends an entry that went stale, as one a moved Deskweave leaves behind would be.
+            // The loop mends an entry that went stale, as one a moved ARS leaves behind would be.
             WorkspaceConnections.StopKeepingUp();
             WriteStale(claudeFile, codexFile, root);
             WorkspaceConnections.KeepUp();
@@ -278,13 +278,13 @@ internal static class FirstRunConnections
             Check(Set(WorkspaceConnections.AgentApp.Codex, true) is null
                 && WorkspaceConnections.ProfileCounts(WorkspaceConnections.AgentApp.Codex) == (2, 2)
                 && File.ReadAllText(secondCodexFile).Contains("[mcp_servers.another]", StringComparison.Ordinal),
-                "An explicit Connect reenables Deskweave while preserving unrelated entries across both profiles");
+                "An explicit Connect reenables ARS while preserving unrelated entries across both profiles");
             WorkspaceConnections.Profiles = SingleProfiles;
 
             // Turned off in Settings, with the loop still running because the other agent has left
             // this PC and is still worth waiting for. It has to leave the one the owner took out.
             Check(Set(WorkspaceConnections.AgentApp.Codex, false) is null && Entries(codexFile) == 0,
-                "Turning an agent off in Settings takes Deskweave out of its configuration");
+                "Turning an agent off in Settings takes ARS out of its configuration");
             Set(WorkspaceConnections.AgentApp.ClaudeCode, false);
             WorkspaceConnections.Locate = app => app == WorkspaceConnections.AgentApp.ClaudeCode ? null : Environment.ProcessPath;
             WorkspaceConnections.Remember(WorkspaceConnections.AgentApp.Codex, false);
@@ -313,14 +313,14 @@ internal static class FirstRunConnections
                 && WorkspaceMcp.Scope.Contains("never your own shell", StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("start it from your own shell as usual", StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("Headless servers, builds, tests, code and files stay in your own tools", StringComparison.Ordinal),
-                "A connected agent is told to use Deskweave for windows it will use, its own shell for ones the user will, and not for code, builds, tests or file work");
+                "A connected agent is told to use ARS for windows it will use, its own shell for ones the user will, and not for code, builds, tests or file work");
             // Claude Code keeps only the first 2,048 characters of a server's instructions; everything
             // past that never reaches the model.
             Check(WorkspaceMcp.RouterInstructions.Length < 2000,
                 $"The whole instruction reaches the agent: {WorkspaceMcp.RouterInstructions.Length} characters, under Claude Code's 2,048 cut");
 
             Check(OwnEntry(realClaude) == claudeEntry && OwnEntry(Path.Combine(realCodex, "config.toml")) == codexEntry,
-                "Deskweave's entry in the owner's own Claude Code and Codex configuration is exactly as it was");
+                "ARS's entry in the owner's own Claude Code and Codex configuration is exactly as it was");
         }
         finally
         {
@@ -349,10 +349,10 @@ internal static class FirstRunConnections
     }
 
     /// <summary>
-    /// Deskweave's own entry in one of the owner's real configuration files, as its text, or nothing
+    /// ARS's own entry in one of the owner's real configuration files, as its text, or nothing
     /// when it has none. It is the only part of that file these checks could ever write, and a whole
     /// file would be the wrong thing to compare: an agent session of the owner's own rewrites its
-    /// history while the probe runs, which says nothing about Deskweave.
+    /// history while the probe runs, which says nothing about ARS.
     /// </summary>
     static string OwnEntry(string path)
     {
@@ -369,7 +369,7 @@ internal static class FirstRunConnections
     }
 
     /// <summary>
-    /// Stale Deskweave entries in both agents' own formats, beside a server that is not Deskweave's:
+    /// Stale ARS entries in both agents' own formats, beside a server that is not ARS's:
     /// Claude Code's JSON, and Codex's TOML with the literal strings Codex writes.
     /// </summary>
     static void WriteStale(string claudeFile, string codexFile, string root, string name = WorkspaceConnections.AppName)
@@ -395,7 +395,7 @@ internal static class FirstRunConnections
         return ready();
     }
 
-    /// <summary>Whether the entry runs Deskweave's own bridge against the router ticket.</summary>
+    /// <summary>Whether the entry runs ARS's own bridge against the router ticket.</summary>
     static bool Pointed(string configuration)
     {
         string text = File.ReadAllText(configuration);
@@ -406,7 +406,7 @@ internal static class FirstRunConnections
         static string Escaped(string path) => path.Replace(@"\", @"\\");
     }
 
-    /// <summary>How many Deskweave entries an agent's configuration holds. More than one is the bug.</summary>
+    /// <summary>How many ARS entries an agent's configuration holds. More than one is the bug.</summary>
     static int Entries(string configuration)
     {
         if (!File.Exists(configuration)) return 0;
@@ -429,9 +429,9 @@ internal static class FirstRunConnections
         // one asked `mcp list --json`.
         bool claude = args.Contains("--scope") || args.Length > 1 && args[1] == "get";
         if (Environment.GetEnvironmentVariable(claude ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME") is not { Length: > 0 } home) return 2;
-        // Standing in for a PATH shim that hands the real command a configuration folder Deskweave's
+        // Standing in for a PATH shim that hands the real command a configuration folder ARS's
         // own environment does not name, which is what `claude` resolving to a wrapper that clears
-        // CLAUDE_CONFIG_DIR does. The entry is written and the file Deskweave reads never shows it.
+        // CLAUDE_CONFIG_DIR does. The entry is written and the file ARS reads never shows it.
         if (Environment.GetEnvironmentVariable("DESKWEAVE_STUB") == "elsewhere")
             Directory.CreateDirectory(home = Path.Combine(home, "shim"));
         string path = Path.Combine(home, claude ? ".claude.json" : "config.toml");
@@ -499,7 +499,7 @@ internal static class FirstRunConnections
                 ?[WorkspaceConnections.AppName] is not JsonObject entry) return 1;
             Console.WriteLine(WorkspaceConnections.AppName + ":");
             Console.WriteLine("  Scope: User config (available in all your projects)");
-            // The real command prints a tick or a cross here. What Deskweave reads is below it:
+            // The real command prints a tick or a cross here. What ARS reads is below it:
             // whether the entry is there and what it would run, not whether it answered just now.
             Console.WriteLine("  Status: Connected");
             Console.WriteLine("  Type: stdio");

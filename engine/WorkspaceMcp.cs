@@ -33,7 +33,7 @@ public sealed class WorkspaceMcp : IDisposable
     long _notesSeen;
 
     /// <summary>A tool reply with anything the owner did since the last one put in front of it, so
-    /// the agent hears that its app went to his desktop before it goes looking for it.</summary>
+    /// the agent hears that its app went to their desktop before it goes looking for it.</summary>
     object WithNotes(object reply)
     {
         IReadOnlyList<string> notes = _control.NotesSince(ref _notesSeen);
@@ -52,7 +52,7 @@ public sealed class WorkspaceMcp : IDisposable
         string[] Needs, bool Acts);
 
     // Every word here is paid for in every connected session, so each tool says only what a model
-    // gets wrong without it. Measured 2026-09-21: 30 tools and 3,279 characters of instructions
+    // gets wrong without it. Measured: 30 tools and 3,279 characters of instructions
     // were about 5,300 tokens, and Claude Code cut the instructions off at about 2,000 characters.
     static readonly Definition[] Tools =
     [
@@ -125,8 +125,8 @@ public sealed class WorkspaceMcp : IDisposable
     ];
 
     /// <summary>
-    /// The scoped instruction that comes with connecting (MVP_SPEC, Behavior): an agent uses
-    /// Deskweave by itself for a window it will use, and its own tools for one the user will use.
+    /// The scoped instruction that comes with connecting: an agent uses
+    /// ARS by itself for a window it will use, and its own tools for one the user will use.
     /// "The app you are building" and "a program the user will use" are the same thing when the app
     /// is the user's game, so the rule is who uses the window next, not what kind of program it is.
     /// </summary>
@@ -269,7 +269,7 @@ public sealed class WorkspaceMcp : IDisposable
                     return Fail("that window would not be arranged; it may be gone, busy, or the owner took control. Call window again.");
                 if (what != WindowArrangement.Close) return Say("done.\n" + WindowList());
                 // Close is a request the app can answer with a question - "Save changes?" - and
-                // "done" read as if the window were gone (2026-09-22). Give it a moment, then say which.
+                // "done" read as if the window were gone. Give it a moment, then say which.
                 for (int wait = 0; wait < 15 && _control.Windows().Any(open => open.Handle == window); wait++)
                     await Task.Delay(100, cancel).ConfigureAwait(false);
                 return Say((_control.Windows().Any(open => open.Handle == window)
@@ -314,7 +314,7 @@ public sealed class WorkspaceMcp : IDisposable
                 // the agent acts on a screen that has moved on. Say what it is looking at.
                 if (window == 0 && _control.ScreenState.Note is { Length: > 0 } stale) what += ". " + stale;
                 // Its pixels are not the ones computer takes, and an agent that forgets which picture a
-                // point came from clicks beside what it meant to (2026-09-22). Say so where it is read.
+                // point came from clicks beside what it meant to. Say so where it is read.
                 return Picture(frame, what, "For reading only: click with computer, by control number or its own picture's pixels.");
             }
 
@@ -379,7 +379,7 @@ public sealed class WorkspaceMcp : IDisposable
                 if (pid == 0) return Fail("that program did not start");
                 // Wait only while this process has not exposed a window, not for a fixed cosmetic delay.
                 Started started = await WindowReady(pid, cancel).ConfigureAwait(false);
-                // Measured 2026-09-21: Notepad opened behind a maximized browser left from an earlier
+                // Measured: Notepad opened behind a maximized browser left from an earlier
                 // session, so the next picture showed the browser. What was just opened comes first.
                 if (started == Started.Showing) Front(pid);
                 if (started == Started.Exited && _control.RunningOutside(exe) is { } elsewhere)
@@ -467,7 +467,7 @@ public sealed class WorkspaceMcp : IDisposable
                 // A title that never shows up is still bounded: without seconds the wait used to hold
                 // the call open until the client gave up on it.
                 if (seconds <= 0) seconds = 30;
-                // ponytail: capped at the tool timeout the CLI is started with. A wait longer than
+                // Capped at the tool timeout the CLI is started with. A wait longer than
                 // that wants the session parked and resumed, which is the Sleeping state and is not
                 // built - the cap is honest and the agent is told the real number.
                 if (seconds > MaxWaitSeconds) seconds = MaxWaitSeconds;
@@ -484,7 +484,7 @@ public sealed class WorkspaceMcp : IDisposable
     /// a batch file rather than onto cmd's own command line, because `cmd /c` quoting is its own
     /// small hell and a mangled quote there would look like the program itself failing.
     ///
-    /// Measured 2026-08-23: `claude -p` runs in here and answers, on the owner's subscription, at low
+    /// Measured: `claude -p` runs in here and answers, on the owner's subscription, at low
     /// integrity. `codex` does not - its launcher looks for its own install under APPDATA, which the
     /// safety boundary redirects into the workspace.
     /// </summary>
@@ -577,10 +577,10 @@ public sealed class WorkspaceMcp : IDisposable
     }
 
     /// <summary>
-    /// The owner's one-click route for a program, as one sentence for the agent: his own desktop,
-    /// or moving a copy he already has open into this workspace. The request is data until he
-    /// clicks it, which is what keeps an agent from putting a window on his screen or closing an
-    /// application of his. It is a route and not a refusal, so it answers as an ordinary result.
+    /// The owner's one-click route for a program, as one sentence for the agent: their own desktop,
+    /// or moving a copy they already have open into this workspace. The request is data until they
+    /// click it, which is what keeps an agent from putting a window on their screen or closing an
+    /// application of theirs. It is a route and not a refusal, so it answers as an ordinary result.
     /// </summary>
     string AskOwnerText(string program, string? arguments, string reason, bool takeOver)
     {
@@ -615,7 +615,7 @@ public sealed class WorkspaceMcp : IDisposable
             return Say("The owner set this workspace to workspace-only, so nothing in here can reach their desktop."
                 + " Ask them in your answer instead.");
         // A web link for the owner is something the agent could open from its own shell anyway, so
-        // Deskweave does not stand between them: it opens in his browser now, no click. Programs and
+        // ARS does not stand between them: it opens in their browser now, no click. Programs and
         // documents still ask, since those reach past the agent's own sandbox.
         if (kind == "url")
         {
@@ -650,7 +650,7 @@ public sealed class WorkspaceMcp : IDisposable
     enum Started { Showing, Starting, Exited }
 
     /// <summary>
-    /// Waits for the program to put a window up. Measured 2026-09-07: a large WPF app took 57 s to draw in
+    /// Waits for the program to put a window up. Measured: a large WPF app took 57 s to draw in
     /// a workspace at the default power and 21 s at Fast, so the old two-second wait answered "no
     /// windows are open" for everything bigger than Notepad and the agent read that as a failure.
     /// This waits long enough for an ordinary application and returns the moment one appears.

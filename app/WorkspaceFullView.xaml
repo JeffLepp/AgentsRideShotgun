@@ -3,12 +3,12 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:Deskweave"
              Focusable="False">
-    <!-- A workspace in full (reference 04, .main): header, live screen, "What it did" and "Files". -->
+    <!-- A workspace in full: header, live screen, "What it did" and "Files". -->
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <!-- A crescent, stroked like the rest of the icon family rather than pulled from
-             Deskweave.AgentWorkspaces's own sprite (out of scope for this fix): fix list item 2.2's
-             "small sleep mark" and the Sleep control's own icon. -->
+             Deskweave.AgentWorkspaces's own sprite: the
+             small sleep mark and the Sleep control's own icon. -->
         <Geometry x:Key="Icon.Sleep">M2.5,6.5 H7.5 L2.5,12.5 H7.5 M9.5,2.5 H13 L9.5,7 H13</Geometry>
         <Style x:Key="HerePill" TargetType="Border">
             <Setter Property="CornerRadius" Value="99"/>
@@ -64,7 +64,7 @@
                         <Run Text="{Binding Prefix, Mode=OneWay}"/><Run Text="{Binding Code, Mode=OneWay}"
                              FontFamily="{DynamicResource MonoFontFamily}" Foreground="{DynamicResource AccentBrush}"/>
                     </TextBlock>
-                    <!-- 44 wide, 16:10 (reference .act .mini) -->
+                    <!-- 44 wide, 16:10 -->
                     <Border Grid.Column="2" Height="27.5" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
                             Visibility="{Binding HasThumb, Converter={StaticResource BoolToVis}}">
                         <Image Source="{Binding Thumb}" Stretch="UniformToFill"/>
@@ -82,7 +82,7 @@
                     </Grid.ColumnDefinitions>
                     <Path Grid.Column="0" Style="{StaticResource Icon13}" Data="{StaticResource Icon.File}"
                           TextElement.Foreground="{DynamicResource MutedInkBrush}" Margin="0,0,10,0"/>
-                    <!-- LineHeight matches the reference's 1.55 leading (12.5px * 1.55) so the row's pitch matches. -->
+                    <!-- LineHeight is a 1.55 leading (12.5px * 1.55) so the row's pitch comes out right. -->
                     <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12.5" LineHeight="19.4" LineStackingStrategy="BlockLineHeight"
                                TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="2" Text="{Binding When}" FontSize="11.5" Foreground="{DynamicResource FaintInkBrush}"
@@ -132,16 +132,16 @@
             <TextBlock x:Name="HeaderError" Grid.Column="3" FontSize="12" Foreground="{DynamicResource DangerInkBrush}"
                        VerticalAlignment="Center" HorizontalAlignment="Right" Margin="10,0,10,0"
                        TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
-            <!-- One honest line for what running costs (fix list item 2.6): WorkspaceRuntime.MemoryLoad
+            <!-- One honest line for what running costs: WorkspaceRuntime.MemoryLoad
                  as-is, no chart and no metric this page invents itself. Only while this workspace's
                  own computer is running, same as the Sleep control beside it. -->
             <TextBlock x:Name="MemoryText" Grid.Column="4" FontSize="12" Foreground="{DynamicResource FaintInkBrush}"
                        VerticalAlignment="Center" HorizontalAlignment="Right" Margin="10,0,10,0"
                        TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
-            <!-- Sleeps the workspace right now, in one click (fix list item 2.2). Wording carries the
+            <!-- Sleeps the workspace right now, in one click. Wording carries the
                  whole explanation since a one-click action has no confirmation dialog to say it in;
-                 never the word "asleep" itself (MVP_SPEC.md reserves it for the stack, and the gate
-                 checks this page too). No Take over / Hand back (brief A.3 stands): clicking the
+                 never the word "asleep" itself (it is reserved for the stack, and the UI probe
+                 checks this page too). No Take over / Hand back: clicking the
                  screen is still taking over, same as the corner window; this is a different control. -->
             <Button x:Name="SleepButton" Grid.Column="5" Style="{StaticResource IconButton}" Click="Sleep_Click" Margin="0,0,4,0"
                     Visibility="Collapsed"
@@ -166,10 +166,10 @@
                      the same as the corner window's. -->
                 <Image x:Name="ScreenImage" Stretch="UniformToFill" Cursor="Hand"
                        AutomationProperties.Name="Live workspace screen"/>
-                <!-- Fix list item 2.2: build on the existing "Last seen" pill rather than add a second,
+                <!-- Builds on the existing "Last seen" pill rather than adding a second,
                      competing indicator. ScreenImage's own Opacity (set in code) dims the picture
-                     underneath; this small mark plus the pill's own text is the "small sleep icon,
-                     you still see the background" the owner asked for. -->
+                     underneath; this small mark plus the pill's own text say it is asleep while
+                     the background stays visible. -->
                 <Border x:Name="LastSeenPill" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top"
                         Margin="12" Padding="10,5" CornerRadius="8" Background="{DynamicResource GlassBrush}">
                     <StackPanel Orientation="Horizontal">
@@ -178,7 +178,7 @@
                         <TextBlock x:Name="LastSeenText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}"/>
                     </StackPanel>
                 </Border>
-                <!-- Fix list item 2.7: taking over is legible. The owner pressing the live picture
+                <!-- Taking over is legible. The owner pressing the live picture
                      takes the wheel and the agent waits, and until this nothing on the page said so.
                      Shown the moment WorkspaceScreenInput's OwnerActed fires and cleared the moment
                      WorkspaceControl.Driving lets go, for any reason (its own timeout, Pause every
@@ -192,7 +192,7 @@
         </Border>
         <!-- Only this scrolls: the live screen above keeps its own fixed place so the owner's
              pointer never loses it mid-drive. ScrollChanged tracks whether the owner is at the
-             bottom so a reload can follow the newest row without fighting a scroll he did himself. -->
+             bottom so a reload can follow the newest row without fighting a scroll they did themselves. -->
         <ScrollViewer x:Name="ActivityScroll" Grid.Row="4" VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled" ScrollChanged="ActivityScroll_ScrollChanged">
             <Grid>

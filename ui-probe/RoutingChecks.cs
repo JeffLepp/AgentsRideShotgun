@@ -75,7 +75,7 @@ internal static class RoutingChecks
                 && WorkspaceStore.All().Count(w => w.Agents == WorkspaceHome.Scratch) == 1,
                 "Real sessions from home and Desktop reuse the one Scratch workspace");
 
-            // Sleep (MVP_SPEC): a quiet agent lets go, a quiet workspace sleeps, the next call wakes it.
+            // Sleep: a quiet agent lets go, a quiet workspace sleeps, the next call wakes it.
             WorkspaceExternalAccess.IdleHandoverMs = 1000;
             await desktop.Tool("computer", new { screenshot = true });
             WorkspaceRuntime sleeper = WorkspaceRuntime.Of(scratch)!;

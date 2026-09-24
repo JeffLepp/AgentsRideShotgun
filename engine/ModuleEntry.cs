@@ -45,7 +45,7 @@ public static class ModuleEntry
 
     internal static void RequestShowCorner() => ShowCornerRequested?.Invoke();
 
-    /// <summary>An agent needs the owner and the corner window can't show it (MVP_SPEC, Alerts):
+    /// <summary>An agent needs the owner and the corner window can't show it:
     /// title, one line, the workspace and the request, for the app's Windows notification. Raised
     /// on the UI thread.</summary>
     public static event Action<string, string, string, string>? AttentionNeeded;
@@ -103,7 +103,7 @@ public static class ModuleEntry
     }
 
     /// <summary>Optional uninstall/storage-inventory contract. This root contains only workspaces
-    /// created by Deskweave, their records/evidence, and transient setup staging.</summary>
+    /// created by ARS, their records/evidence, and transient setup staging.</summary>
     public static string[] GetDataPaths() => [WorkspaceStore.Root, WorkspaceAccessStore.Root];
 
     /// <summary>Uninstall: stops everything this install is running and takes its bridge out of the

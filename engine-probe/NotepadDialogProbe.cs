@@ -7,7 +7,7 @@ using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Notepad's "Do you want to save changes?" prompt, answered by control number the way an agent
-/// does it: type, close, press "Don't Save". Found refused on the published app on 2026-09-22.
+/// does it: type, close, press "Don't Save".
 /// Also writes what UI Automation says about the button, so the refusal can be explained.
 ///
 /// Run: Deskweave.Probe.exe --notepad-dialog "C:\absolute\output"

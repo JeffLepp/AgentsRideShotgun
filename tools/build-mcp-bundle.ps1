@@ -76,9 +76,9 @@ $manifest = [ordered]@{
     description = 'Connect an AI agent to the installed ARS Windows desktop app.'
     long_description = 'Windows x64 only. Install ARS first. This bundle connects an MCP client to its local bridge and does not install a second app.'
     author = [ordered]@{ name = 'Jefferson Kline' }
-    repository = [ordered]@{ type = 'git'; url = 'https://github.com/JeffLepp/Deskweave' }
-    homepage = 'https://github.com/JeffLepp/Deskweave'
-    support = 'https://github.com/JeffLepp/Deskweave/issues'
+    repository = [ordered]@{ type = 'git'; url = 'https://github.com/JeffLepp/AgentsRideShotgun' }
+    homepage = 'https://github.com/JeffLepp/AgentsRideShotgun'
+    support = 'https://github.com/JeffLepp/AgentsRideShotgun/issues'
     license = 'MIT'
     compatibility = [ordered]@{ platforms = @('win32') }
     server = [ordered]@{

@@ -5,8 +5,7 @@ namespace Deskweave.UiProbe;
 /// <summary>
 /// Hands the foreground straight back to whatever the owner was using. The gate's windows live off
 /// every screen, but some checks still activate one - restoring a minimized hub does, as a person
-/// restoring it would expect - and each took the owner's typing for a second or more, six seconds
-/// once (measured 2026-09-22 while he worked). Every 50 ms: if this process has the foreground and
+/// restoring it would expect - and each can take the owner's typing for a second or more. Every 50 ms: if this process has the foreground and
 /// it came from someone else's window, give it back. Being the foreground process is exactly what
 /// Windows asks of a caller before it may pass the foreground on.
 /// </summary>

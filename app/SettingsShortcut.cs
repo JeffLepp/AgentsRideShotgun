@@ -7,7 +7,7 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave;
 
 /// <summary>
-/// A shortcut shown as key caps (reference .key). Click it, or press Space or Enter on it, then
+/// A shortcut shown as key caps. Click it, or press Space or Enter on it, then
 /// press a combination with at least one modifier; Escape, Tab or clicking elsewhere cancels.
 /// </summary>
 public sealed class SettingsShortcut : Button

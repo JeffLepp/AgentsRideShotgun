@@ -10,7 +10,7 @@ namespace Deskweave.AgentWorkspaces;
 /// <summary>
 /// Runs the corner view for the whole module: which workspace (or two) it shows, when it is on
 /// screen, the picture it draws, and the two global hotkeys. It lives here rather than in a panel
-/// for the same reason the runtime does: a workspace works with every window of Deskweave closed,
+/// for the same reason the runtime does: a workspace works with every window of ARS closed,
 /// so a corner view that only existed while a panel was open would appear exactly when it was not
 /// needed. Nothing here runs while it has nothing to show: no timer, no capture, no window.
 /// </summary>
@@ -34,7 +34,7 @@ internal static class WorkspacePeekHost
     static readonly Dictionary<string, DateTimeOffset> _runStarted = [];
 
     // The ids Pause every agent itself took control of, so a second press hands back only those and
-    // not a workspace the owner was already driving before he paused.
+    // not a workspace the owner was already driving before they paused.
     static readonly HashSet<string> _pausedByUs = [];
 
     // The workspace the owner picked from the tabs. It wins over whatever is busiest for as long as
@@ -57,7 +57,7 @@ internal static class WorkspacePeekHost
     static bool _lastPresentation;
 
     // Remembered only for this run: the width the owner last grew it to, so the shrink button can
-    // offer to grow back once he has shrunk it again. Size and position that must survive a real
+    // offer to grow back once they have shrunk it again. Size and position that must survive a real
     // restart live in AppSettings (CornerWidth, CornerLeft/Top) instead.
     static double? _lastGrownWidth;
 
@@ -555,7 +555,7 @@ internal static class WorkspacePeekHost
     static readonly HashSet<string> _announced = [];
 
     /// <summary>
-    /// MVP_SPEC, Alerts: a Windows notification only when an agent needs the owner and this window
+    /// A Windows notification only when an agent needs the owner and this window
     /// can't show it - turned off in Settings, or a full-screen app in front. Once per request; the
     /// hub shows its own. Windows' Do not disturb and sound settings apply to the notification.
     /// </summary>
@@ -569,13 +569,13 @@ internal static class WorkspacePeekHost
     }
 
     /// <summary>The one line the owner answers. A takeover runs the other way round from every other
-    /// request - it closes his own copy of a program and starts it in the workspace - so it gets its
+    /// request - it closes their own copy of a program and starts it in the workspace - so it gets its
     /// own sentence rather than a target worded to survive somebody else's.</summary>
     static string Question(WorkspaceHandoff request) => request.Kind switch
     {
         "takeover" => "Close your copy of " + request.Target + " and start it in the workspace?",
         "file" => "Open " + Path.GetFileName(request.Target) + " on your desktop?",
-        // A program runs with whatever command line came with it, so he sees all of it, and why.
+        // A program runs with whatever command line came with it, so they see all of it, and why.
         "program" => "Open this on your desktop?\n" + CommandLine(request) + "\nWhy: " + request.Reason,
         _ => "Open " + request.Target + " on your desktop?",
     };
@@ -600,7 +600,7 @@ internal static class WorkspacePeekHost
 
     static string WorkspaceName(WorkspaceRuntime r) => WorkspaceStore.Find(r.Id)?.Name ?? "Workspace";
 
-    /// <summary>What an external agent calls itself, as the reference always shows it.</summary>
+    /// <summary>What an external agent calls itself, as the app always shows it.</summary>
     static string AgentName(WorkspaceRuntime r) =>
         r.Access is { LastController.Length: > 0 } access ? WorkspaceHome.DisplayName(access.LastController) : "Agent";
 
@@ -769,8 +769,8 @@ internal static class WorkspacePeekHost
             chosen = candidate;
             break;
         }
-        // A key the owner picked stays his: a stand-in keeps Pause working for this run, Settings says
-        // his key is taken, and the next start tries it again. Only the untouched default moves to
+        // A key the owner picked stays theirs: a stand-in keeps Pause working for this run, Settings says
+        // their key is taken, and the next start tries it again. Only the untouched default moves to
         // the free key, which Settings then shows.
         bool picked = _settings.PauseHotkey != new AppSettings().PauseHotkey;
         bool standIn = chosen is not null && chosen != _settings.PauseHotkey;
@@ -828,7 +828,7 @@ internal static class WorkspacePeekHost
     }
 
     /// <summary>Every running workspace waits as if the owner had taken it; pressing it again hands
-    /// back only the ones Pause itself took, never a workspace the owner already held before he
+    /// back only the ones Pause itself took, never a workspace the owner already held before they
     /// pressed it.</summary>
     static void TogglePauseAll()
     {

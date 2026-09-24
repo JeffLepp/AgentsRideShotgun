@@ -15,7 +15,7 @@ param(
 # was configured with, the packaged bridge, the router ticket, and a workspace. Harmless calls only
 # (initialize, tools/list, status, one screenshot, release). No model is called, the owner's own Claude
 # Code and Codex configuration is fingerprinted before and after, and nothing here starts or stops
-# Deskweave itself.
+# ARS itself.
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'presentation-state.ps1')
 Add-Type -TypeDefinition @'
@@ -71,7 +71,7 @@ function Check([bool]$passed, [string]$claim) {
 }
 function Hash([string]$path) { if (Test-Path -LiteralPath $path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash } else { 'missing' } }
 
-# Deskweave's entry, as text, in each real agent configuration this user has. Only the entry: the rest
+# ARS's entry, as text, in each real agent configuration this user has. Only the entry: the rest
 # of those files belongs to the owner's own sessions, which rewrite their history while this runs.
 function Get-OwnerEntries {
     $profile = [Environment]::GetFolderPath('UserProfile')
@@ -254,12 +254,12 @@ function Invoke-McpSession([string]$label, [string]$command, [string[]]$argument
 try {
     $owner = Get-OwnerEntries
     $running = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable })
-    Check ($running.Count -eq 1) 'Exactly one Deskweave is running, from this publish folder'
+    Check ($running.Count -eq 1) 'Exactly one ARS is running, from this publish folder'
     $report.app = [ordered]@{ pid = $running[0].Id; started = $running[0].StartTime.ToString('o'); exeSha256 = Hash $executable
         engineSha256 = Hash (Join-Path $deskweaveRoot 'out\Deskweave.AgentWorkspaces.dll'); bridgeSha256 = Hash $bridge
         bridgeManagedSha256 = Hash ([IO.Path]::ChangeExtension($bridge, '.dll')) }
     $routerTicket = Get-Content -LiteralPath $ticket -Raw | ConvertFrom-Json
-    Check ($routerTicket.schema -eq 1 -and [DeskweavePipe]::Served($routerTicket.pipe)) 'The router ticket names a pipe Deskweave is serving right now'
+    Check ($routerTicket.schema -eq 1 -and [DeskweavePipe]::Served($routerTicket.pipe)) 'The router ticket names a pipe ARS is serving right now'
     $report.routerPipe = $routerTicket.pipe
     $workspacesBefore = @(Get-Workspaces)
 
@@ -283,7 +283,7 @@ try {
             $entry = $json['mcpServers']['ars']
             Check ($add.code -eq 0 -and $entry['command'] -eq $bridge -and ($entry['args'] -join '|') -eq "--workspace|$ticket") `
                 'Claude Code, with an isolated configuration root, records the entry as the packaged bridge on the router ticket'
-            Check ($list.code -eq 0 -and $list.output -match 'deskweave:.*Connected') `
+            Check ($list.code -eq 0 -and $list.output -match 'ars:.*Connected') `
                 "Claude Code's own MCP health check connects to the live router through that entry"
             $entries.Add(@{ label = 'claude-code'; client = 'claude-code'; command = $entry['command']; arguments = [string[]]$entry['args'] })
         }
@@ -312,7 +312,7 @@ try {
         $session = Invoke-McpSession $entry.label $entry.command $entry.arguments $entry.client
         $sessions.Add($session)
         Check ($session.serverName -eq 'ars' -and $session.toolNames.Count -ge 20 -and 'status' -in $session.toolNames -and 'computer' -in $session.toolNames) `
-            "$($entry.label): the bridge initializes as deskweave and lists $($session.toolNames.Count) tools"
+            "$($entry.label): the bridge initializes as ars and lists $($session.toolNames.Count) tools"
         Check ($session.screenshot -and $session.workspace) `
             "$($entry.label): a screenshot comes back from workspace '$($session.workspace)', and status names it"
         if ($BrowserFixture) { Check $session.browserVerified "$($entry.label): the local browser fixture received its click and page readback confirms it" }
@@ -328,7 +328,7 @@ try {
     $report.workspace = [ordered]@{ id = $ids[0]; existedBefore = $existed; before = $workspacesBefore; after = $workspacesAfter }
     $ownerAfter = Get-OwnerEntries
     Check ((($ownerAfter.Keys | ForEach-Object { "$_=$($ownerAfter[$_])" }) -join "`n") -eq (($owner.Keys | ForEach-Object { "$_=$($owner[$_])" }) -join "`n")) `
-        "Deskweave's entry in the owner's own Claude Code and Codex configuration is exactly as it was"
+        "ARS's entry in the owner's own Claude Code and Codex configuration is exactly as it was"
 }
 catch { $failure = $_.ToString() }
 $report.status = if ($failure) { 'failed' } else { 'passed' }

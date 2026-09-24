@@ -76,7 +76,7 @@
     <CornerRadius x:Key="SkinWindowRadius">8</CornerRadius>
     <CornerRadius x:Key="PillRadius">8</CornerRadius>
     <CornerRadius x:Key="CornerWindowRadius">12</CornerRadius>
-    <!-- The corner window's one soft shadow (reference: 0 24 60 at 20%, 55% in dark). -->
+    <!-- The corner window's one soft shadow (0 24 60 at 20%, 55% in dark). -->
     <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="CornerShadowOpacity">0.2</sys:Double>
     <FontFamily x:Key="SkinFontFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
     <FontFamily x:Key="MonoFontFamily">Cascadia Mono, Consolas</FontFamily>
@@ -94,7 +94,7 @@
         </Setter>
     </Style>
 
-    <!-- Secondary button (reference .btn): card fill, control border, 12 semibold, radius 6. -->
+    <!-- Secondary button: card fill, control border, 12 semibold, radius 6. -->
     <Style x:Key="DeskButton" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
         <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
@@ -129,7 +129,7 @@
     </Style>
     <Style TargetType="Button" BasedOn="{StaticResource DeskButton}"/>
 
-    <!-- Primary (reference .btn.p): accent fill, no border. -->
+    <!-- Primary: accent fill, no border. -->
     <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource DeskButton}">
         <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}"/>
         <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
@@ -157,7 +157,7 @@
         <Setter Property="Padding" Value="8,5"/>
     </Style>
 
-    <!-- Title-bar and toolbar icon button (reference .tbtn): 32 square, radius 6, a Path icon inside. -->
+    <!-- Title-bar and toolbar icon button: 32 square, radius 6, a Path icon inside. -->
     <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource QuietButton}">
         <Setter Property="Width" Value="32"/>
         <Setter Property="Height" Value="32"/>
@@ -206,9 +206,9 @@
         <Setter Property="Padding" Value="12,11"/><Setter Property="Margin" Value="0,2"/>
     </Style>
 
-    <!-- A row in either sidebar (reference .item): radius 8, selected = card fill with a hairline
+    <!-- A row in either sidebar: radius 8, selected = card fill with a hairline
          ring and a 1 DIP shadow. The ring is a real 1 DIP border, so padding is one less than the
-         reference's 7/8 (workspaces) or 8/10 (Settings, SidebarNavItem). Use as RadioButtons in one
+         design's 7/8 (workspaces) or 8/10 (Settings, SidebarNavItem). Use as RadioButtons in one
          GroupName so arrow keys move the selection. -->
     <Style x:Key="SidebarItem" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
@@ -246,14 +246,14 @@
         <Setter Property="Padding" Value="9,7"/>
     </Style>
 
-    <!-- A card of settings rows or a list (reference .card): card fill, hairline, radius 10, no shadow. -->
+    <!-- A card of settings rows or a list: card fill, hairline, radius 10, no shadow. -->
     <Style x:Key="Card" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{DynamicResource SkinPanelRadius}"/>
     </Style>
-    <!-- A label over a group (reference .lbl): 12 semibold muted, sentence case. -->
+    <!-- A label over a group: 12 semibold muted, sentence case. -->
     <Style x:Key="SectionLabel" TargetType="TextBlock">
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="FontWeight" Value="SemiBold"/>

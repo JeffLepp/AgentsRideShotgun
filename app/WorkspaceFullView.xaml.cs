@@ -13,7 +13,7 @@ namespace Deskweave;
 
 internal sealed class PillInfo(string text, bool working) { public string Text => text; public bool Working => working; }
 /// <summary>One "What it did" row. <paramref name="code"/> is the part shown in accent mono, such
-/// as the address a page was opened at (reference 04: "Opened `localhost:5173`"); empty for a step
+/// as the address a page was opened at ("Opened `localhost:5173`"); empty for a step
 /// that is plain text throughout.</summary>
 internal sealed class DidRow(string time, string prefix, string code, BitmapSource? thumb)
 {
@@ -27,7 +27,7 @@ internal sealed class DidRow(string time, string prefix, string code, BitmapSour
 internal sealed class FileRow(string name, string when) { public string Name => name; public string When => when; }
 
 /// <summary>
-/// A workspace in full (reference 04): header, the live screen, "What it did" and "Files". Its own
+/// A workspace in full: header, the live screen, "What it did" and "Files". Its own
 /// preview loop picks its own rate like the stack's working cards.
 /// </summary>
 public partial class WorkspaceFullView : UserControl, IDisposable
@@ -58,7 +58,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         HerePanel.ItemsSource = _pills;
         DidList.ItemsSource = _did;
         FilesList.ItemsSource = _files;
-        // Named after WorkspaceScreenInput's own constants (fix list item 2.7) rather than a copy of
+        // Named after WorkspaceScreenInput's own constants rather than a copy of
         // the numbers, so a future change to LeaveDelay or StayDelay reaches this wording for free.
         ControlToastText.Text = "You have control. The agent waits, and resumes "
             + (int)WorkspaceScreenInput.LeaveDelay.TotalSeconds + "s after you leave, or "
@@ -89,7 +89,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         _fixture = false;
         _id = id;
         Reload();
-        // Clicking the screen takes over right there (brief A.3), the same as the corner window.
+        // Clicking the screen takes over right there, the same as the corner window.
         _input = new WorkspaceScreenInput(ScreenImage, () => WorkspaceRuntime.Of(_id));
         _input.OwnerActed += OwnerActed;
         // Full desktop: the agent's screen gets its taskbar here too, under the Last seen pill.
@@ -103,13 +103,13 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     WorkspaceTaskbar? _taskbar;
 
-    /// <summary>The strip, for the gate.</summary>
+    /// <summary>The strip, for the UI probe.</summary>
     internal WorkspaceTaskbar? Taskbar => _taskbar;
 
-    /// <summary>The live picture, for the gate that clicks it the way the owner does.</summary>
+    /// <summary>The live picture, for the UI probe, which clicks it the way the owner does.</summary>
     internal Image ScreenPicture => ScreenImage;
 
-    /// <summary>The owner's hand on that picture, for the gate.</summary>
+    /// <summary>The owner's hand on that picture, for the UI probe.</summary>
     internal WorkspaceScreenInput? ScreenInput => _input;
 
     void Reload()
@@ -140,7 +140,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         if (driver.Length > 0) _pills.Add(new PillInfo(WorkspaceHome.DisplayName(driver), true));
         else if (workspace is not null && !WorkspaceHome.IsFolder(workspace.Agents) && WorkspaceHome.Label(workspace.Agents) is { Length: > 0 } kept)
             _pills.Add(new PillInfo(kept, false));
-        // Fix list item 2.2 and 2.6: the Sleep control and the one honest memory line both only mean
+        // The Sleep control and the one honest memory line both only mean
         // something while this workspace actually has a computer running.
         SleepButton.Visibility = runtime is not null ? Visibility.Visible : Visibility.Collapsed;
         MemoryText.Visibility = runtime is not null && HeaderError.Visibility != Visibility.Visible
@@ -152,7 +152,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     }
 
     /// <summary>Keeps "You have control" listening to whichever WorkspaceRuntime instance actually
-    /// backs this workspace right now (fix list item 2.7). Re-checked on every RefreshLive tick
+    /// backs this workspace right now. Re-checked on every RefreshLive tick
     /// instead of once in SetWorkspace, so a workspace that slept and woke under a new runtime while
     /// this page was open does not leave the toast listening to a runtime that is gone.</summary>
     void UpdateDriverSubscription(WorkspaceRuntime? runtime)
@@ -171,7 +171,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     // own UI thread, so this one updates the toast directly rather than hopping through the dispatcher.
     void OwnerActed() => UpdateControlToast(WorkspaceRuntime.Of(_id ?? ""));
 
-    /// <summary>"You have control" (fix list item 2.7): visible for exactly as long as
+    /// <summary>"You have control": visible for exactly as long as
     /// WorkspaceControl.Driving says the owner is the one driving.</summary>
     void UpdateControlToast(WorkspaceRuntime? runtime) =>
         ControlToast.Visibility = runtime?.Plane?.Driving == Driver.Owner ? Visibility.Visible : Visibility.Collapsed;
@@ -290,7 +290,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         if (_capturingScreen) return;
         WorkspaceControl? plane = WorkspaceRuntime.Of(id)?.Plane;
         // Asleep: the picture is the last one it had, dimmed, and says so rather than looking live
-        // or broken (fix list item 2.2).
+        // or broken.
         LastSeenPill.Visibility = plane is null && ScreenImage.Source is not null ? Visibility.Visible : Visibility.Collapsed;
         ScreenImage.Opacity = plane is null ? 0.55 : 1.0;
         if (_taskbar is not null)
@@ -374,8 +374,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     }
 
     /// <summary>Tracks whether the owner is looking at the newest row so a reload can follow it
-    /// there without overriding a scroll he did himself. An extent change with no offset change is
-    /// new content landing, not the owner's hand; only his own scroll updates the flag.</summary>
+    /// there without overriding a scroll they did themselves. An extent change with no offset change is
+    /// new content landing, not the owner's hand; only their own scroll updates the flag.</summary>
     void ActivityScroll_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
         if (e.ExtentHeightChange != 0 && e.VerticalChange == 0)
@@ -391,7 +391,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         if (PathText.Text.Length > 0) SettingsActions.CopyText(PathText.Text);
     }
 
-    /// <summary>Sleeps this workspace right now, in one click (fix list item 2.2). The same
+    /// <summary>Sleeps this workspace right now, in one click. The same
     /// WorkspaceRuntime.Of(id)?.Dispose() the delete path already uses: work is not lost, the
     /// folder and last picture stay, and the next agent call wakes it. Refreshed immediately rather
     /// than left to the next timer tick, since the owner just asked for this and expects to see it.</summary>
@@ -436,11 +436,11 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             item.Click += (_, _) => action();
             menu.Items.Add(item);
         }
-        // Exactly Rename, Delete (brief A.3): no Stop/Start computer (automatic) or Who can use it.
+        // Exactly Rename, Delete: no Stop/Start computer (automatic) or Who can use it.
         Add("Rename", BeginRename);
         menu.Items.Add(new Separator());
         Add("Delete", () => DeleteWorkspace(id));
-        // Test seam (ui-probe/Scenes.Hub.cs): the gate drives this exact menu instance rather than
+        // Test seam (ui-probe/Scenes.Hub.cs): the UI probe drives this exact menu instance rather than
         // rebuilding its own copy of the item list above.
         LastMoreMenu = menu;
         menu.IsOpen = true;

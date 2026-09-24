@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 namespace Deskweave.AgentWorkspaces;
 
 /// <summary>A program request carries its own arguments, fixed when it is made: the owner is shown
-/// exactly this and approving runs exactly this, so nothing can be swapped in before his click.</summary>
+/// exactly this and approving runs exactly this, so nothing can be swapped in before their click.</summary>
 internal sealed record WorkspaceHandoff(string Id, string Kind, string Target, string Reason,
     string State, string Detail, DateTimeOffset Created, string? Sha256 = null, string? Arguments = null);
 
@@ -24,7 +24,7 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
     /// <summary>
     /// What an approved "program" or "takeover" request does, set by the workspace that owns these
     /// requests because both need its launcher: start a program on the owner's own desktop, or move
-    /// one he already has open into the workspace. Null when it went, one sentence when it did not.
+    /// one they already have open into the workspace. Null when it went, one sentence when it did not.
     /// </summary>
     internal Func<WorkspaceHandoff, string?>? Perform { get; set; }
 
@@ -50,8 +50,8 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
             using var file = File.Open(target, FileMode.Open, FileAccess.Read, FileShare.Read);
             hash = Convert.ToHexString(SHA256.HashData(file));
         }
-        // A program the owner asked for goes to his own desktop, and a program he already has open
-        // can be moved in here - both are his click, and both need the workspace's own launcher,
+        // A program the owner asked for goes to their own desktop, and a program they already have open
+        // can be moved in here - both are their click, and both need the workspace's own launcher,
         // which is what Perform is. Neither is a document, so neither is checked as one.
         else if (kind is "program" or "takeover")
         {

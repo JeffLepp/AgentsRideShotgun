@@ -63,7 +63,7 @@ public partial class MainWindow : Window, IDisposable
 
     void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        // Never empty (brief A.4): a fresh install always has something under Recent to show.
+        // Never empty: a fresh install always has something under Recent to show.
         WorkspaceHome.EnsureScratch();
         RestorePreferences();
         _hub.Refresh();
@@ -98,7 +98,7 @@ public partial class MainWindow : Window, IDisposable
 
     /// <summary>
     /// Recent keeps the last few. Every project folder an agent works in gets a workspace, so the
-    /// list grew without end - the owner's had over a dozen on 2026-09-22, most untouched for days.
+    /// list would grow without end, most of it untouched for days.
     /// An older one is still one search away, and stays listed while it is the one open.
     /// </summary>
     IEnumerable<HubEntry> Recent() =>
@@ -220,8 +220,8 @@ public partial class MainWindow : Window, IDisposable
         if (_priorMode == "wide") ShowWide(_selectedId); else ShowStack();
     }
 
-    /// <summary>Settings from the tray or the gear: inside the card when the stack is showing
-    /// (owner's pick, 2026-09-22), the wide page when a workspace is open.</summary>
+    /// <summary>Settings from the tray or the gear: inside the card when the stack is showing,
+    /// the wide page when a workspace is open.</summary>
     internal void OpenSettings()
     {
         if (_mode is "stack" or "cardsettings") ShowCardSettings(); else ShowSettings();
@@ -338,8 +338,8 @@ public partial class MainWindow : Window, IDisposable
     }
     void SidebarItem_Checked(object sender, RoutedEventArgs e) { if (sender is RadioButton { DataContext: HubEntry entry }) SelectWorkspace(entry.Id); }
 
-    /// <summary>Sleeps one workspace right from its card or sidebar row, in one click (fix list item
-    /// 2.2), the same as the workspace page's own Sleep control. Nested inside the card/row's own
+    /// <summary>Sleeps one workspace right from its card or sidebar row, in one click,
+    /// the same as the workspace page's own Sleep control. Nested inside the card/row's own
     /// Button or RadioButton, which already marks a completed click handled before it can bubble
     /// into WorkingCard_Click or SidebarItem_Checked; e.Handled here is belt and braces.</summary>
     void SleepCard_Click(object sender, RoutedEventArgs e)
@@ -448,7 +448,7 @@ public partial class MainWindow : Window, IDisposable
 
     /// <summary>True when <paramref name="entry"/>'s card is realized and any part of it falls
     /// inside the visible scrolled area of the current mode's list; used by the capture loop and,
-    /// through <see cref="ShouldCaptureForTest"/>, by the gate driving this same method.</summary>
+    /// through <see cref="ShouldCaptureForTest"/>, by the UI probe driving this same method.</summary>
     bool ShouldCapture(HubEntry entry)
     {
         (ItemsControl? list, ScrollViewer? viewport) = CaptureSurface();
@@ -465,7 +465,7 @@ public partial class MainWindow : Window, IDisposable
         return bounds.IntersectsWith(new Rect(0, 0, viewport.ActualWidth, viewport.ActualHeight));
     }
 
-    // --- test seams for the gate (Scenes.Hub.cs): drive this window's real state, never a copy ---
+    // --- test seams for the UI probe (Scenes.Hub.cs): drive this window's real state, never a copy ---
 
     /// <summary>True while the card-preview loop's timer is actually running.</summary>
     internal bool PreviewLoopRunning => _cardPreviews.IsEnabled;
@@ -507,7 +507,7 @@ public partial class MainWindow : Window, IDisposable
         });
     }
 
-    /// <summary>Reopening from the tray or the taskbar always lands on the stack (brief A.5).</summary>
+    /// <summary>Reopening from the tray or the taskbar always lands on the stack.</summary>
     public void RestoreWorkspaceWindow()
     {
         if (_disposed) return;
@@ -557,14 +557,14 @@ public partial class MainWindow : Window, IDisposable
     void Back_Click(object sender, RoutedEventArgs e) => ShowStack();
     void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     void Maximize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-    // The close button always hides to the tray (brief A.5); Quit lives only on the tray menu.
+    // The close button always hides to the tray; Quit lives only on the tray menu.
     void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     // --- windows: keyboard, DWM rounding, lifecycle -----------------------------------------------
 
     void Window_SourceInitialized(object? sender, EventArgs e)
     {
-        // Windows 10 stays square: a deliberate exception recorded in the spec.
+        // Windows 10 stays square: a deliberate exception.
         if (Environment.OSVersion.Version.Build < 22000) return;
         try
         {
@@ -610,7 +610,7 @@ public partial class MainWindow : Window, IDisposable
     void Window_StateChanged(object? sender, EventArgs e)
     {
         bool minimizedNow = WindowState == WindowState.Minimized;
-        // Restoring from the taskbar is another kind of reopening: back to the stack (brief A.5).
+        // Restoring from the taskbar is another kind of reopening: back to the stack.
         if (_wasMinimized && !minimizedNow && _mode != "stack") ShowStack();
         _wasMinimized = minimizedNow;
         UpdateVisibleWork();

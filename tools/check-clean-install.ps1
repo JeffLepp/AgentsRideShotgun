@@ -29,7 +29,7 @@ function Assert-SandboxLaunchAllowed {
 Assert-SandboxLaunchAllowed
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Validation output must be inside this Deskweave checkout.'
+    throw 'Validation output must be inside this ARS checkout.'
 }
 if (Test-Path -LiteralPath $output) { throw 'Use a new output folder for each run; old results must never count as a fresh pass.' }
 $setupDir = Join-Path $output 'installer'; $results = Join-Path $output 'results'

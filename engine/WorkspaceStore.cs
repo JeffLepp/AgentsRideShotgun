@@ -4,13 +4,13 @@ using System.Text.Json;
 namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// What a workspace is allowed to be. Not a security setting: see FREE_ROAM.md.
+/// What a workspace is allowed to be. Not a security setting.
 /// </summary>
 public enum WorkspaceMode
 {
     /// <summary>
-    /// The owner's own desktop, on a second screen he is not looking at. The agent has his files,
-    /// his programs, his network and his permissions, and nothing is withheld from it. The boundary
+    /// The owner's own desktop, on a second screen they are not looking at. The agent has their files,
+    /// their programs, their network and their permissions, and nothing is withheld from it. The boundary
     /// is attention rather than privilege: the point is that an agent working does not take over
     /// the screen the owner is using. This is the product, and it is the default.
     /// </summary>
@@ -33,7 +33,7 @@ public sealed record StoredWorkspace
     /// Fast by default, because a workspace that is slower than the owner's own desktop is not the
     /// product. Fast is not a cap - it schedules by weight - so an idle machine is given over to
     /// the agent and taken straight back when the owner wants it. Light is the opt-in for a
-    /// workspace that must stay out of the way while he works.
+    /// workspace that must stay out of the way while they work.
     /// </summary>
     public WorkspacePower Power { get; init; } = WorkspacePower.Fast;
 
@@ -41,7 +41,7 @@ public sealed record StoredWorkspace
     public WorkspaceMode Mode { get; init; } = WorkspaceMode.Free;
 
     /// <summary>
-    /// Which outside agents Deskweave sends here. Empty: none, just the owner. See
+    /// Which outside agents ARS sends here. Empty: none, just the owner. See
     /// <see cref="WorkspaceHome"/> for the other values.
     /// </summary>
     public string Agents { get; init; } = string.Empty;
@@ -54,8 +54,8 @@ public sealed record StoredWorkspace
 /// <c>%LOCALAPPDATA%\ARS\agent-workspaces</c> holding its own <c>workspace.json</c>; listing
 /// them is a directory scan and deleting one is deleting the folder.
 ///
-/// This is the whole of what Milestone 2 has to persist under a desktop object. The original
-/// Milestone 2 was written for a disposable Sandbox VM and needed a manifest, a verified installer
+/// This is the whole of what has to persist under a desktop object. An earlier design
+/// was written for a disposable Sandbox VM and needed a manifest, a verified installer
 /// cache and deterministic reconstruction because the guest was wiped on every stop. A desktop
 /// object wipes nothing: the files an agent wrote are still there when the workspace starts again,
 /// so there is nothing to rebuild and nothing to promise about what survives.
@@ -76,7 +76,7 @@ public static class WorkspaceStore
 
     /// <summary>
     /// Everything one workspace's programs and its last mission leave lying about: the redirected
-    /// APPDATA, LOCALAPPDATA and TEMP, the workspace's own Chrome profile, Deskweave's evidence of
+    /// APPDATA, LOCALAPPDATA and TEMP, the workspace's own Chrome profile, ARS's evidence of
     /// the mission, and the picture of the screen it was stopped on. Nothing in here was written by
     /// the owner or by an agent, which is what makes clearing it a refresh rather than a delete.
     /// </summary>
@@ -89,7 +89,7 @@ public static class WorkspaceStore
     /// Raised when a workspace is created, deleted or cleared - a change to which workspaces exist,
     /// which nothing else on screen can find out for itself. The dashboard reads its cards from the
     /// folder tree on demand, so before this a workspace deleted in the panel stayed on the
-    /// dashboard until Deskweave was restarted.
+    /// dashboard until ARS was restarted.
     ///
     /// Deliberately not raised by <see cref="Save"/>: reading a folder with an unreadable record
     /// saves the recovered one while <see cref="All"/> is still enumerating, so a listener that

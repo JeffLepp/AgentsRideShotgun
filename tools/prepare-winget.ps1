@@ -43,13 +43,13 @@ try {
 finally { Remove-Item -LiteralPath $download -ErrorAction SilentlyContinue }
 
 if (-not $OutputRoot) { $OutputRoot = Join-Path $root 'artifacts/winget' }
-$manifestDir = Join-Path $OutputRoot "manifests/j/JeffLepp/ARS/$Version"
+$manifestDir = Join-Path $OutputRoot "manifests/j/JeffLepp/AgentsRideShotgun/$Version"
 if (Test-Path -LiteralPath $manifestDir) { throw "Manifest already exists: $manifestDir" }
 [IO.Directory]::CreateDirectory($manifestDir) | Out-Null
 
 $versionManifest = @'
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
-PackageIdentifier: JeffLepp.ARS
+PackageIdentifier: JeffLepp.AgentsRideShotgun
 PackageVersion: __VERSION__
 DefaultLocale: en-US
 ManifestType: version
@@ -57,7 +57,7 @@ ManifestVersion: 1.12.0
 '@
 $installerManifest = @'
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
-PackageIdentifier: JeffLepp.ARS
+PackageIdentifier: JeffLepp.AgentsRideShotgun
 PackageVersion: __VERSION__
 InstallerType: exe
 Scope: user
@@ -75,7 +75,7 @@ ManifestVersion: 1.12.0
 '@
 $localeManifest = @'
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
-PackageIdentifier: JeffLepp.ARS
+PackageIdentifier: JeffLepp.AgentsRideShotgun
 PackageVersion: __VERSION__
 PackageLocale: en-US
 Publisher: Jefferson Kline
@@ -92,7 +92,7 @@ Description: |-
   ARS gives coding agents like Claude Code and Codex a second Windows desktop, so they can
   open apps, click and test while your mouse, keyboard and windows stay yours. A small corner
   window shows what the agent is doing. Everything runs locally.
-Moniker: ars
+Moniker: agentsrideshotgun
 Tags:
   - ai
   - agent
@@ -110,9 +110,9 @@ $versionManifest = $versionManifest.Replace('__VERSION__', $Version)
 $installerManifest = $installerManifest.Replace('__VERSION__', $Version).Replace('__URL__', $installerUrl).Replace('__HASH__', $hash).Replace('__DATE__', [DateTime]::UtcNow.ToString('yyyy-MM-dd'))
 $localeManifest = $localeManifest.Replace('__VERSION__', $Version).Replace('__PACKAGE_URL__', $packageUrl).Replace('__TAG__', $ReleaseTag)
 $utf8 = [Text.UTF8Encoding]::new($false)
-[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.ARS.yaml'), $versionManifest + [Environment]::NewLine, $utf8)
-[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.ARS.installer.yaml'), $installerManifest + [Environment]::NewLine, $utf8)
-[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.ARS.locale.en-US.yaml'), $localeManifest + [Environment]::NewLine, $utf8)
+[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.AgentsRideShotgun.yaml'), $versionManifest + [Environment]::NewLine, $utf8)
+[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.AgentsRideShotgun.installer.yaml'), $installerManifest + [Environment]::NewLine, $utf8)
+[IO.File]::WriteAllText((Join-Path $manifestDir 'JeffLepp.AgentsRideShotgun.locale.en-US.yaml'), $localeManifest + [Environment]::NewLine, $utf8)
 $oneLineTemplate = '$u=''__URL__'';$h=''__HASH__'';$p=Join-Path $env:TEMP (''ARS-''+[guid]::NewGuid().ToString(''N'')+''.exe'');try{& curl.exe --silent --show-error --fail --location --retry 3 --proto ''=https'' --proto-redir ''=https'' --output $p $u;if($LASTEXITCODE){throw ''Download failed''};$s=Get-AuthenticodeSignature -LiteralPath $p;if((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash -cne $h -or $s.Status -ne ''Valid'' -or $s.SignerCertificate.Subject -notmatch ''^CN=Jefferson Kline(?:,|$)''){throw ''Verification failed''};Set-Content -LiteralPath $p -Stream Zone.Identifier -Encoding Ascii -Value ''[ZoneTransfer]'',''ZoneId=3'',(''HostUrl='' + $u);$r=Start-Process -FilePath $p -ArgumentList ''--silent'' -PassThru -Wait;if($r.ExitCode){throw (''Installer exited ''+$r.ExitCode)}}finally{Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue}'
 $oneLine = $oneLineTemplate.Replace('__URL__', $installerUrl).Replace('__HASH__', $hash)
 Write-Output 'PowerShell install command (download verified; clean install still required):'

@@ -7,16 +7,16 @@ using System.Text;
 namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// One of a workspace's windows taken out onto the owner's own desktop: he pulled it off a picture
+/// One of a workspace's windows taken out onto the owner's own desktop: they pulled it off a picture
 /// of the workspace, or pressed Open on my desktop. Windows cannot move a running window from one
-/// desktop to another, so this starts it again over there - a page in his own browser, an app from
+/// desktop to another, so this starts it again over there - a page in their own browser, an app from
 /// its own program, arguments and folder - and closes an app's copy in here, so there is one of it,
-/// on his screen. Only the owner's own gesture reaches this; no agent tool can.
+/// on their screen. Only the owner's own gesture reaches this; no agent tool can.
 /// </summary>
 internal static class WorkspacePopOut
 {
     /// <summary>What taking one window out would start. Page: the workspace browser's current
-    /// page, opened in his browser. Otherwise the program that owns the window.</summary>
+    /// page, opened in their browser. Otherwise the program that owns the window.</summary>
     internal sealed record Plan(nint Window, string Title, bool Page, string? Program, string? Arguments,
         string? Folder, int ProcessId);
 
@@ -30,7 +30,7 @@ internal static class WorkspacePopOut
     };
 
     /// <summary>What taking this window out would do, or null when it cannot be started again on the
-    /// owner's desktop: Deskweave's own screen furniture, consoles, packaged apps, anything whose
+    /// owner's desktop: ARS's own screen furniture, consoles, packaged apps, anything whose
     /// command line cannot be read.</summary>
     internal static Plan? For(WorkspaceRuntime runtime, nint window)
     {
@@ -49,9 +49,9 @@ internal static class WorkspacePopOut
     }
 
     /// <summary>
-    /// Does it, on the owner's behalf. <paramref name="at"/> is where he let go, in screen pixels,
+    /// Does it, on the owner's behalf. <paramref name="at"/> is where they let go, in screen pixels,
     /// or null from the button, which leaves placement to the program. Returns one short line for
-    /// him, and tells the agents on this workspace, so none of them starts it again in here.
+    /// them, and tells the agents on this workspace, so none of them starts it again in here.
     /// </summary>
     internal static async Task<string> Run(WorkspaceRuntime runtime, Plan plan, (int X, int Y)? at)
     {
@@ -74,8 +74,8 @@ internal static class WorkspacePopOut
         Process started;
         try
         {
-            // Started by Deskweave itself, which runs on the owner's desktop: the new process lands
-            // there, with his own environment rather than the workspace's redirected one.
+            // Started by ARS itself, which runs on the owner's desktop: the new process lands
+            // there, with their own environment rather than the workspace's redirected one.
             var start = new ProcessStartInfo(plan.Program!, plan.Arguments ?? "") { UseShellExecute = false };
             if (plan.Folder is { Length: > 0 } folder && Directory.Exists(folder)) start.WorkingDirectory = folder;
             started = Process.Start(start) ?? throw new InvalidOperationException("no process");
@@ -119,7 +119,7 @@ internal static class WorkspacePopOut
     static readonly HashSet<string> OneCopy = new(StringComparer.OrdinalIgnoreCase) { "VirtualBoxVM.exe" };
 
     /// <summary>A resizable or maximizable window is an app; a fixed one without either is a
-    /// message. ponytail: style heuristic; a fixed-size main window keeps both copies, which loses nothing.</summary>
+    /// message. A style heuristic: a fixed-size main window keeps both copies, which loses nothing.</summary>
     static bool LooksLikeApp(nint window)
     {
         const nint maximizeBox = 0x00010000;
@@ -134,7 +134,7 @@ internal static class WorkspacePopOut
     }
 
     /// <summary>Stands in for waiting on a real window on the owner's desktop, so the gate can take
-    /// the rest of the path without putting anything on his screen.</summary>
+    /// the rest of the path without putting anything on their screen.</summary>
     internal static Func<Process, TimeSpan, Task<nint>>? WindowOfForTests;
 
     /// <summary>The first visible top-level window of the new process or one it started (a launcher
@@ -178,7 +178,7 @@ internal static class WorkspacePopOut
         return family;
     }
 
-    /// <summary>Where he let go: the title bar under the pointer, kept on that monitor's work area.</summary>
+    /// <summary>Where they let go: the title bar under the pointer, kept on that monitor's work area.</summary>
     static void Place(nint window, (int X, int Y) point)
     {
         if (!Native.GetWindowRect(window, out Native.Rect rect)) return;

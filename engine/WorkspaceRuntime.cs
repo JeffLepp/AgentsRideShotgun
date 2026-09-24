@@ -15,15 +15,15 @@ public sealed class WorkspaceRuntime : IDisposable
     static readonly Lock Lifetime = new();
 
     /// <summary>
-    /// How long a workspace nobody uses keeps its desktop and browser (MVP_SPEC, Sleep). 30 minutes
-    /// was the original number; the owner asked for sooner on the belief that waking is free. It is
+    /// How long a workspace nobody uses keeps its desktop and browser. 30 minutes
+    /// was the original number; sooner looked better on the belief that waking is free. It is
     /// not, so this is not as short as first tried.
     ///
-    /// WorkspaceRuntime.Start() alone is cheap - 15-19 ms on this machine (SleepGate.WakeCost) - but
+    /// WorkspaceRuntime.Start() alone is cheap - 15-19 ms on a test machine (SleepGate.WakeCost) - but
     /// Start is not what a nap costs. Sleep tears down the whole desktop: the browser process and
     /// its DevTools connection, every app the agent had open, the shell. SleepGate.RoundTripCost
     /// measures the real round trip - browser warm and navigated, one app open, sleep, wake, browser
-    /// relaunched and renavigated to the same page, app relaunched - at 5.9-6.2 s on this machine,
+    /// relaunched and renavigated to the same page, app relaunched - at 5.9-6.2 s on that machine,
     /// repeatably, when nothing else is competing for the machine. Under the load three workspaces
     /// at once actually creates, a Chrome cold start can lose the race and need a retry (observed
     /// directly running this gate), so a few seconds is the floor, not the ceiling. None of that
@@ -33,8 +33,8 @@ public sealed class WorkspaceRuntime : IDisposable
     ///
     /// So sleeping is not free, and a workspace an agent pauses on for a few minutes, or the owner
     /// reads for six, must not pay that repeatedly. 30 minutes was too patient about a desktop and a
-    /// Chrome nobody answered; 15 is the number this settles on - still half the original, which is
-    /// the "sooner" the owner asked for, but long enough that an ordinary pause is not what triggers
+    /// Chrome nobody answered; 15 is the number this settles on - still half the original, so
+    /// sooner, but long enough that an ordinary pause is not what triggers
     /// the teardown this comment just finished describing.
     /// </summary>
     internal static TimeSpan SleepAfter { get; set; } = TimeSpan.FromMinutes(15);
@@ -71,8 +71,8 @@ public sealed class WorkspaceRuntime : IDisposable
         {
             // No terminal of its own any more. Every workspace used to open a PowerShell window as it
             // started, a head start from before agents had `run`; nothing used it, and the owner saw
-            // a stray console in the corner and an agent had one more window to read past
-            // (2026-09-22). A workspace now starts empty until an agent opens something.
+            // a stray console in the corner and an agent had one more window to read past.
+            // A workspace now starts empty until an agent opens something.
             // The control plane owns the lease, so who is driving is one answer rather than a
             // boolean here and a different boolean wherever an agent ends up living.
             _plane = new WorkspaceControl(_computer);
@@ -275,7 +275,7 @@ public sealed class WorkspaceRuntime : IDisposable
     static Timer? _sweeper;
 
     /// <summary>
-    /// Screenshots older than a week go from every workspace, running or asleep (MVP_SPEC, History):
+    /// Screenshots older than a week go from every workspace, running or asleep:
     /// now and hourly for as long as the app runs, on a pool thread. Walks the folders rather than
     /// reading workspace records, which can write a record back while one is being created.
     /// </summary>

@@ -89,10 +89,10 @@ internal static class PrewarmProbe
     }
 
     /// <summary>
-    /// The rest: under the owner's own design point of about three workspaces at once,
-    /// a Chrome cold start can lose its race outright. Measured 2026-09-21: twice in a row during a
-    /// full gate run, never once in three isolated runs - the same load this reproduces by starting
-    /// three cold starts at the same instant instead of one at a time. Checks that WorkspaceBrowser
+    /// The rest: under the intended load of about three workspaces at once,
+    /// a Chrome cold start can lose its race outright. It shows up during a full gate run and rarely
+    /// in isolated runs, so this reproduces the same load by starting three cold starts at the same
+    /// instant instead of one at a time. Checks that WorkspaceBrowser
     /// either comes up under that load or says exactly which stage did not, per workspace - not the
     /// silent "DID NOT COME UP" that made this hole unreportable in the first place.
     /// </summary>

@@ -7,13 +7,13 @@ public enum WorkspacePower
 {
     /// <summary>
     /// Stays out of the owner's way, as a hard cap it may not exceed even on an idle machine. The
-    /// opt-in, for a workspace that must be unfeelable while he works.
+    /// opt-in, for a workspace that must be unfeelable while they work.
     /// </summary>
     Light,
 
     /// <summary>
-    /// What a workspace runs at unless he says otherwise. Scheduled by weight rather than capped,
-    /// so it uses whatever the machine is not using and yields the moment he wants it back.
+    /// What a workspace runs at unless they say otherwise. Scheduled by weight rather than capped,
+    /// so it uses whatever the machine is not using and yields the moment they want it back.
     /// </summary>
     Fast
 }
@@ -88,7 +88,7 @@ sealed class WorkspaceLimits : IDisposable
     /// strangers' PCs and 4 GB is a third of one machine and all of another. But a pure share is
     /// what breaks the small ones: a quarter of an 8 GB laptop is 2 GB for the application under
     /// test *and* the workspace's Chrome, and Chrome alone will pass that. The job limit is not a
-    /// soft target - crossing it fails the allocation, so the owner sees the program he asked the
+    /// soft target - crossing it fails the allocation, so the owner sees the program they asked the
     /// agent to test die for no visible reason and blames the product.
     ///
     /// So the share has a floor, the way the processor share has one in cores: enough to hold a
@@ -114,13 +114,13 @@ sealed class WorkspaceLimits : IDisposable
     /// Light is a hard cap. It may not exceed its share even on a machine doing nothing else, and
     /// that is the point: the owner is working and must not be able to feel an agent.
     ///
-    /// Fast is not a cap at all. Measured 2026-09-07 on a four-core Windows 10 machine: a large WPF app
+    /// Fast is not a cap at all. Measured on a four-core Windows 10 machine: a large WPF app
     /// took 57.4 s to show a window under the flat quarter and 21.5 s at 80%, against seconds on the
     /// owner's own desktop, and the hard cap was the whole of that difference - the machine was
     /// idle and the workspace was forbidden from using it. Weight-based scheduling constrains a job
     /// only against other weight-based jobs, so a workspace gets everything nobody else wants and
-    /// gives it straight back when someone does. That is what "he is not using the machine and
-    /// wants the agent to get on with it" was always supposed to mean.
+    /// gives it straight back when someone does. That is what "they are not using the machine and
+    /// want the agent to get on with it" was always supposed to mean.
     /// </summary>
     internal static Native.JobCpuRateControlInformationData CpuControl(WorkspacePower power, int processors) =>
         power == WorkspacePower.Fast

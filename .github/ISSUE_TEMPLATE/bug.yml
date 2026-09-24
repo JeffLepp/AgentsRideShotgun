@@ -1,5 +1,5 @@
 name: Bug
-description: Something Deskweave did that it should not have, or did not do
+description: Something ARS did that it should not have, or did not do
 body:
   - type: textarea
     attributes:
@@ -9,7 +9,7 @@ body:
       required: true
   - type: input
     attributes:
-      label: Deskweave version
+      label: ARS version
       description: Settings > General shows it.
     validations:
       required: true
@@ -24,5 +24,5 @@ body:
   - type: textarea
     attributes:
       label: Log lines
-      description: The relevant lines from the workspace's evidence folder (Settings > General > Open Deskweave data). Check them for anything private first.
+      description: The relevant lines from the workspace's evidence folder (Settings > General > Open ARS data). Check them for anything private first.
       render: text

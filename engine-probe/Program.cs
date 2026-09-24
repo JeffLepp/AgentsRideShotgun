@@ -56,7 +56,7 @@ internal static class Program
         if (args.Length > 0 && args[0] == "mcp") return FirstRunConnections.Cli(args);
         if (args.Length == 3 && args[0] == "--render-mode-child") return RenderModeProbe.Child(args[1], args[2]);
         if (args.Length == 3 && args[0] == "--popout-fixture") return PopOutProbe.Fixture(args[1], args[2]);
-        // ponytail: one probe at a time on this PC (see ui-probe); child modes above never wait for it.
+        // One probe at a time on this PC (see ui-probe); child modes above never wait for it.
         using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
         try { turn.WaitOne(); } catch (AbandonedMutexException) { }
         if (args.Length == 2 && args[0] == "--capture-spike" && Path.IsPathFullyQualified(args[1]))
@@ -138,8 +138,8 @@ internal static class Program
             Check(ProductContext.FolderName == "ARS", "Copied product context defaults to ARS");
             Check(Path.GetFileName(ProductContext.LocalRoot) == "ARS"
                 && Path.GetFileName(ProductContext.RoamingRoot) == "ARS", "Local and roaming product roots are ARS's own");
-            Check(WorkspaceStore.Root == ProductContext.Local("agent-workspaces"), "Production workspace root is owned by Deskweave");
-            Check(File.Exists(bridge) && Path.GetFileName(bridge) == "ARS.WorkspaceBridge.exe", "Deskweave bridge is packaged beside the copied engine");
+            Check(WorkspaceStore.Root == ProductContext.Local("agent-workspaces"), "Production workspace root is owned by ARS");
+            Check(File.Exists(bridge) && Path.GetFileName(bridge) == "ARS.WorkspaceBridge.exe", "ARS bridge is packaged beside the copied engine");
             Check(AgentDesktop.NameFor("probe") == "ARS-probe", "Desktop namespace is ARS's own");
             using var scope = WorkspaceStore.UseRootForTests(Path.Combine(fixture, "w"));
             // The connection checks change consent and switches; they did that in the owner's own settings.
@@ -166,7 +166,7 @@ internal static class Program
             string config = JsonSerializer.Serialize(WorkspaceConnections.Configuration(first.Id));
             Check(WorkspaceConnections.Name(first.Id) == "ars_workspace_" + first.Id
                 && config.Contains("ARS.WorkspaceBridge.exe", StringComparison.Ordinal)
-                && config.Contains("--workspace", StringComparison.Ordinal), "Generated MCP connection names the Deskweave bridge and its workspace ticket");
+                && config.Contains("--workspace", StringComparison.Ordinal), "Generated MCP connection names the ARS bridge and its workspace ticket");
 
             WorkspaceRuntime one = WorkspaceRuntime.Start(first);
             WorkspaceRuntime two = WorkspaceRuntime.Start(second);
@@ -207,7 +207,7 @@ internal static class Program
             using (var competitor = new Client(first.Id))
             {
                 Check(client.Request("initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "Deskweave engine probe", version = "1" } }).TryGetProperty("result", out _),
-                    "Packaged Deskweave bridge initializes as standard MCP");
+                    "Packaged ARS bridge initializes as standard MCP");
                 competitor.Request("initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "Competing probe", version = "1" } });
                 string file = Path.Combine(firstFolder, "retained-output.txt");
                 // Writes and reads go through run: the agent's own tools do file work, so the

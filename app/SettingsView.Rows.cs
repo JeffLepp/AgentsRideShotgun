@@ -7,11 +7,11 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave;
 
 /// <summary>
-/// The building blocks every settings page is made of: a card of rows (reference .card/.srw), the
+/// The building blocks every settings page is made of: a card of rows, the
 /// three control kinds a row can end in (toggle, dropdown, a group of radio choices), a shortcut row
 /// and a two-step confirm. Each wiring helper writes <see cref="AppSettingsStore"/> on a real change,
 /// registers a follower so <see cref="Follow"/> can show a change made elsewhere, and adds a
-/// <see cref="Bound"/> entry so the UI gate can drive it the way a click would.
+/// <see cref="Bound"/> entry so the UI probe can drive it the way a click would.
 /// </summary>
 public partial class SettingsView
 {
@@ -23,7 +23,7 @@ public partial class SettingsView
     }
 
     /// <summary>The label (and optional "Default" tag) over an optional muted hint, as every row's
-    /// left side is built (reference .srw .t).</summary>
+    /// left side is built.</summary>
     static StackPanel RowText(string label, string? hint = null)
     {
         var stack = new StackPanel();
@@ -36,7 +36,7 @@ public partial class SettingsView
     }
 
 
-    /// <summary>One row in a card (reference .srw): optional leading icon, the text, and a control
+    /// <summary>One row in a card: optional leading icon, the text, and a control
     /// on the right with an 8 DIP gap. The hairline between rows is added by <see cref="Group"/>,
     /// not here, so a row looks the same whether it is a plain row or a radio choice.</summary>
     Border Row(UIElement text, FrameworkElement? control = null, UIElement? icon = null)
@@ -98,7 +98,7 @@ public partial class SettingsView
         return border;
     }
 
-    /// <summary>A card of rows (reference .card), with a hairline between every pair - whatever the
+    /// <summary>A card of rows, with a hairline between every pair - whatever the
     /// rows are, plain or radio choices - and none above the first. A row a <see cref="SettingsFeatures"/>
     /// flag starts collapsed is skipped for this: it takes no space either way, but a hairline drawn
     /// above one would still stretch the card's width and leave a bare line where nothing shows.</summary>
@@ -125,8 +125,8 @@ public partial class SettingsView
     }
 
 
-    /// <summary>A section: an optional label (with an optional action button at its right, reference
-    /// .lbl .btn) over one card, 22 DIP below the section before it.</summary>
+    /// <summary>A section: an optional label (with an optional action button at its right)
+    /// over one card, 22 DIP below the section before it.</summary>
     static StackPanel Section(string? label, Border card, UIElement? action = null)
     {
         var stack = new StackPanel { Margin = new Thickness(0, 0, 0, 22) };
@@ -136,7 +136,7 @@ public partial class SettingsView
             if (action is null) { text.Margin = new Thickness(2, 0, 0, 8); stack.Children.Add(text); }
             else
             {
-                // .lbl is a flex row with align-items:center (reference CSS) - the label and its
+                // .lbl is a flex row with align-items:center in CSS - the label and its
                 // button share a middle, not a top, or the label sits high against the taller button.
                 var header = new Grid { Margin = new Thickness(2, 0, 0, 8) };
                 header.ColumnDefinitions.Add(new ColumnDefinition());
@@ -153,7 +153,7 @@ public partial class SettingsView
         return stack;
     }
 
-    /// <summary>A toggle switch (reference .sw) bound to one bool setting. <paramref name="allow"/>
+    /// <summary>A toggle switch bound to one bool setting. <paramref name="allow"/>
     /// can hold a change back, to ask first: the switch goes back and the setting stays.</summary>
     CheckBox Toggle(string claim, Func<AppSettings, bool> read, Func<AppSettings, bool, AppSettings> write,
         Func<bool, bool>? allow = null)
@@ -185,7 +185,7 @@ public partial class SettingsView
         return box;
     }
 
-    /// <summary>A dropdown (reference .dd) bound to one setting, offered as the exact choices given -
+    /// <summary>A dropdown bound to one setting, offered as the exact choices given -
     /// which must be no more than <c>AppSettings.Sane</c> allows for that setting.</summary>
     ComboBox Dropdown<T>(string claim, IReadOnlyList<Choice> choices, Func<AppSettings, T> read,
         Func<AppSettings, T, AppSettings> write) where T : notnull
@@ -209,10 +209,10 @@ public partial class SettingsView
     }
 
 
-    /// <summary>A rebindable shortcut row (reference .key): the row and the control that shows and
+    /// <summary>A rebindable shortcut row: the row and the control that shows and
     /// records it, so two rows on the same page can refuse each other's combination. When
     /// <paramref name="taken"/> is given, "Another app is using this shortcut." shows under the row
-    /// exactly while it reports true (reference: the same style as the Start with Windows error),
+    /// exactly while it reports true (the same style as the Start with Windows error),
     /// following <see cref="ModuleEntry.PauseShortcutTakenChanged"/>. Show() replacing the page does not
     /// raise this row's Unloaded - Page and this view both stay connected to the same
     /// PresentationSource throughout, so nothing here is actually removed from a live tree - so the
@@ -253,7 +253,7 @@ public partial class SettingsView
 
     /// <summary>A destructive or slow action that asks first: the row's control starts as one button
     /// (a plain <c>DeskButton</c>, or a <c>LinkButton</c> for a Storage kind's Clear) and turns into
-    /// the question with a real Yes/Cancel, never a modal dialog the gate cannot see past. The prompt
+    /// the question with a real Yes/Cancel, never a modal dialog the UI probe cannot see past. The prompt
     /// is read lazily, at the moment of asking, so a Storage row can name the size it holds right
     /// then rather than the one it had when the page was built. <paramref name="enabled"/> and
     /// <paramref name="disabledTooltip"/> are Scratch's own Clear disabled while its computer runs;
@@ -305,7 +305,7 @@ public partial class SettingsView
         return host;
     }
 
-    /// <summary>The 6 DIP meter above the Storage rows (reference .meter): a hairline track, radius
+    /// <summary>The 6 DIP meter above the Storage rows: a hairline track, radius
     /// 3, one segment per <see cref="StorageKind"/> that has a known, positive size, each as wide as
     /// its share of the total. Rebuilt whenever the sizes change, since a WPF Grid's star columns
     /// cannot be re-weighted any other way.</summary>

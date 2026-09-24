@@ -116,7 +116,7 @@ public sealed class WorkspaceCommands : IDisposable
     public WorkspaceCommands(WorkspaceControl control)
     {
         _control = control;
-        // A Deskweave that stopped without closing its workspaces leaves job files behind, and a
+        // An ARS that stopped without closing its workspaces leaves job files behind, and a
         // workspace is meant to be reusable for months. Sweep them on the way in, when nothing can
         // still be holding them, rather than accumulating a folder of dead scripts.
         Sweep(control.Folder);
@@ -177,8 +177,8 @@ public sealed class WorkspaceCommands : IDisposable
 
         try
         {
-            // A PowerShell script goes into its own file and the batch file merely starts it. Measured
-            // 2026-09-06: an agent asked to embed a PowerShell one-liner in a cmd line lost a turn to
+            // A PowerShell script goes into its own file and the batch file merely starts it. Measured:
+            // an agent asked to embed a PowerShell one-liner in a cmd line lost a turn to
             // every level of quoting, then gave up and typed the script into Notepad instead.
             if (scriptPs is not null)
                 File.WriteAllText(scriptPs, Crlf(command) + "\r\n");
@@ -471,8 +471,7 @@ public sealed class WorkspaceCommands : IDisposable
 
     /// <summary>
     /// A long command cut in the middle, not at the end: what it runs is usually last, after a
-    /// `cd /d "..."` into a long folder, and two jobs cut at 120 characters read the same
-    /// (2026-09-22: "python groceries.py" was lost off the end of both listed jobs).
+    /// `cd /d "..."` into a long folder, and two jobs cut at 120 characters read the same.
     /// </summary>
     internal static string Short(string command)
     {

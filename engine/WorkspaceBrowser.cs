@@ -14,27 +14,27 @@ namespace Deskweave.AgentWorkspaces;
 /// Layer 3: the workspace's own Chrome, driven through its DevTools protocol, so an agent reads the
 /// real page instead of a picture of it - exact text, links, forms, and everything below the fold.
 ///
-/// Two transports, in this order and for the owner's stated reason, which is collision and not
+/// Two transports, in this order, chosen against collision rather than
 /// attack. First an inherited pipe: nothing binds, nothing on the PC can reach it, and no program of
-/// his can take it. If the pipe does not survive our CreateProcessAsUser launch, a port the
+/// theirs can take it. If the pipe does not survive our CreateProcessAsUser launch, a port the
 /// operating system chooses, on loopback, recorded in the workspace record. Never a fixed port.
 ///
 /// The browser is a separate process with its own profile inside the workspace folder. The owner's
-/// Chrome, his profile and his logins are never driven and never read.
+/// Chrome, their profile and their logins are never driven and never read.
 /// </summary>
 public sealed partial class WorkspaceBrowser : IDisposable
 {
     /// <summary>
-    /// A Chromium to drive, found rather than assumed. This was a hardcoded
-    /// `C:\Program Files\Google\Chrome\Application\chrome.exe` until 2026-08-23, which is only where
+    /// A Chromium to drive, found rather than assumed. A hardcoded
+    /// `C:\Program Files\Google\Chrome\Application\chrome.exe` is only where
     /// Chrome lands when it is installed for every user - the ordinary per-user install puts it under
-    /// LOCALAPPDATA, and a PC with no Chrome at all had no browser layer whatsoever.
+    /// LOCALAPPDATA, and a PC with no Chrome at all would have no browser layer whatsoever.
     ///
     /// Edge is last on purpose and matters most: it ships with Windows, it is Chromium, and it speaks
     /// the same DevTools protocol. It is what makes the browser layer work on a PC where nothing has
-    /// been installed. Resolved once - a browser does not move while Deskweave is running.
+    /// been installed. Resolved once - a browser does not move while ARS is running.
     ///
-    /// Finding nothing is remembered only briefly. Deskweave starts with Windows and stays in the
+    /// Finding nothing is remembered only briefly. ARS starts with Windows and stays in the
     /// tray, so a fresh PC with no browser installs one while we are running; a permanent miss left
     /// the browser layer dead until the app was restarted, with no hint why. Looking again is a
     /// handful of registry reads and File.Exists calls.
@@ -246,9 +246,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
         {
             // One bounded retry after TryPort has stopped its unsuccessful launch. A retry is
             // recovery, not evidence that the original failure was harmless or caused by load.
-            // Keep the failed stage visible if this attempt also fails. The earlier SleepGate
-            // failures were traced to that fixture's idle retirement, not a measured browser
-            // startup requirement; real installed-app startup still needs its own evidence.
+            // Keep the failed stage visible if this attempt also fails.
             port = await TryPort(desktop, common, profile, url, cancel, lease, attempt: 2).ConfigureAwait(false);
         }
         return port is null ? null : await NavigateStarted(port, url, cancel).ConfigureAwait(false);
@@ -510,11 +508,11 @@ public sealed partial class WorkspaceBrowser : IDisposable
 
     /// <summary>
     /// The page as an agent should see it: its text, and the things on it that can be acted on.
-    /// This is the whole reason layer 3 exists - measured 2026-08-23, Chrome's element tree
+    /// This is the whole reason layer 3 exists - measured, Chrome's element tree
     /// published 42 elements for a page whose text is right here.
     ///
     /// Each control leads with a selector that matches it and nothing else, so it can go straight
-    /// into page click or type. A bare `a "Today"` left an agent to invent one (2026-09-22). Built
+    /// into page click or type. A bare `a "Today"` left an agent to invent one. Built
     /// from what the page already has - an id, a distinctive attribute, else its place in the
     /// tree - without marking the page, which is the app being tested.
     /// </summary>

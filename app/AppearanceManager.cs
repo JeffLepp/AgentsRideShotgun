@@ -7,7 +7,7 @@ using Microsoft.Win32;
 namespace Deskweave;
 
 /// <summary>
-/// Light and dark, with the design spec's exact tokens. Follows Windows' app theme
+/// Light and dark, with fixed color tokens. Follows Windows' app theme
 /// unless Settings > General > Theme forces one. Every brush is replaced in the application
 /// resources, so anything bound with DynamicResource repaints in place; no window, workspace or
 /// agent restarts.
@@ -49,7 +49,7 @@ internal static class AppearanceManager
         ("AsleepColor", "#B0B7C3", "#586070"),
     ];
 
-    // The engine's pages and the pre-MVP shell still use these names; they get the same values.
+    // The engine's pages and the older shell still use these names; they get the same values.
     static readonly (string Alias, string Of)[] Aliases =
     [
         ("ShellSurfaceBrush", "WindowBrush"), ("ShellCanvasBrush", "WindowBrush"), ("ShellChromeBrush", "WindowBrush"),

@@ -9,7 +9,7 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'OutputDirectory must be inside this Deskweave checkout.'
+    throw 'OutputDirectory must be inside this ARS checkout.'
 }
 if (Test-Path -LiteralPath $output) { throw 'Use a fresh output directory.' }
 if (-not (Test-Path -LiteralPath $Installer -PathType Leaf) -or -not (Test-Path -LiteralPath $Bundle -PathType Leaf)) {

@@ -14,8 +14,8 @@ internal static class WorkspacePeekPolicy
     /// <param name="hub">The hub window is on screen, which shows the same thing bigger.</param>
     /// <param name="dismissed">The owner pressed hide; gone until the next activity.</param>
     /// <param name="summoned">The owner called it up with the shortcut or by dragging a file at it.</param>
-    /// <param name="held">The owner's pointer, a drag or his input is on it right now.</param>
-    /// <param name="busy">A workspace waits on the owner: a question, or a workspace he holds.</param>
+    /// <param name="held">The owner's pointer, a drag or their input is on it right now.</param>
+    /// <param name="busy">A workspace waits on the owner: a question, or a workspace they hold.</param>
     /// <param name="quiet">How long since the last thing any workspace did.</param>
     internal static bool Wanted(CornerShow show, bool running, bool hub, bool dismissed, bool summoned,
         bool pinned, bool held, bool busy, TimeSpan quiet, TimeSpan fade, bool presentation = false, bool explicitlyRequested = false)
@@ -131,7 +131,7 @@ internal static class WorkspacePeekPlacement
 
     /// <summary>
     /// Whether a place the owner dragged it to, read back from disk, still lands on a monitor
-    /// Windows knows about. A monitor unplugged since he moved it there is not somewhere to trust;
+    /// Windows knows about. A monitor unplugged since they moved it there is not somewhere to trust;
     /// the caller falls back to the ordinary corner instead.
     /// </summary>
     internal static bool OnConnectedMonitor(Rect dip)

@@ -24,7 +24,7 @@ else if (args.Length == 1 && args[0].StartsWith("Deskweave.Workspace.", StringCo
     && !string.IsNullOrEmpty(capability)) fixedPipe = args[0];
 else return await Say(Mismatched, 2);
 
-// Where the agent is working, so Deskweave can give each project its own workspace. Claude Code
+// Where the agent is working, so ARS can give each project its own workspace. Claude Code
 // names its project; other clients start their servers in theirs.
 string cwd = Environment.GetEnvironmentVariable("CLAUDE_PROJECT_DIR") is { Length: > 0 } project
     ? project : Environment.CurrentDirectory;
@@ -39,7 +39,7 @@ string? hello = null;
 // Change only this process's inheritance bits; the streams themselves remain open and usable.
 bool mayLaunchApp = PreventStandardPipeInheritance();
 
-// A Deskweave that is starting (at sign-in, or for another agent a moment ago) gets as long as one
+// An ARS that is starting (at sign-in, or for another agent a moment ago) gets as long as one
 // this bridge starts itself; one not running at all is started in the background. Both stay under
 // Codex's 10 s MCP startup timeout. Past that, the client hears one line rather than a long hang.
 (Link? link, string why) = await Reach(TimeSpan.FromSeconds(9));
@@ -59,7 +59,7 @@ try
     while (true)
     {
         int read = await reader.ReadAsync(buffer);
-        // The provider closed its end: this session is over, whatever Deskweave is doing.
+        // The provider closed its end: this session is over, whatever ARS is doing.
         if (read == 0) return 0;
         for (int i = 0; i < read; i++)
         {
@@ -79,7 +79,7 @@ try
 }
 finally { link?.Dispose(); }
 
-// One request from the agent. Deskweave closing or restarting mid-session does not end the session:
+// One request from the agent. ARS closing or restarting mid-session does not end the session:
 // the next request finds it again, and until then each request is answered with one line.
 async Task Forward(string message)
 {
@@ -91,7 +91,7 @@ async Task Forward(string message)
         (link, why) = await Reach(TimeSpan.FromSeconds(1));
         if (link is not null)
         {
-            // A new session on Deskweave's side: it hears where the agent works and who it is again.
+            // A new session on ARS's side: it hears where the agent works and who it is again.
             if (link.Send(context, new(null, "deskweave/context", Discard: true)) is { } sending) await sending;
             if (hello is not null && expect.Method != "initialize"
                 && link.Send(hello, Read(hello) with { Discard = true }) is { } greeting) await greeting;
@@ -137,8 +137,8 @@ static Expect Read(string message)
     catch (JsonException) { return new(null, "", false); }
 }
 
-// Joins Deskweave, starting it first when it is not running: an agent that needs a screen should not
-// have to ask the owner to open an app. A Deskweave that is running but still starting gets the
+// Joins ARS, starting it first when it is not running: an agent that needs a screen should not
+// have to ask the owner to open an app. An ARS that is running but still starting gets the
 // patience. Only the real install's router ticket is started or waited on that long; any other
 // ticket (a probe's fixture store) gets two seconds and never starts an app.
 async Task<(Link?, string)> Reach(TimeSpan patience)
@@ -167,7 +167,7 @@ static bool Launch(string app, bool standardPipesIsolated)
 {
     // A failed native isolation check must not leak the session into a new app process.
     // Joining an already running app remains available, and the existing NotOpen response
-    // can direct the owner to start Deskweave themselves.
+    // can direct the owner to start ARS themselves.
     if (!standardPipesIsolated) return false;
     var start = new ProcessStartInfo(app, "--background") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(app)! };
     foreach (string name in start.Environment.Keys.Where(k => k.StartsWith("CLAUDE", StringComparison.OrdinalIgnoreCase)
@@ -192,7 +192,7 @@ static bool PreventStandardPipeInheritance()
     return true;
 }
 
-// Whether a Deskweave holds its one-per-account lock, starting or running. Must match App.xaml.cs.
+// Whether an ARS holds its one-per-account lock, starting or running. Must match App.xaml.cs.
 static bool Running()
 {
     string user = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
@@ -203,7 +203,7 @@ static bool Running()
 }
 
 // Finds the pipe the ticket names and joins it. The ticket is read again on every attempt: a
-// Deskweave that restarted serves a new pipe under a new ticket.
+// ARS that restarted serves a new pipe under a new ticket.
 async Task<(Link?, string)> Open(TimeSpan patience)
 {
     long until = Environment.TickCount64 + (long)patience.TotalMilliseconds;
@@ -236,7 +236,7 @@ async Task<(Link?, string)> Open(TimeSpan patience)
     }
 }
 
-// Deskweave writes a ticket whole or not at all, so one it cannot read is not a half-written one:
+// ARS writes a ticket whole or not at all, so one it cannot read is not a half-written one:
 // it is from a different version, and waiting will not change it.
 static (string Pipe, string? Key, string Reason) Ticket(string path)
 {
@@ -257,7 +257,7 @@ static (string Pipe, string? Key, string Reason) Ticket(string path)
     { return ("", null, Mismatched); }
 }
 
-// Asks Windows whether anyone serves the pipe, without connecting: a ticket left by a Deskweave
+// Asks Windows whether anyone serves the pipe, without connecting: a ticket left by an ARS
 // that crashed names a pipe that is gone, and waiting on it only delays the answer.
 static bool Served(string pipe)
 {
@@ -287,7 +287,7 @@ static extern bool SetHandleInformation(nint handle, uint mask, uint flags);
 sealed record Expect(string? Id, string Method, bool Discard);
 
 /// <summary>
-/// One connection to Deskweave. Deskweave answers every request frame with exactly one frame, in
+/// One connection to ARS. ARS answers every request frame with exactly one frame, in
 /// order, an empty one for a notification, so replies are matched by position. When the pipe goes,
 /// every request still waiting is answered at once instead of being left to time out.
 /// </summary>

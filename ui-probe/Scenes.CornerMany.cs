@@ -70,7 +70,7 @@ static class CornerManyScenes
         WorkspaceHandoff open = asking.Request("program", "Notepad", "he asked for it");
         WorkspaceHandoff take = asking.Request("takeover", "Notepad", "it is already running outside");
         Program.Check(open.Id != take.Id && open.Kind == "program" && take.Kind == "takeover",
-            "Opening a program on the owner's desktop and taking his copy into the workspace stay two separate questions");
+            "Opening a program on the owner's desktop and taking their copy into the workspace stay two separate questions");
         asking.CancelPending();
 
         string[] order = [.. tabs.Select(tab => (string)tab.Tag)];
@@ -144,7 +144,7 @@ static class CornerManyScenes
     }
 
     /// <summary>The one line the owner answers, per kind of request. A takeover runs the other way
-    /// round from the rest - it closes his own copy and starts the program in the workspace - and
+    /// round from the rest - it closes their own copy and starts the program in the workspace - and
     /// used to borrow the "open it on your desktop" sentence with the difference written into the
     /// program's name to keep it true.</summary>
     static void QuestionChecks()
@@ -155,7 +155,7 @@ static class CornerManyScenes
             && Ask("program", "Notepad") == "Open this on your desktop?\nNotepad\nWhy: why"
             && Ask("file", @"C:\somewhere\report.pdf") == "Open report.pdf on your desktop?"
             && Ask("url", "http://localhost:5173/") == "Open http://localhost:5173/ on your desktop?",
-            "A takeover asks to close the owner's own copy and start it in the workspace; every other request still asks to open something on his desktop");
+            "A takeover asks to close the owner's own copy and start it in the workspace; every other request still asks to open something on their desktop");
         // The owner approves what will actually run: a program's whole command line and the agent's
         // reason are on the card, not just its name.
         Program.Check(Ask("program", @"C:\Program Files\Tool\tool.exe", "--wipe \"C:\\data\"")

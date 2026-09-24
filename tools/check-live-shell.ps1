@@ -54,7 +54,7 @@ public static class ShellCheckWindow {
 '@
 $exe = Join-Path $root 'out\ARS.exe'
 $app = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
-if ($app.Count -ne 1) { throw 'Expected one running published Deskweave instance.' }
+if ($app.Count -ne 1) { throw 'Expected one running published ARS instance.' }
 $app = $app[0]
 $checks = [Collections.Generic.List[string]]::new()
 $report = [ordered]@{ pid = $app.Id; version = (Get-Item $exe).VersionInfo.ProductVersion; backgroundOnly = [bool]$BackgroundOnly; compact = [bool]$Compact; checks = $checks }
@@ -103,7 +103,7 @@ try {
         Check ([Math]::Abs(($compactBounds.Right - $compactBounds.Left) - 340 * $scale) -le 2 -and
             [Math]::Abs(($compactBounds.Bottom - $compactBounds.Top) - 560 * $scale) -le 2) 'The requested vertical strip uses 340 by 560 DIP'
     }
-    foreach ($name in @('Find a workspace', 'Settings', 'Close Deskweave')) { $null = Control $name }
+    foreach ($name in @('Find a workspace', 'Settings', 'Close ARS')) { $null = Control $name }
     $bounds = [ShellCheckWindow+Rect]::new()
     [void][ShellCheckWindow]::GetWindowRect($window, [ref]$bounds)
     $beforeWidth = $bounds.Right - $bounds.Left
@@ -154,13 +154,13 @@ try {
     Invoke 'Back to workspaces'
     Check (-not (Control ('Show more for ' + $workspaceName)).Current.IsOffscreen) 'Show more and Back preserve the expanded workspace'
     Invoke ('Collapse preview for ' + $workspaceName)
-    Invoke 'Close Deskweave'
+    Invoke 'Close ARS'
     Wait-ShellVisibility $window $false
-    Check (-not [ShellCheckWindow]::IsWindowVisible($window) -and -not $app.HasExited) 'Closing the strip leaves Deskweave running in the background'
+    Check (-not [ShellCheckWindow]::IsWindowVisible($window) -and -not $app.HasExited) 'Closing the strip leaves ARS running in the background'
     Check ([ShellCheckWindow]::OpenFromTray($app.Id)) 'The published tray accepts its normal selection callback'
     Wait-ShellVisibility $window $true
     Check ([ShellCheckWindow]::IsWindowVisible($window)) 'A tray selection reopens the published strip'
-    Invoke 'Close Deskweave'
+    Invoke 'Close ARS'
     }
     foreach ($file in @('ARS.exe', 'ARS.dll', 'Deskweave.AgentWorkspaces.dll')) {
         $report[$file + 'Sha256'] = (Get-FileHash -LiteralPath (Join-Path $root ('out\' + $file))).Hash

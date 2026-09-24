@@ -6,10 +6,10 @@
              TextOptions.TextFormattingMode="Display"
              Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource InkBrush}"
              FontFamily="{DynamicResource SkinFontFamily}" FontSize="13">
-    <!-- Settings (references 05, 06): the 264 DIP category list with "Workspaces" to go back, and
+    <!-- Settings: the 264 DIP category list with "Workspaces" to go back, and
          the chosen page, at most 720 wide. The hub hosts it below its title bar. -->
     <UserControl.Resources>
-        <!-- "Workspaces" (reference .item.nav.back): a list row in muted ink that goes back. -->
+        <!-- "Workspaces": a list row in muted ink that goes back. -->
         <Style x:Key="BackRow" TargetType="Button">
             <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -96,7 +96,7 @@
                 </ControlTemplate>
             </Setter.Value></Setter>
         </Style>
-        <!-- A quick tile on the card's home (owner's pick, 2026-09-22): a card-coloured square that
+        <!-- A quick tile on the card's home: a card-coloured square that
              fills with accent while on, like Windows' quick settings. -->
         <Style x:Key="QuickTile" TargetType="ToggleButton">
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
@@ -164,7 +164,7 @@
             </StackPanel>
         </Border>
 
-        <!-- Card mode (the hub's own 340 DIP stack, owner's pick 2026-09-22): no category list; this
+        <!-- Card mode (the hub's own 340 DIP stack): no category list; this
              home page of quick tiles and one row per category instead, and the page slides in over it. -->
         <ScrollViewer x:Name="CardHome" Grid.Column="1" Visibility="Collapsed" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                       Background="{DynamicResource WindowBrush}">

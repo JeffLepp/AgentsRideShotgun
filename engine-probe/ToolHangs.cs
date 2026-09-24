@@ -7,7 +7,7 @@ using System.Text.Json;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Tool calls that hung or said the wrong thing (review 2026-09-22): a wait on a window title with
+/// Tool calls that hung or said the wrong thing: a wait on a window title with
 /// no seconds never ended, missed a window that was already open or renamed itself, and woke on a
 /// control's text; a Start Menu scan cut off by its wait kept growing under the caller and was
 /// cached half read; a workspace torn down under a call was reported as bad parameters; the

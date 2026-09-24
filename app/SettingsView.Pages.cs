@@ -12,9 +12,7 @@ using Deskweave.Product;
 
 namespace Deskweave;
 
-/// <summary>Every settings page (MVP_SPEC Surfaces 4, cut to four categories 2026-09-13). Agents,
-/// Accounts and the Storage group of History &amp; privacy match their references word for word; General
-/// has no reference and follows the same look.</summary>
+/// <summary>Every settings page, in four categories.</summary>
 public partial class SettingsView
 {
     FrameworkElement Build(string id) => id switch
@@ -116,7 +114,7 @@ public partial class SettingsView
 
     /// <summary>
     /// The question before the corner window goes off, the same from General's switch and the card's
-    /// tile: a tester switched it off without knowing what it was. It starts hidden; Turn off runs
+    /// tile: it is easy to switch off without knowing what it is. It starts hidden; Turn off runs
     /// <paramref name="turnOff"/>, and either answer hides it again.
     /// </summary>
     static StackPanel CornerQuestion(Action turnOff)
@@ -284,7 +282,7 @@ public partial class SettingsView
             ? SettingsActions.Accounts().Select(AccountRow).Cast<UIElement>().ToArray()
             : [];
         var signedIn = Section("Signed in", Group(accountRows), AddAccountButton());
-        // The account list needs Wave 2 slice E; with it off there is nothing else on this page
+        // The account list waits on SettingsFeatures.Accounts; with it off there is nothing else on this page
         // besides the banner, so the whole category leaves the nav (SettingsView.RefreshNavAvailability).
         signedIn.Visibility = SettingsFeatures.Accounts ? Visibility.Visible : Visibility.Collapsed;
 
@@ -359,8 +357,8 @@ public partial class SettingsView
         ], s => s.Screenshots, (s, v) => s with { Screenshots = v });
         var saveRow = Row(RowText("Save screenshots", "They show up in What it did"), save);
         // Save screenshots saves a value nothing writes by yet; the whole group (its label included)
-        // hides until Wave 2 slice F turns SettingsFeatures.History on. Storage and Delete all
-        // Deskweave data below always show, so this page and History & privacy in the nav are never
+        // hides until SettingsFeatures.History is on. Storage and Delete all
+        // ARS data below always show, so this page and History & privacy in the nav are never
         // left empty either way.
         var screenshots = Section("Screenshots", Group(saveRow));
         screenshots.Visibility = SettingsFeatures.History ? Visibility.Visible : Visibility.Collapsed;
@@ -390,7 +388,7 @@ public partial class SettingsView
             controls.Children.Add(sizeText);
             controls.Children.Add(clear);
             var row = Row(RowText(kind.Label, kind.Hint), controls);
-            // Agent browser has no reliable size source yet (Wave 2 slice E); its row hides until
+            // Agent browser has no reliable size source yet; its row hides until
             // SettingsFeatures.BrowserData turns on. The other three kinds always show.
             row.Visibility = kind.Visible() ? Visibility.Visible : Visibility.Collapsed;
             kindRows[i] = row;
@@ -432,7 +430,7 @@ public partial class SettingsView
             return (UIElement)Row(RowText(project.Name, project.Path), controls);
         }).ToArray();
         var projects = Section("Made by agents in your projects", Group(projectRows));
-        // No reliable way to find a workspace's project folder yet (Wave 2 slice F); hidden until
+        // No reliable way to find a workspace's project folder yet; hidden until
         // SettingsFeatures.ProjectFiles is on and there is at least one row to show.
         projects.Visibility = SettingsFeatures.ProjectFiles && projectRows.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 

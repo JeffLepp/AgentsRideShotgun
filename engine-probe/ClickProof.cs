@@ -6,8 +6,8 @@ using Deskweave.AgentWorkspaces;
 /// <summary>
 /// Proves or disproves the theory that a workspace desktop has
 /// no foreground window, so WPF and WinForms drop their "mouse is over this control" state and a
-/// coordinate press puts the focus ring on a button while the release never raises Click
-/// (the app-testing friction review, item 5). Three real windows on a real workspace
+/// coordinate press puts the focus ring on a button while the release never raises Click.
+/// Three real windows on a real workspace
 /// desktop, each with one button that appends to a file when pressed - PowerShell + Add-Type builds
 /// all three. The WPF one is started through AgentDesktop.Launch, not the probe's own process, so
 /// WorkspaceRenderMode's software-drawing switch applies to it exactly as it would to a real agent's

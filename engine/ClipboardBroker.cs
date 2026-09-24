@@ -13,7 +13,7 @@ namespace Deskweave.AgentWorkspaces;
 /// every copy made on a workspace desktop under that workspace before handing the owner's clipboard
 /// back.
 ///
-/// Everything here is the plain Win32 clipboard, deliberately. Measured on 2026-08-22: the managed
+/// Everything here is the plain Win32 clipboard, deliberately. Measured: the managed
 /// clipboard goes through OLE, and two desktops using OLE lock each other out with
 /// CLIPBRD_E_CANT_OPEN - the second workspace to copy anything simply fails, whatever the timing.
 /// The raw calls hold the clipboard for microseconds and work from every desktop at once.
@@ -70,7 +70,7 @@ public sealed class ClipboardBroker : IDisposable
     ClipboardBroker()
     {
         using var ready = new ManualResetEventSlim();
-        // ponytail: the broker owns one thread rather than borrowing the host's UI thread. It needs
+        // The broker owns one thread rather than borrowing the host's UI thread. It needs
         // a window and a message pump, and a wedged application must not be able to freeze the app.
         _thread = new Thread(() =>
         {
@@ -190,9 +190,9 @@ public sealed class ClipboardBroker : IDisposable
         _settle?.Stop();
         // Nobody owns the clipboard when the copier opened it with a null window, which leaves
         // nothing to ask. Such a copy stays the owner's. Guessing towards a workspace would take
-        // the owner's copy out of his clipboard and hand it to an agent; guessing this way the
+        // the owner's copy out of their clipboard and hand it to an agent; guessing this way the
         // cost is an agent app that copies anonymously landing its text in the owner's clipboard,
-        // which he can see and overwrite. Leaking his data to an agent is the worse failure.
+        // which they can see and overwrite. Leaking their data to an agent is the worse failure.
         if (_changedOn is not null && _workspaces.Contains(_changedOn))
         {
             // An agent copied something. It belongs to that workspace and to nobody else.

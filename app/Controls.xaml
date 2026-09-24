@@ -1,11 +1,11 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:local="clr-namespace:Deskweave">
-    <!-- Settings controls shared with first launch (reference .sw, .dd, .radio, .key, .rec, .link,
-         .glyph, .banner, .srw). Merged after Theme.xaml; tokens, icons and Theme.xaml's styles are
+    <!-- Settings controls shared with first launch.
+         Merged after Theme.xaml; tokens, icons and Theme.xaml's styles are
          reached with DynamicResource only, because a merged dictionary cannot StaticResource its
          siblings. CSS line heights are set as block line heights so rows come out the same height
-         as the reference. -->
+         as the design. -->
 
     <!-- Focus rings for the rounder controls; the square ones use Theme.xaml's KeyboardFocus. -->
     <Style x:Key="SwitchFocus">
@@ -61,7 +61,7 @@
         </Setter.Value></Setter>
     </Style>
 
-    <!-- Dropdown (reference .dd): at least 150 wide, radius 6, control border, window fill, padding
+    <!-- Dropdown: at least 150 wide, radius 6, control border, window fill, padding
          5 x 10, 12.5 DIP, the Down icon at 12 DIP muted, 10 after the text. The list opens on a card
          with a hairline; the popup is its own window, so it gets one soft shadow to lift it off the
          card it opens over. Arrow keys change the choice while it is closed, Alt+Down opens it. -->
@@ -145,7 +145,7 @@
     </Style>
 
 
-    <!-- Key cap (reference .key): 11.5 mono, 1 DIP control border, radius 5, 2 vertical and 6-7 horizontal padding. -->
+    <!-- Key cap: 11.5 mono, 1 DIP control border, radius 5, 2 vertical and 6-7 horizontal padding. -->
     <Style x:Key="KeyCap" TargetType="ContentControl">
         <Setter Property="FontFamily" Value="{DynamicResource MonoFontFamily}"/>
         <Setter Property="FontSize" Value="11.5"/>
@@ -163,7 +163,7 @@
     </Style>
 
 
-    <!-- Text button (reference .link): 12.5 semibold accent, no box. -->
+    <!-- Text button: 12.5 semibold accent, no box. -->
     <Style x:Key="LinkButton" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
         <Setter Property="FontSize" Value="12.5"/>
@@ -184,7 +184,7 @@
         </Setter.Value></Setter>
     </Style>
 
-    <!-- Letter tile for an agent or an account (reference .glyph): 28 x 28, radius 7, white 12 bold
+    <!-- Letter tile for an agent or an account: 28 x 28, radius 7, white 12 bold
          on the fixed color each tile is drawn in. -->
     <Style x:Key="LetterTile" TargetType="ContentControl">
         <Setter Property="Width" Value="28"/>
@@ -204,7 +204,7 @@
         </Setter.Value></Setter>
     </Style>
 
-    <!-- Banner (reference .banner): soft accent, radius 10, padding 12 x 14, the lock icon in accent,
+    <!-- Banner: soft accent, radius 10, padding 12 x 14, the lock icon in accent,
          13 DIP text at 1.45. Put a TextBlock with a semibold first run in it. -->
     <Style x:Key="Banner" TargetType="ContentControl">
         <Setter Property="FontSize" Value="13"/>
@@ -225,7 +225,7 @@
         </Setter.Value></Setter>
     </Style>
 
-    <!-- A row in a settings card (reference .srw): at least 50 tall, padding 9 x 14, a hairline on
+    <!-- A row in a settings card: at least 50 tall, padding 9 x 14, a hairline on
          top of every row but the first. Label 13, hint 11.5 muted under it, both at 1.35. -->
     <Style x:Key="SettingRow" TargetType="Border">
         <Setter Property="MinHeight" Value="50"/>
@@ -249,7 +249,7 @@
         <Setter Property="Foreground" Value="{DynamicResource DangerInkBrush}"/>
     </Style>
 
-    <!-- Storage (reference .srw .big / .size, 15-settings-storage): the total above the meter, 13
+    <!-- Storage: the total above the meter, 13
          SemiBold, and the faint right-aligned size before each kind's Clear link. -->
     <Style x:Key="StorageTotal" TargetType="TextBlock">
         <Setter Property="FontSize" Value="13"/>

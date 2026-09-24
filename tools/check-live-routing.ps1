@@ -5,9 +5,9 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Validation output must be inside this Deskweave checkout.'
+    throw 'Validation output must be inside this ARS checkout.'
 }
-if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit Deskweave before running this isolated live check.' }
+if (Get-Process ARS -ErrorAction SilentlyContinue) { throw 'Quit ARS before running this isolated live check.' }
 $product = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS'
 $settings = Join-Path $product 'settings.json'
 if ((Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).FirstRunDone) {
@@ -23,7 +23,7 @@ $before = WorkspaceIds
 [IO.Directory]::CreateDirectory($output) | Out-Null
 $projects = if ($ProjectDirectory) { [IO.Path]::GetFullPath($ProjectDirectory) } else { Join-Path $output 'projects' }
 if (-not $projects.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Fixture projects must be inside this Deskweave checkout.'
+    throw 'Fixture projects must be inside this ARS checkout.'
 }
 $project = Join-Path $projects 'Shop'
 $trader = Join-Path $projects 'Trader'

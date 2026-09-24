@@ -12,7 +12,7 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave;
 
 /// <summary>
-/// Settings inside the hub's own card (owner's pick, 2026-09-22): the stack no longer jumps to a
+/// Settings inside the hub's own card: the stack no longer jumps to a
 /// 1200 DIP window. The card's home is three quick tiles (Corner window, Pause agents, Night) over
 /// one row per category, each with a line saying what is set; a category's page slides in from
 /// the right over it, and back slides it away. The pages are the same ones the wide window shows.

@@ -153,8 +153,8 @@ public sealed partial class WorkspaceBrowser
 
     /// <summary>
     /// Closes every tab but the one the page tools are on. Run once, as the browser starts: one
-    /// workspace's browser came back with the tabs of its earlier runs - ten on 2026-09-22, four of
-    /// them blank - which the owner then saw in the corner and an agent had to read past in every
+    /// workspace's browser came back with the tabs of its earlier runs, many of them
+    /// blank, which the owner then saw in the corner and an agent had to read past in every
     /// tab list. What an agent signed into stays; that lives in the profile, not in the tabs.
     /// </summary>
     internal async Task CloseLeftovers(CancellationToken cancel)

@@ -7,7 +7,7 @@ namespace Deskweave;
 /// <summary>
 /// The tray menu in the app's own colours and spacing. The stock WinForms menu kept a grey icon
 /// strip down its left for icons it has none of, stayed light in a dark app, and looked like a
-/// different program's (2026-09-22). Colours are the Theme tokens (AppearanceManager) flattened onto
+/// different program's. Colours are the Theme tokens (AppearanceManager) flattened onto
 /// the card colour, read at paint time so a theme change reaches the next opening.
 /// </summary>
 internal static class TrayMenuStyle

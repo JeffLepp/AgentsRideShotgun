@@ -16,7 +16,7 @@ string app = Path.Combine(install, "ARS.exe");
 string bridge = Path.Combine(install, "Bridge", "ARS.WorkspaceBridge.exe");
 if (!File.Exists(app) || !File.Exists(bridge))
 {
-    Console.Error.WriteLine("ARS is not installed for this Windows user. Install ARS from https://github.com/JeffLepp/Deskweave/releases, open it once, then reconnect this MCP server.");
+    Console.Error.WriteLine("ARS is not installed for this Windows user. Install ARS from https://github.com/JeffLepp/AgentsRideShotgun/releases, open it once, then reconnect this MCP server.");
     return 2;
 }
 

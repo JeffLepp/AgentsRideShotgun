@@ -248,7 +248,7 @@ static class SettingsScenes
             startup.Choose(false);
             Program.Check(startupSynced, "Start with Windows reaches its startup seam");
             FindButton(view, "Open ARS data").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            Program.Check(opened, "Open Deskweave data reaches Explorer seam");
+            Program.Check(opened, "Open ARS data reaches Explorer seam");
             Bound theme = view.BoundControls.Single(b => b.Label == "Theme");
             theme.Choose(ThemeChoice.Dark); Pump();
             Color dark = ((SolidColorBrush)Application.Current!.Resources["WindowBrush"]).Color;
@@ -303,8 +303,8 @@ static class SettingsScenes
             FindButton(view, "Copy setup").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Program.Check(copied, "Copy setup reaches clipboard seam");
 
-            // A switch here is the owner's answer, the same as one on first launch: an agent he
-            // turns off stays off, and the loop that connects agents installed later leaves it.
+            // A switch here is the owner's answer, the same as one on first launch: an agent they
+            // turn off stays off, and the loop that connects agents installed later leaves it.
             HashSet<WorkspaceConnections.AgentApp> connected = [.. WorkspaceConnections.Supported];
             Program.Agents(app => connected.Contains(app) ? AgentState.Connected : AgentState.Found);
             WorkspaceConnections.SetConnected = (app, on, _) =>
@@ -324,12 +324,12 @@ static class SettingsScenes
                 && WorkspaceConnections.TurnedOff(WorkspaceConnections.AgentApp.ClaudeCode),
                 "An agent turned off in Settings is remembered off, not only disconnected");
             Program.Check(!WorkspaceConnections.Missing(WorkspaceConnections.AgentApp.ClaudeCode),
-                "Nothing reconnects an agent turned off in Settings, however long Deskweave runs");
+                "Nothing reconnects an agent turned off in Settings, however long ARS runs");
             claude.IsChecked = true;
             Pump();
             Program.Check(connected.Contains(WorkspaceConnections.AgentApp.ClaudeCode)
                 && !WorkspaceConnections.TurnedOff(WorkspaceConnections.AgentApp.ClaudeCode),
-                "Turning it back on in Settings connects it and lets Deskweave keep it up again");
+                "Turning it back on in Settings connects it and lets ARS keep it up again");
             Bound pause = view.BoundControls.Single(b => b.Label == "Pause every agent");
             AppSettingsStore.Update(s => s with { PauseHotkey = "Ctrl+Alt+F12" });
             Pump();
@@ -442,7 +442,7 @@ static class SettingsScenes
             shell.Width = 340;
             shell.Height = 560;
             shell.UpdateLayout();
-            // Settings opens inside the card (owner's pick, 2026-09-22): its home, then a page that
+            // Settings opens inside the card: its home, then a page that
             // slides in, then back twice, the window never changing size.
             SettingsView? cached = null;
             var cardBack = (Button)shell.FindName("CardBackButton");

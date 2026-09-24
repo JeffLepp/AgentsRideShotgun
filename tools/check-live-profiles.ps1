@@ -6,7 +6,7 @@ param(
     [ValidateRange(1, 30)][int]$ExpectedProfiles = 4
 )
 # Read-only host integration evidence. Requires Python 3.11+ for its standard TOML parser.
-# Reads only provider configuration files and the Deskweave router ticket; never auth files.
+# Reads only provider configuration files and the ARS router ticket; never auth files.
 # Does not invoke provider CLIs, connect to a pipe, launch an app, or change configuration.
 # Run -SnapshotOnly before publishing. After publishing, pass its output directory with
 # -BeforeSnapshot to wait for auto-connection and prove unrelated parsed values survived.
@@ -14,10 +14,10 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $exe = Join-Path $root 'out\ARS.exe'
 $app = @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
-if ($app.Count -ne 1) { throw 'Expected exactly one running Deskweave from this checkout''s out directory.' }
+if ($app.Count -ne 1) { throw 'Expected exactly one running ARS from this checkout''s out directory.' }
 $version = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
 $bridge = Join-Path $root 'out\Bridge\ARS.WorkspaceBridge.exe'
-$ticket = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Deskweave\agent-workspaces.access\router.json'
+$ticket = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ARS\agent-workspaces.access\router.json'
 $userProfile = [Environment]::GetFolderPath('UserProfile')
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw 'Python 3.11 or newer is required for independent JSON/TOML inspection.' }
 $mode = if ($SnapshotOnly) { 'snapshot' } else { 'verify' }
@@ -211,7 +211,7 @@ finally:
     report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
 print(report['status'].upper() + ': profile ' + mode + '; report: ' + str(report_path))
 if 'profiles' in report:
-    print('Profiles: ' + str(report['profileCount']) + '; current Deskweave entries: ' + str(report['currentEntryCount']))
+    print('Profiles: ' + str(report['profileCount']) + '; current ARS entries: ' + str(report['currentEntryCount']))
 for item in checks:
     print(('PASS ' if item['passed'] else 'FAIL ') + item['claim'])
 sys.exit(0 if report['status'] == 'passed' else 1)

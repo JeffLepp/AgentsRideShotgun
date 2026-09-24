@@ -4,13 +4,13 @@ using System.Windows.Media.Imaging;
 namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// What one tick of the corner view draws. Wave 0's spike found the whole screen far too costly to
+/// What one tick of the corner view draws. The whole screen is far too costly to
 /// print at a rate worth watching, but one window prints fast and cheap - so idle prints the whole
 /// screen at a slow pace, and in use prints only the front window, refreshing the whole-screen
 /// background once a second underneath it. Pure enough to call from the host's timer and from the
 /// probe that measures it, and it touches no window of its own.
 ///
-/// Wave 1's fix round found the first cut of "in use" still compositing a full 1920x1080
+/// The first cut of "in use" still composited a full 1920x1080
 /// <see cref="System.Windows.Media.Imaging.RenderTargetBitmap"/> every tick to draw the window over
 /// the background - most of an idle tick's own cost, paid again on every one of the much faster
 /// in-use ticks. There is no composite any more: the two bitmaps are handed back separately and the

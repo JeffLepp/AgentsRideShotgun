@@ -5,10 +5,10 @@ using Deskweave.AgentWorkspaces;
 
 /// <summary>
 /// Where a thing opens follows who it is for:
-/// the agent's own work stays in the workspace, and something the owner asked for goes to his own
+/// the agent's own work stays in the workspace, and something the owner asked for goes to their own
 /// desktop, where the shell is - so packaged apps, file associations and one-copy-per-session
-/// applications all have a route instead of a refusal. Nothing reaches his desktop, and nothing of
-/// his closes, until he clicks.
+/// applications all have a route instead of a refusal. Nothing reaches their desktop, and nothing of
+/// theirs closes, until they click.
 /// </summary>
 internal static class OpenRouteProbe
 {
@@ -187,7 +187,7 @@ internal static class OpenRouteProbe
 
     /// <summary>
     /// The owner's route end to end: the agent asks, nothing opens, the owner clicks, and only then
-    /// does Windows start it - on his own desktop, which is the whole point, and which an independent
+    /// does Windows start it - on their own desktop, which is the whole point, and which an independent
     /// oracle inside the launched process confirms rather than the tool's own say-so.
     /// </summary>
     static void OwnerRouteWaitsForTheClick(Action<bool, string> check)
@@ -208,14 +208,14 @@ internal static class OpenRouteProbe
             check(!Program.Client.Failed(asked)
                 && Program.Client.Text(asked).Contains("one click", StringComparison.Ordinal),
                 "open where=owner comes back as a route the owner can take, not as a refusal");
-            check(!File.Exists(his), "Asking for the owner's desktop starts nothing there: an agent cannot put a window on his screen by itself");
+            check(!File.Exists(his), "Asking for the owner's desktop starts nothing there: an agent cannot put a window on their screen by itself");
 
             WorkspaceHandoff pending = runtime.Access!.Handoffs.All.Single(r => r.State == "pending" && r.Kind == "program");
             WorkspaceHandoff decided = runtime.Access.Handoffs.Decide(pending.Id, approve: true);
             check(decided.State == "opened", "The owner's one click is enough to open it; the request says what happened: " + decided.Detail);
             string? where = DesktopIn(his);
             check(where is not null && where != runtime.Computer.Name,
-                "Once he has clicked, the program really is running on his own desktop (" + (where ?? "not started")
+                "Once they have clicked, the program really is running on their own desktop (" + (where ?? "not started")
                 + "), not on the workspace's");
 
             // The default route, unchanged, and proved where it counts: a window is on exactly one
@@ -234,7 +234,7 @@ internal static class OpenRouteProbe
     /// <summary>
     /// The owner approves a command line, not a program name. Asking again with other arguments
     /// used to find the waiting request and overwrite what it would run, so an agent could ask with
-    /// something harmless and swap in something else before his click. Each command line is now its
+    /// something harmless and swap in something else before their click. Each command line is now its
     /// own request, fixed when it is made, and approving one runs exactly that one.
     /// </summary>
     static void OwnerApprovesWhatRuns(Action<bool, string> check)
@@ -293,8 +293,9 @@ internal static class OpenRouteProbe
 
     /// <summary>
     /// Most Windows applications allow one copy per logon session, so a second launch hands its
-    /// command line to the copy already running and quits. The owner had to close his own copy twice
-    /// to let an agent test it; the answer must be a button he can press, not a negotiation.
+    /// command line to the copy already running and quits. Without a route, the owner has to close
+    /// their own copy to let an agent test it; the answer must be a button they can press, not a
+    /// negotiation.
     ///
     /// The fixture is the real shape of it: one copy already running somewhere the workspace does not
     /// own, with a window that closing actually closes, and a second launch that exits at once.
@@ -308,10 +309,10 @@ internal static class OpenRouteProbe
         string mine = Path.Combine(testing.Computer!.Folder!, name + ".exe");
         try
         {
-            // His copy keeps a window open, the way an application he is using does. The workspace's
+            // Their copy keeps a window open, the way an application they are using does. The workspace's
             // own launch is a program of the same name from another folder that exits at once with no
             // window, which is what Windows leaves behind when the launch was handed to the copy
-            // already up. Two ordinary Windows programs stand in for his, because a copied and
+            // already up. Two ordinary Windows programs stand in for theirs, because a copied and
             // renamed one does not always find its own resources on every machine.
             File.Copy(Path.Combine(Environment.SystemDirectory, "rundll32.exe"), mine);
             int copy = 0;
@@ -338,15 +339,15 @@ internal static class OpenRouteProbe
                 "A launch handed to a copy already running outside answers with the owner's one click, not with a dead end for the agent to argue about");
 
             WorkspaceHandoff pending = testing.Access!.Handoffs.All.Single(r => r.State == "pending" && r.Kind == "takeover");
-            // The owner's click comes from a window on the desktop his copy is on. Standing there is
+            // The owner's click comes from a window on the desktop their copy is on. Standing there is
             // what lets a close reach that window at all - EnumWindows only sees its own desktop -
-            // and in the product that desktop is his own, where both the app and Deskweave's window are.
+            // and in the product that desktop is their own, where both the app and ARS's window are.
             WorkspaceHandoff decided = OnDesktop(elsewhere.Computer.Name,
                 () => testing.Access.Handoffs.Decide(pending.Id, approve: true));
             check(decided.State == "opened",
-                "One click closes the copy he had open and starts the program in the workspace instead: " + decided.Detail);
+                "One click closes the copy they had open and starts the program in the workspace instead: " + decided.Detail);
             check(Process.GetProcessesByName(name).Length == 0,
-                "His copy really is gone afterwards, so the next launch in the workspace is no longer handed to it");
+                "Their copy really is gone afterwards, so the next launch in the workspace is no longer handed to it");
         }
         finally
         {

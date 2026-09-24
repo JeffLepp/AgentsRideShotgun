@@ -68,13 +68,13 @@ public sealed record TypedText(bool Landed, string Target, string How, bool Veri
 /// are driveable at native speed, but their windows never appear on the owner's screen and cannot
 /// receive or steal the owner's mouse and keyboard - the desktop is the Windows UI security boundary.
 ///
-/// Measured on 2026-08-21 on Windows 10 Pro N 19045 with no hypervisor, no elevation and no feature
+/// Measured on Windows 10 Pro N 19045 with no hypervisor, no elevation and no feature
 /// install: two apps launched, both captured at full resolution, typing delivered by window message.
 /// SendInput returned 0, which is why <see cref="TypeText"/> posts WM_CHAR instead.
 /// </summary>
 public sealed partial class AgentDesktop : IDisposable
 {
-    // ponytail: every user32 call below is desktop-affine, so one thread owns the handle and all
+    // Every user32 call below is desktop-affine, so one thread owns the handle and all
     // work is marshalled to it. A pool would need SetThreadDesktop per rental for no gain.
     readonly BlockingCollection<Action> _work = new();
     readonly Thread _thread;
@@ -552,7 +552,7 @@ public sealed partial class AgentDesktop : IDisposable
 
             // A window that is not answering is drawn where it is, as it last looked, washed pale and
             // labelled. Leaving it out showed whatever was behind it - another app, the browser - as
-            // though that were the window asked about, and an agent read it that way (2026-09-22).
+            // though that were the window asked about, and an agent read it that way.
             void Ghost(AgentWindow window, AgentWindow shows)
             {
                 var box = new Native.Rect
@@ -614,7 +614,7 @@ public sealed partial class AgentDesktop : IDisposable
     /// The part of a window that is actually drawn. A sizable Windows 10 window carries an invisible
     /// resize border, 7 px on the left, right and bottom at 100%, inside its rectangle; the owner's
     /// desktop shows what is behind it there, but PrintWindow paints it black, and every window on
-    /// an agent's screen wore a black frame in the corner and the hub (2026-09-22). DWM reports the
+    /// an agent's screen wore a black frame in the corner and the hub. DWM reports the
     /// visible frame even for a window on a workspace desktop; anything it reports outside the
     /// rectangle is not believed, and a window it knows nothing about is drawn whole as before.
     /// </summary>
@@ -776,7 +776,7 @@ public sealed partial class AgentDesktop : IDisposable
 
     /// <summary>
     /// The owner taking control revokes the agent's lease. Input the agent had already queued
-    /// carries the old number and is dropped here on the pump, rather than landing under his hands.
+    /// carries the old number and is dropped here on the pump, rather than landing under their hands.
     /// </summary>
     public long Revoke() => Interlocked.Increment(ref _lease);
 
@@ -801,7 +801,7 @@ public sealed partial class AgentDesktop : IDisposable
         nint screen = (y & 0xFFFF) << 16 | (x & 0xFFFF);
 
         // A title bar, a close button, a scrollbar and a resize edge are non-client area and drop
-        // WM_LBUTTONDOWN on the floor. Measured 2026-08-23: the element tree offers those buttons,
+        // WM_LBUTTONDOWN on the floor. Measured: the element tree offers those buttons,
         // and before this hit test the matching click by coordinate did nothing at all.
         nint answered = Native.SendMessageTimeoutW(target, Native.WmNcHitTest, 0, screen,
             Native.SmtoAbortIfHung, 500, out nint area);
@@ -865,8 +865,8 @@ public sealed partial class AgentDesktop : IDisposable
         _lastClicked = target;
         // WPF hit-tests a mouse message against the real hardware pointer rather than the coordinates
         // carried in the message, and that pointer lives on the window station, not this desktop, so
-        // it is wherever the owner left it and the message route can never raise Click here - measured
-        // 2026-09-20, activation included. See InvokeAtPoint for what does.
+        // it is wherever the owner left it and the message route can never raise Click here - measured,
+        // activation included. See InvokeAtPoint for what does.
         if (IsWpfWindow(Native.GetAncestor(target, 2)) && InvokeAtPoint(x, y)) return true;
         return pressed && released;
     });
@@ -878,7 +878,7 @@ public sealed partial class AgentDesktop : IDisposable
     /// on - a WinForms combo box's drop button and a hover-styled control both read as "inactive"
     /// without this.
     ///
-    /// Measured 2026-09-20 with engine-probe's --click-proof, though: activating first did not make a
+    /// Measured with engine-probe's --click-proof, though: activating first did not make a
     /// WPF button's Click fire, before or after this existed. WinForms and a plain Win32 button both
     /// answered a coordinate click either way - they only need mouse capture, not window activation, to
     /// raise Click. So this stays because it is cheap, correct, and the real difference from the
@@ -973,8 +973,8 @@ public sealed partial class AgentDesktop : IDisposable
     /// <summary>
     /// Returns whether the input actually went out. False means the pump discarded it - the lease it
     /// carried is stale because the owner took the workspace - and the caller must not then write
-    /// down that it happened. Milestone 4's exit gate found the evidence log claiming a discarded
-    /// write had been typed, which is worse than the input landing would have been.
+    /// down that it happened. Otherwise the evidence log can claim a discarded write had
+    /// been typed, which is worse than the input landing would have been.
     ///
     /// Types text. WM_CHAR per character, because SendInput returns 0 for a desktop that is not the
     /// input desktop - measured, not assumed. This is also how the agent itself will type.
@@ -1130,7 +1130,7 @@ public sealed partial class AgentDesktop : IDisposable
 
     /// <summary>
     /// Copies from the workspace. The copy lands on the real clipboard for an instant and the
-    /// broker files it under this workspace, so the owner never finds an agent's text in his own.
+    /// broker files it under this workspace, so the owner never finds an agent's text in their own.
     /// </summary>
     public void Copy(nint window = 0) => Run(() => Deliver(window, Native.WmCopy));
 
@@ -1190,7 +1190,7 @@ public sealed partial class AgentDesktop : IDisposable
         //
         // Bounded, because "every pump operation is bounded" is a claim about our own code and not
         // about Windows: one call into a wedged application used to hold this Join forever and the
-        // workspace could not be closed, nor Deskweave shut down, until that application was killed.
+        // workspace could not be closed, nor ARS shut down, until that application was killed.
         // The job object below kills everything in the workspace anyway, and the pump is a
         // background thread, so going on without it is the safe direction.
         ShutdownWaitedOut = !_thread.Join(ShutdownJoin);
@@ -1282,7 +1282,7 @@ public sealed partial class AgentDesktop : IDisposable
             int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
             if (width < 64 || height < 64) return true;
             // GetWindowText sends WM_GETTEXT to another process's window and waits for its thread to
-            // answer. Measured 2026-09-07: an application that had stopped pumping parked the whole
+            // answer. Measured: an application that had stopped pumping parked the whole
             // desktop thread there, and with it every capture, every action, and the panel's own UI
             // thread behind it. Nothing here may wait on another process without a bound.
             bool responding = Answering(handle);

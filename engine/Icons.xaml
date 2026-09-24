@@ -32,7 +32,7 @@
     <Geometry x:Key="Icon.Shield">M8,1.8 L13,3.8 V7.8 C13,11 10.8,13.2 8,14.2 C5.2,13.2 3,11 3,7.8 V3.8 Z</Geometry>
     <Geometry x:Key="Icon.Info">M14,8 A6,6 0 1 1 2,8 A6,6 0 1 1 14,8 Z M8,7.2 V11 M8,5 H8.01</Geometry>
     <Geometry x:Key="Icon.Lock">M5,7 H11 A1.5,1.5 0 0 1 12.5,8.5 V12.5 A1.5,1.5 0 0 1 11,14 H5 A1.5,1.5 0 0 1 3.5,12.5 V8.5 A1.5,1.5 0 0 1 5,7 Z M5.5,7 V5 A2.5,2.5 0 0 1 10.5,5 V7</Geometry>
-    <!-- 18x18, filled with the accent: the app icon's two windows (owner's pick, 2026-09-22), yours
+    <!-- 18x18, filled with the accent: the app icon's two windows, yours
          behind as an outline, the agent's in front, with a gap between so they read apart. -->
     <CombinedGeometry x:Key="Icon.Mark" GeometryCombineMode="Union">
         <CombinedGeometry.Geometry1>

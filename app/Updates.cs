@@ -5,13 +5,13 @@ namespace Deskweave;
 
 /// <summary>
 /// Downloads new releases from GitHub in the background. Nothing restarts under a running agent:
-/// a downloaded update is applied only when the owner next opens Deskweave with no copy running,
+/// a downloaded update is applied only when the owner next opens ARS with no copy running,
 /// never on a --background start by an agent's bridge or Windows (Program.ApplyUpdateOnStart).
 /// </summary>
 static class Updates
 {
     // GitHub redirects a renamed repository, so a rename does not strand installed copies.
-    const string Feed = "https://github.com/JeffLepp/Deskweave";
+    const string Feed = "https://github.com/JeffLepp/AgentsRideShotgun";
 
     public static async void Start(Action<string, string> tell)
     {

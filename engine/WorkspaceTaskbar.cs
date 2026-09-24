@@ -13,7 +13,7 @@ namespace Deskweave.AgentWorkspaces;
 /// <summary>
 /// The strip along the bottom of an agent's screen when Settings > General > Agent screens is Full
 /// desktop: a launcher for any Start-menu app, a button per open window (the front one marked), and
-/// the time. Drawn by Deskweave rather than a second Windows shell: Windows runs one shell per
+/// the time. Drawn by ARS rather than a second Windows shell: Windows runs one shell per
 /// session, and a second one on another desktop loses its Start menu and tray. Viewer-only, so an
 /// agent's screenshots never show it, and it refreshes only while it is on screen. Whatever the owner
 /// does here takes the wheel the way a click on the screen does; the agent waits, then carries on.

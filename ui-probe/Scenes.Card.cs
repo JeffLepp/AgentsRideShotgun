@@ -5,7 +5,7 @@ using Deskweave.AgentWorkspaces;
 
 namespace Deskweave.UiProbe;
 
-/// <summary>Settings inside the hub's card (owner's pick, 2026-09-22): its home and each page, at
+/// <summary>Settings inside the hub's card: its home and each page, at
 /// the stack's own 340 x 560. No reference image; these are for review.</summary>
 static class CardScenes
 {

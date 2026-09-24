@@ -6,7 +6,7 @@ using System.Windows.Media.Imaging;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// The two things an agent reported on 2026-09-22 after driving a WPF app's nav rail, on a real
+/// Two problems an agent can hit when driving a WPF app's nav rail on a real
 /// workspace desktop:
 ///
 /// - a picture taken while the app was busy for a moment after a click showed whatever was behind

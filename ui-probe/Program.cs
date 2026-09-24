@@ -16,7 +16,7 @@ namespace Deskweave.UiProbe;
 
 /// <summary>
 /// Where the gate's real windows go: a monitor other than the primary one when there is one, so a
-/// run leaves the owner's main screen alone while he works (the harness scenes already render off
+/// run leaves the owner's main screen alone while they work (the harness scenes already render off
 /// every monitor). The app's own defaults are pointed there through their test hooks; the placement
 /// rules under test are the same on any monitor.
 /// </summary>
@@ -90,7 +90,7 @@ static class Program
         _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking || storage || lifecycle || scaling ? args[1] : args[0]);
         Directory.CreateDirectory(_output);
         // The scenes stand in for every agent seam; if one is ever missed, what it writes lands here and
-        // not in the owner's own configuration, which is what the gate-1 run did.
+        // not in the owner's own configuration.
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", Path.Combine(_output, "agents", "claude"));
         Environment.SetEnvironmentVariable("CODEX_HOME", Path.Combine(_output, "agents", "codex"));
         WorkspaceConnections.Profiles = app =>
@@ -99,7 +99,7 @@ static class Program
             string root = Path.Combine(_output, "agents", claude ? "claude" : "codex");
             return [new(app, "Probe", root, Path.Combine(root, claude ? ".claude.json" : "config.toml"))];
         };
-        // ponytail: one probe at a time on this PC, so parallel worktrees don't fight over the screen,
+        // One probe at a time on this PC, so parallel worktrees don't fight over the screen,
         // focus and CPU timings. Never released by hand; closing it at exit hands the turn on.
         using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
         try { turn.WaitOne(); } catch (AbandonedMutexException) { }
@@ -186,7 +186,7 @@ static class Program
             && _window.FindName("HelpButton") is null && _window.FindName("SearchBox") is null
             && _window.FindName("AppearanceButton") is null && _window.FindName("FocusSlot") is null,
             "The icon rail, overview grid, compact/collapsed modes, search box, help panel and boss panel are gone");
-        Check(_window.FindName("NewButton") is null, "The title bar has no new-workspace button (brief A.1)");
+        Check(_window.FindName("NewButton") is null, "The title bar has no new-workspace button");
         Check(AppearanceManager.Choice == ThemeChoice.FollowWindows && AppearanceManager.Dark == AppearanceManager.WindowsIsDark(),
             "The theme follows Windows until Settings forces one");
         CheckSettings();
@@ -210,8 +210,8 @@ static class Program
         _window.Height = 804;
         await Settle();
 
-        // A workspace the engine's own router creates (brief A.7: no + button; workspaces make
-        // themselves), started with the store's speed and restrictions (brief A.11).
+        // A workspace the engine's own router creates (no + button; workspaces make
+        // themselves), started with the store's speed and restrictions.
         var created = WorkspaceStore.Create("Workspace 1");
         created = WorkspaceStore.Update(created.Id, w => w with { Power = WorkspacePower.Fast, Mode = WorkspaceMode.Free }) ?? created;
         WorkspaceRuntime.Start(created);
@@ -259,7 +259,7 @@ static class Program
         _window.ShowStack();
         await Settle();
 
-        // The filter field (Ctrl+F opens it; Escape clears it): the stack's only search surface (brief A.3).
+        // The filter field (Ctrl+F opens it; Escape clears it): the stack's only search surface.
         InvokePrivate(_window, "BeginFilter");
         await Settle();
         Check(Find<Border>("FilterHost").Visibility == Visibility.Visible, "The filter field can be opened");
@@ -272,8 +272,8 @@ static class Program
         Check(Find<Border>("FilterHost").Visibility == Visibility.Collapsed && Find<ItemsControl>("StackAsleepList").Items.Count == 1,
             "Escape clears the filter and shows every workspace again");
 
-        // The gear opens Settings inside the card, the window keeping its size (owner's pick,
-        // 2026-09-22); Escape from a wide workspace returns to the stack (brief A.5).
+        // The gear opens Settings inside the card, the window keeping its size; Escape from a
+        // wide workspace returns to the stack.
         double stackWidth = _window.ActualWidth;
         Click("SettingsButton");
         await Settle();
@@ -282,7 +282,7 @@ static class Program
         _window.ShowStack();
         await Settle();
 
-        // Previews only run while the hub is on screen and not minimized (brief A.10); the corner
+        // Previews only run while the hub is on screen and not minimized; the corner
         // window watches the same flag to know when to stay away.
         Check(ModuleEntry.HubShowing, "The corner window stays away while the hub is on screen");
         _window.WindowState = WindowState.Minimized;
@@ -292,7 +292,7 @@ static class Program
         await Settle();
         Check(ModuleEntry.HubShowing, "Restoring brings the hub back in front of the corner window");
 
-        // Reopening from the tray or the taskbar always lands on the stack, even from wide (brief A.5).
+        // Reopening from the tray or the taskbar always lands on the stack, even from wide.
         _window.ShowWide(created.Id);
         await Settle();
         _window.Hide();
@@ -301,7 +301,7 @@ static class Program
         await Settle();
         Check(_window.DisplayMode == "stack" && _window.IsVisible, "Reopening from the tray returns to the stack");
 
-        // The engine asking for a specific workspace opens it in the wide window (brief A.8).
+        // The engine asking for a specific workspace opens it in the wide window.
         ModuleEntry.Selected = created.Id;
         bool raised = false;
         void OnOpen() => raised = true;
@@ -349,7 +349,7 @@ static class Program
         Check(File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"Theme\": \"Dark\"") && AppearanceManager.Dark,
             "An explicit theme persists and wins over Windows after reopening");
 
-        // Each Wave 1 slice adds its behavior checks in its own Scenes.*.cs file. A named slice is
+        // Each slice adds its behavior checks in its own Scenes.*.cs file. A named slice is
         // useful while repairing one checker; ordinary validation leaves it unset and runs all.
         string ownerAgents = OwnerAgentEntries();
         if (slice is null or "hub") await HubScenes.Gate();
@@ -369,13 +369,13 @@ static class Program
         if (slice is null or "firstrun") await FirstRunScenes.Gate();
         if (slice is null or "scaling") await ScalingScenes.Gate();
         Check(OwnerAgentEntries() == ownerAgents,
-            "The gate left Deskweave's entry in the owner's own Claude Code and Codex configuration alone");
+            "The gate left ARS's entry in the owner's own Claude Code and Codex configuration alone");
     }
 
     /// <summary>
-    /// Deskweave's own entry in the owner's real agent configuration, as text. Nothing in the gate
+    /// ARS's own entry in the owner's real agent configuration, as text. Nothing in the gate
     /// may write it: a stand-in that misses one path would connect the owner's agents to a debug
-    /// build for real, and this is where that shows up. The rest of those files belongs to his own
+    /// build for real, and this is where that shows up. The rest of those files belongs to their own
     /// agent sessions, which rewrite their history while the gate runs, so only the entry is read.
     /// </summary>
     static string OwnerAgentEntries()
@@ -411,14 +411,14 @@ static class Program
 
     static void CheckSettings()
     {
-        // Only choices that remain visible after the cut round belong in this default claim.
+        // Only choices that remain visible in Settings belong in this default claim.
         AppSettings s = AppSettingsStore.Current;
         Check(s.StartWithWindows && s.Theme == ThemeChoice.FollowWindows && !s.FirstRunDone && !s.ConnectAgents
             && s.AgentsOff.Count == 0 && s.PauseHotkey == "Ctrl+Alt+P" && s.AccountScopes.Count == 0
             && s.CornerShow == CornerShow.ComesAndGoes && !s.CornerPinned
             && s.CornerLeft is null && s.CornerTop is null && s.CornerWidth is null
             && s.Screenshots == ScreenshotMode.KeySteps,
-            "Every remaining choice starts at the MVP spec's default");
+            "Every remaining choice starts at its default");
         AppSettings odd = new AppSettings
         {
             Theme = (ThemeChoice)9, PauseHotkey = "P", CornerWidth = double.NaN, AccountScopes = null!,
@@ -486,7 +486,7 @@ static class Program
         WorkspaceAccessStore.Write(shared.Id, new WorkspaceAccessPolicy(true, false) { PrewarmBrowser = false });
         WorkspaceRouter.Start();
         Check(File.Exists(WorkspaceAccessStore.RouterTicket) && File.Exists(WorkspaceConnections.Bridge),
-            "Deskweave publishes one connection for every outside agent, reached through its packaged bridge");
+            "ARS publishes one connection for every outside agent, reached through its packaged bridge");
         var start = new ProcessStartInfo(WorkspaceConnections.Bridge)
         {
             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -540,7 +540,7 @@ static class Program
         await Settle();
         Check(sharedRuntime.Access?.HasDriver == false, "Closing an agent's session hands its workspace back");
         WorkspaceRouter.Stop();
-        Check(!File.Exists(WorkspaceAccessStore.RouterTicket), "Quitting Deskweave withdraws the agent connection");
+        Check(!File.Exists(WorkspaceAccessStore.RouterTicket), "Quitting ARS withdraws the agent connection");
         sharedRuntime.Dispose();
         await RoutingChecks.Run(_output);
     }
@@ -558,7 +558,7 @@ static class Program
 
 
     /// <summary>
-    /// The owner's hand on the live screen (brief A.3). A picture of a whole desktop drawn a few
+    /// The owner's hand on the live screen. A picture of a whole desktop drawn a few
     /// hundred pixels wide is easy to get subtly wrong - an overlay over the picture, a stretch the
     /// mapping does not match - and every one of those ends as "my clicks do nothing", so this
     /// drives a real click through the real page and asks the workspace where it landed. What it
@@ -750,7 +750,7 @@ static class Program
 
     /// <summary>
     /// Stands in for the three engine fields every agent path shares: where an agent's command is,
-    /// whether its configuration already names Deskweave, and the one call that writes it. First
+    /// whether its configuration already names ARS, and the one call that writes it. First
     /// launch, Settings and the keep-up loop all read and write through these, so a scene answers
     /// for all three at once and none of them reaches the owner's own agents. Put them back with
     /// the handle this gives.

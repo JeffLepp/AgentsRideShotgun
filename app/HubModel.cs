@@ -24,8 +24,8 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
     public bool Idle { get => _idle; set { Set(ref _idle, value); Changed(nameof(OpenLabel)); } }
     /// <summary>Screen-reader name for the card or row: the dot is the only visible status.</summary>
     public string OpenLabel => "Open workspace " + Name + (NeedsYou ? ", needs you" : Idle ? ", idle" : Working ? ", working" : ", recent");
-    /// <summary>Tooltip and screen-reader name for the card/row's own Sleep control (fix list item
-    /// 2.2): says exactly what happens up front, since a one-click action has no confirmation dialog
+    /// <summary>Tooltip and screen-reader name for the card/row's own Sleep control:
+    /// says exactly what happens up front, since a one-click action has no confirmation dialog
     /// to say it in.</summary>
     public string SleepLabel => "Sleep " + Name + ". Open apps close; saved files and the last picture stay. The next agent action wakes it.";
     /// <summary>"Claude Code", "Codex wants you", "Sleeps in 4m", or empty when there is nothing to say.</summary>
@@ -71,7 +71,7 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
     }
 }
 
-/// <summary>The relative time an asleep workspace shows, in the two wordings the reference uses.</summary>
+/// <summary>The relative time an asleep workspace shows, in its two wordings.</summary>
 internal static class HubFormat
 {
     internal static string StackAge(DateTimeOffset lastUsed, DateTimeOffset now)
@@ -213,7 +213,7 @@ internal sealed class HubViewModel : IDisposable
             : entry.RestText;
     }
 
-    /// <summary>True while the once-a-minute age refresh is running (the gate drives this through
+    /// <summary>True while the once-a-minute age refresh is running (the UI probe drives this through
     /// the real window's visibility rather than waiting out a real minute).</summary>
     internal bool AgingActive => _agingTimer is not null;
 
@@ -304,7 +304,7 @@ internal sealed class HubViewModel : IDisposable
     }
 }
 
-/// <summary>Shared preview-loop rules (brief A.6, A.10): the app picks the rate itself, no Smoothness
+/// <summary>Shared preview-loop rules: the app picks the rate itself, no Smoothness
 /// or Pause-previews-on-battery setting to read. Balanced pace, and a slower one on battery rather
 /// than none - most Windows machines are laptops, and a tile frozen on its last frame reads as the
 /// feature being broken.</summary>

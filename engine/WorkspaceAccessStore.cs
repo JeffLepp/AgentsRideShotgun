@@ -7,7 +7,7 @@ internal sealed record WorkspaceAccessPolicy(bool Enabled = false, bool DesktopR
 {
     /// <summary>
     /// Start this workspace's Chrome when the workspace starts, rather than on the first browse.
-    /// Measured 2026-09-07: a cold browse costs about forty seconds, which an agent reads as a hung
+    /// Measured: a cold browse costs about forty seconds, which an agent reads as a hung
     /// tool. Not a permission - it opens no page and reads nothing - so a connecting client never
     /// tightens or widens it.
     /// </summary>
@@ -74,14 +74,14 @@ internal static class WorkspaceAccessStore
 
     /// <summary>
     /// Whether a ticket has to be written for this server: it is missing, unreadable, or names a pipe
-    /// nobody serves any more. A ticket naming another live pipe is left alone, so two Deskweaves on
+    /// nobody serves any more. A ticket naming another live pipe is left alone, so two ARS instances on
     /// one account (two Windows sessions) never take turns overwriting each other's.
     /// </summary>
     internal static bool NeedsTicket(string path, WorkspacePipeServer server) =>
         TicketPipe(path) is not { } pipe || pipe != server.Name && !WorkspacePipeServer.Exists(pipe);
 
     /// <summary>
-    /// Connection tickets left by a Deskweave that stopped without withdrawing them: a crash, a
+    /// Connection tickets left by an ARS that stopped without withdrawing them: a crash, a
     /// killed process, a restart. A bridge reading one would wait on a pipe nobody serves. Runs at
     /// startup, when nothing of this process's own can be among them.
     /// </summary>

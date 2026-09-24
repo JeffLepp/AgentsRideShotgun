@@ -84,8 +84,8 @@ public sealed partial class AgentDesktop
             Native.SwpNoMove | Native.SwpNoSize | Native.SwpNoActivate | Native.SwpNoOwnerZOrder));
 
     /// <summary>
-    /// Moves, sizes, maximizes, restores, raises or closes one window. Measured 2026-09-06:
-    /// without this the agent wrote a PowerShell script around SetWindowPos, in Notepad, to do what
+    /// Moves, sizes, maximizes, restores, raises or closes one window. Without
+    /// this an agent wrote a PowerShell script around SetWindowPos, in Notepad, to do what
     /// one call does. A move is fitted to the screen; zero width or height keeps the current size.
     /// </summary>
     public bool Arrange(nint window, WindowArrangement what, int x = 0, int y = 0, int width = 0, int height = 0,
@@ -116,7 +116,7 @@ public sealed partial class AgentDesktop
             case WindowArrangement.Front:
             {
                 if (Native.IsIconic(window)) Native.ShowWindow(window, Native.SwRestore);
-                // Measured 2026-09-07: HWND_TOP without activation leaves the z-order alone on a
+                // Measured: HWND_TOP without activation leaves the z-order alone on a
                 // desktop that has no active window. Topmost and back again is the reorder that
                 // holds, and it activates nothing.
                 const uint keep = Native.SwpNoMove | Native.SwpNoSize | Native.SwpNoActivate;

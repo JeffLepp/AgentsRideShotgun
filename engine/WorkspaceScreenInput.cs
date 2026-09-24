@@ -47,7 +47,7 @@ public sealed class WorkspaceScreenInput : IDisposable
     internal bool OwnsControl => _held is { Driving: Driver.Owner };
 
     /// <summary>A window was taken out onto the owner's desktop, or could not be: one short line
-    /// for the view to show him.</summary>
+    /// for the view to show them.</summary>
     internal event Action<string>? PoppedOut;
 
     /// <summary>Release only the screen this view took, including when the view closes.</summary>
@@ -470,7 +470,7 @@ public sealed class WorkspaceScreenInput : IDisposable
     }
 
     /// <summary>
-    /// Input the owner gives the workspace, off the UI thread and in the order he gave it. It goes
+    /// Input the owner gives the workspace, off the UI thread and in the order they gave it. It goes
     /// to the workspace's own pump, which may be part-way through a capture or waiting on an
     /// application's own message loop, and the window drawing the picture must never sit and wait
     /// for that: measured, an ordinary click can take a second on a busy screen, and the hub froze

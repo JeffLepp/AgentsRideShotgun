@@ -13,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Where Deskweave keeps its data (%LOCALAPPDATA%\Deskweave and %APPDATA%\Deskweave). -->
+    <!-- Where ARS keeps its data (%LOCALAPPDATA%\ARS and %APPDATA%\ARS). -->
     <ProjectReference Include="..\dependencies\Deskweave.ProductContext\Deskweave.ProductContext.csproj" />
     <ProjectReference Include="Bridge\Deskweave.WorkspaceBridge.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

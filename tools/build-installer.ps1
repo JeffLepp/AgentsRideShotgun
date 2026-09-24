@@ -1,7 +1,7 @@
 param([string]$Version = '', [switch]$SkipPublish, [switch]$Sign)
-# Builds Deskweave-Setup: a per-user install (no admin) with a Start menu shortcut and an Apps &
-# features uninstall that takes Deskweave out of the agents' configs. Publishes fresh first, so
-# Deskweave must be closed. -SkipPublish packages a separately published, version-matched payload.
+# Builds ARS-Setup: a per-user install (no admin) with a Start menu shortcut and an Apps &
+# features uninstall that takes ARS out of the agents' configs. Publishes fresh first, so
+# ARS must be closed. -SkipPublish packages a separately published, version-matched payload.
 # -Sign signs every binary and Setup with the Azure identity; public releases are always signed.
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -36,8 +36,8 @@ $assemblyVersion = [Reflection.AssemblyName]::GetAssemblyName((Join-Path $payloa
 if ($fileVersion -cne $numeric -or $assemblyVersion -cne $numeric) { throw "Published app file version $fileVersion and assembly version $assemblyVersion should both be $numeric." }
 $staging = Join-Path $root ('artifacts\installer-staging\' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff'))
 
-# The install id is not "Deskweave" on purpose: Velopack installs to %LOCALAPPDATA%\<id> and its
-# uninstall deletes that whole folder, while the owner's workspaces live in %LOCALAPPDATA%\Deskweave.
+# The install id is not "ARS" on purpose: Velopack installs to %LOCALAPPDATA%\<id> and its
+# uninstall deletes that whole folder, while the owner's workspaces live in %LOCALAPPDATA%\ARS.
 # A technical floor, matching the oldest Windows build it was tested on.
 $packageRuntime = 'win10.0.19041-x64'
 $signing = @()

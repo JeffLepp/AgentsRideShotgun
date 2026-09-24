@@ -22,7 +22,7 @@ public partial class SettingsView : UserControl
     // the page that now holds what survived from it, rather than
     // nowhere. Control's one surviving row (Pause every agent) moved to Agents; Corner window's one
     // surviving row (Show the corner window) moved to General; Privacy & safety's one surviving row
-    // (Delete all Deskweave data) moved to History & privacy, alongside About's Licenses and data
+    // (Delete all ARS data) moved to History & privacy, alongside About's Licenses and data
     // folder, which moved to General. Notifications and Performance kept nothing, so, like any other
     // unknown id, they fall through to the plain default below.
     static readonly Dictionary<string, string> LegacyCategory = new(StringComparer.Ordinal)
@@ -37,7 +37,7 @@ public partial class SettingsView : UserControl
     // A category whose page can be entirely SettingsFeatures-gated: once every row on it is
     // hidden, the row it would show is only a bare card, so the category itself leaves the nav
     // until the flag it names turns on. History &
-    // privacy is not here: Save screenshots may hide, but Storage and Delete all Deskweave data
+    // privacy is not here: Save screenshots may hide, but Storage and Delete all ARS data
     // always show, so its page and nav row are never empty.
     static readonly Dictionary<string, Func<bool>> CategoryGate = new(StringComparer.Ordinal)
     {
@@ -91,7 +91,7 @@ public partial class SettingsView : UserControl
         Nav.Children.OfType<RadioButton>().Where(item => item.Visibility == Visibility.Visible).Select(item => (string)item.Tag).ToList();
 
     // Notifications and Browser & accounts can each end up with nothing wired on yet (the latter
-    // down to its banner); re-run on every Show() since a gate can flip a flag and re-show without
+    // down to its banner); re-run on every Show() since a test can flip a flag and re-show without
     // building a whole new SettingsView.
     void RefreshNavAvailability()
     {

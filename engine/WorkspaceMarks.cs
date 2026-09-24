@@ -16,7 +16,7 @@ namespace Deskweave.AgentWorkspaces;
 /// image over the model's limit is rejected outright rather than resized for us, so the resizing
 /// has to happen here.
 ///
-/// Reconsidered 2026-09-22, when an agent found the two sizes (this cap, and look at full size) a
+/// Reconsidered when an agent found the two sizes (this cap, and look at full size) a
 /// tax to keep apart: the cap stays. Opus 4.7 and later read up to 2576 px with coordinates 1:1, but
 /// the full screen still costs 2.25 times as many tokens, and Haiku 4.5 and Sonnet 4.6 shrink
 /// anything past 1568 px on their side - a scale nobody here would know to map clicks back
@@ -126,7 +126,7 @@ internal static class WorkspaceMarks
                     Math.Min(text.Height + 2, Math.Max(1, height - 2)));
                 // On a short control - a button, a field - the badge covered the start of its own
                 // label, and one whose app names nothing read "106 e selected" for Remove selected
-                // (a Tk app, 2026-09-22). It moves just above the outline when that spot is empty:
+                // (a Tk app). It moves just above the outline when that spot is empty:
                 // not over another control, only over something that holds this one. A stacked list
                 // has its neighbour there, so its rows keep their badges inside.
                 if (height < 34 && text.Width + 6 <= width + 2)

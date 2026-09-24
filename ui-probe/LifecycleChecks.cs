@@ -26,7 +26,7 @@ static class LifecycleChecks
         bool quiet = true;
         try { App.ShowHubAfterFirstRun(hub, quitting: true); }
         catch (InvalidOperationException) { quiet = false; }
-        Program.Check(threw && quiet, "Closing setup while Deskweave quits leaves the closed hub alone");
+        Program.Check(threw && quiet, "Closing setup while ARS quits leaves the closed hub alone");
 
         string name = @"Local\Deskweave.Probe.Instance." + Guid.NewGuid().ToString("N");
         using var activate = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Show");
@@ -39,13 +39,13 @@ static class LifecycleChecks
         Program.Check(heldDuringExit && await Task.Run(() => Free(name)),
             "The single-instance lock is held through Exit's folder delete and released after it");
 
-        // A running Deskweave takes the request and the new launch ends.
+        // A running ARS takes the request and the new launch ends.
         using (var holder = Holder(name, listen: true, releaseAfter: TimeSpan.FromSeconds(3)))
         using (var mine = new Mutex(false, name))
         {
             holder.Ready.Wait();
             bool claimed = App.ClaimInstance(mine, activate, background: false, TimeSpan.FromMilliseconds(500));
-            Program.Check(!claimed && holder.Shown.Wait(2000), "A second launch shows the running Deskweave and ends");
+            Program.Check(!claimed && holder.Shown.Wait(2000), "A second launch shows the running ARS and ends");
         }
         // A background start asks for nothing.
         using (var holder = Holder(name, listen: false, releaseAfter: TimeSpan.FromSeconds(3)))
@@ -53,7 +53,7 @@ static class LifecycleChecks
         {
             holder.Ready.Wait();
             bool claimed = App.ClaimInstance(mine, activate, background: true, TimeSpan.FromMilliseconds(500));
-            Program.Check(!claimed && !activate.WaitOne(0), "A background start beside a running Deskweave asks for no window");
+            Program.Check(!claimed && !activate.WaitOne(0), "A background start beside a running ARS asks for no window");
         }
         // One that is quitting stopped listening; the launch waits for its lock and starts normally.
         using (var holder = Holder(name, listen: false, releaseAfter: TimeSpan.FromMilliseconds(600)))
@@ -72,7 +72,7 @@ static class LifecycleChecks
         bool besideRunning;
         using (var running = new Mutex(false, name)) besideRunning = Deskweave.Program.ApplyUpdateOnStart([], name);
         Program.Check(ownerStart && !bridgeStart && !besideRunning,
-            "Updates apply on the owner's start only, not on a background start or beside a running Deskweave");
+            "Updates apply on the owner's start only, not on a background start or beside a running ARS");
 
         // Settings shows the assembly version; it and the file version follow Version.
         Assembly app = typeof(App).Assembly;
@@ -116,7 +116,7 @@ static class LifecycleChecks
         catch (AbandonedMutexException) { probe.ReleaseMutex(); return true; }
     }
 
-    /// <summary>Another Deskweave holding the lock on its own thread, listening for a show request or not.</summary>
+    /// <summary>Another ARS holding the lock on its own thread, listening for a show request or not.</summary>
     static Held Holder(string name, bool listen, TimeSpan releaseAfter)
     {
         var held = new Held(name, new ManualResetEventSlim(), new ManualResetEventSlim());

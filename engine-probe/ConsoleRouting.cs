@@ -90,7 +90,7 @@ internal static class ConsoleRouting
             Check(process.WaitForExit(5000) && process.ExitCode == 37,
                 "The launched shell retains its real exit code rather than a conhost wrapper code");
 
-            // The production constructor opens nothing of its own any more (2026-09-22): a workspace
+            // The production constructor opens nothing of its own: a workspace
             // starts empty, so no console can reach the owner's desktop from its start at all.
             StoredWorkspace boot = WorkspaceStore.Create("Console boot " + nonce[..8]);
             WorkspaceAccessStore.Write(boot.Id, new WorkspaceAccessPolicy(false, false) { PrewarmBrowser = false });

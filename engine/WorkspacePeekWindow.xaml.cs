@@ -11,8 +11,8 @@ using System.Windows.Shapes;
 
 namespace Deskweave.AgentWorkspaces;
 
-/// <summary>The dot color and the tone of the words beside it - the same three states the reference
-/// uses everywhere a workspace shows its status.</summary>
+/// <summary>The dot color and the tone of the words beside it - the same three states used
+/// everywhere a workspace shows its status.</summary>
 internal enum PeekTone { Working, Attention, Quiet }
 
 /// <summary>One workspace's tab: what it is called, how it is doing, and whether it is the one the
@@ -574,7 +574,7 @@ public partial class WorkspacePeekWindow : Window
     /// <summary>
     /// Left and right move between workspaces, and so does Ctrl+Tab, which is what a row of tabs does
     /// everywhere else. Only once the owner has clicked the corner: it never takes focus by appearing,
-    /// so it can never swallow a key meant for the window he is actually working in. A key the live
+    /// so it can never swallow a key meant for the window they are actually working in. A key the live
     /// picture already sent into the workspace arrives here handled, and is left alone.
     /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
@@ -611,7 +611,7 @@ public partial class WorkspacePeekWindow : Window
 
     /// <summary>
     /// Hovering the picture puts Open on my desktop on the window under the pointer, at that
-    /// window's top right, when Deskweave can start it again on the owner's desktop. Asked at most
+    /// window's top right, when ARS can start it again on the owner's desktop. Asked at most
     /// a few times a second, and never while a button is held: a drag is its own way out.
     /// </summary>
     async void LiveScreen_PopOutHover(object sender, MouseEventArgs e)

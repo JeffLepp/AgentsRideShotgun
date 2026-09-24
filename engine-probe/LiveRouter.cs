@@ -5,11 +5,11 @@ using System.Text.Json;
 using Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// The one connection every outside agent uses stays live for as long as Deskweave is open, and an
+/// The one connection every outside agent uses stays live for as long as ARS is open, and an
 /// agent that cannot reach it hears so in one line rather than hanging. Covers the packaged bridge
 /// and the router's tickets against the fixture's own store: a router pipe that died after enough
 /// clients dropped before the handshake, a ticket that went missing or stale while the app was
-/// open, tickets a crashed Deskweave left behind, and a session that outlives a Deskweave restart.
+/// open, tickets a crashed ARS left behind, and a session that outlives an ARS restart.
 ///
 /// No model is called and no provider configuration is read or written here.
 /// </summary>
@@ -21,7 +21,7 @@ internal static class LiveRouter
         WorkspaceRouter.RetryEvery = TimeSpan.FromSeconds(1);
         try
         {
-            // What a crashed or killed Deskweave leaves: tickets naming pipes that nobody serves.
+            // What a crashed or killed ARS leaves: tickets naming pipes that nobody serves.
             string dead = "Deskweave.Workspace." + Guid.NewGuid().ToString("N");
             string crashed = Path.Combine(WorkspaceAccessStore.Root, "crashed-workspace", "connection.json");
             Directory.CreateDirectory(Path.GetDirectoryName(crashed)!);
@@ -30,7 +30,7 @@ internal static class LiveRouter
             WorkspaceRouter.Start();
             string pipe = WorkspaceRouter.Pipe ?? throw new InvalidOperationException("The router did not start.");
             Check(!File.Exists(crashed) && WorkspaceAccessStore.TicketPipe(ticket) == pipe,
-                "Starting Deskweave clears tickets a crashed Deskweave left and publishes a live router ticket");
+                "Starting ARS clears tickets a crashed ARS left and publishes a live router ticket");
 
             // Before the fix one dropped client ended the accept loop somewhere between 30 and 300
             // of them, and the app went on advertising a pipe nobody answered.
@@ -61,39 +61,39 @@ internal static class LiveRouter
                     && Text(session.Tool("status")).StartsWith("No workspace yet", StringComparison.Ordinal),
                     "Unknown tools and malformed arguments are rejected before routing creates a record, desktop or client");
 
-                // Deskweave quits under a connected agent, then opens again.
+                // ARS quits under a connected agent, then opens again.
                 WorkspaceRouter.Stop();
-                Check(!File.Exists(ticket), "Quitting Deskweave withdraws its own router ticket");
+                Check(!File.Exists(ticket), "Quitting ARS withdraws its own router ticket");
                 Thread.Sleep(500);   // the bridge hears the pipe close; a call racing that is answered as "closed"
                 var waited = Stopwatch.StartNew();
                 JsonElement closed = session.Tool("status");
                 Check(Failed(closed) && Text(closed) == "ARS isn't open. Ask the owner to open ARS, then try again."
                     && waited.Elapsed < TimeSpan.FromSeconds(5),
-                    "A tool call while Deskweave is closed is answered in one line within five seconds, and the bridge stays up");
+                    "A tool call while ARS is closed is answered in one line within five seconds, and the bridge stays up");
                 WorkspaceRouter.Start();
                 Check(WorkspaceRouter.Pipe is { } again && again != pipe && Text(session.Tool("status")).StartsWith("No workspace yet", StringComparison.Ordinal),
-                    "Once Deskweave is open again the same agent session reaches the new router without reconnecting");
+                    "Once ARS is open again the same agent session reaches the new router without reconnecting");
                 pipe = WorkspaceRouter.Pipe!;
                 Check(session.Close() == 0, "Closing the agent's end still ends the bridge");
             }
 
             File.Delete(ticket);
             Check(Until(() => WorkspaceAccessStore.TicketPipe(ticket) == pipe),
-                "A router ticket deleted while Deskweave is open is put back");
+                "A router ticket deleted while ARS is open is put back");
             File.WriteAllText(ticket, StaleTicket(dead));
             Check(Until(() => WorkspaceAccessStore.TicketPipe(ticket) == pipe),
-                "A router ticket overwritten with a dead pipe while Deskweave is open is replaced");
+                "A router ticket overwritten with a dead pipe while ARS is open is replaced");
 
-            // Two Deskweaves on one account, one per Windows session: neither takes the other's ticket.
+            // Two copies of ARS on one account, one per Windows session: neither takes the other's ticket.
             using (var other = new WorkspacePipeServer((_, _) => Task.FromResult<string?>(null)))
             {
                 File.WriteAllText(ticket, StaleTicket(other.Name));
                 Thread.Sleep(1500);
                 Check(WorkspaceAccessStore.TicketPipe(ticket) == other.Name,
-                    "A ticket naming another live Deskweave is left alone rather than fought over");
+                    "A ticket naming another live ARS is left alone rather than fought over");
                 WorkspaceRouter.Stop();
                 Check(WorkspaceAccessStore.TicketPipe(ticket) == other.Name,
-                    "Quitting never withdraws a ticket that another live Deskweave published");
+                    "Quitting never withdraws a ticket that another live ARS published");
             }
             File.Delete(ticket);
 
@@ -114,7 +114,7 @@ internal static class LiveRouter
                 "A ticket from another version says to connect the agent again, at once and not silently");
             File.Delete(ticket);
 
-            // A call that is running when Deskweave goes is answered, not left for the client to time out.
+            // A call that is running when ARS goes is answered, not left for the client to time out.
             using (var slow = new WorkspacePipeServer(async (body, cancel) =>
             {
                 if (body.Contains("\"id\"", StringComparison.Ordinal)) await Task.Delay(Timeout.Infinite, cancel);
@@ -129,7 +129,7 @@ internal static class LiveRouter
                 bool answered = running.Wait(TimeSpan.FromSeconds(5));
                 Check(answered && Failed(running.Result)
                     && Text(running.Result) == "ARS closed while this was running. Ask the owner to open ARS, then try again.",
-                    "A tool call in flight when Deskweave closes is answered at once with one line");
+                    "A tool call in flight when ARS closes is answered at once with one line");
             }
             WorkspaceAccessStore.Withdraw("in-flight");
             CheckQueuedReplies(Check);

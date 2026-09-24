@@ -5,10 +5,10 @@ param(
     [switch]$PreserveExistingCodexConfiguration
 )
 # Runs inside Windows Sandbox (Windows PowerShell 5.1) as a brand-new user: nothing installed, no
-# Claude Code, no Codex, no Chrome. Installs Deskweave from the mapped installer folder, checks
+# Claude Code, no Codex, no Chrome. Installs ARS from the mapped installer folder, checks
 # first launch, the bridge starting the app for an agent, a workspace browser with only Edge,
 # then uninstalls and checks what is left. Writes everything to the mapped results folder.
-# VM mode also supports a fresh Deskweave install in an existing Windows profile;
+# VM mode also supports a fresh ARS install in an existing Windows profile;
 # opt-in Codex preservation compares config hashes without reading credentials.
 $ErrorActionPreference = 'Stop'
 if ($VirtualMachine) {
@@ -19,10 +19,10 @@ if ($VirtualMachine) {
     }
 }
 elseif ($env:USERNAME -ne 'WDAGUtilityAccount') { throw 'Run this script inside Windows Sandbox, never on the host.' }
-if ($PreserveExistingCodexConfiguration -and -not $VirtualMachine) { throw 'Existing-provider preservation is only for the VM gate.' }
+if ($PreserveExistingCodexConfiguration -and -not $VirtualMachine) { throw 'Existing-provider preservation is only for the VM check.' }
 $codexConfiguration = Join-Path $env:USERPROFILE '.codex\config.toml'
 $codexConfigurationBefore = if (Test-Path -LiteralPath $codexConfiguration) { (Get-FileHash -LiteralPath $codexConfiguration).Hash } else { $null }
-if ($codexConfigurationBefore -and -not $PreserveExistingCodexConfiguration) { throw 'This gate requires a fresh Codex configuration or explicit VM preservation mode.' }
+if ($codexConfigurationBefore -and -not $PreserveExistingCodexConfiguration) { throw 'This check requires a fresh Codex configuration or explicit VM preservation mode.' }
 $results = [IO.Path]::GetFullPath($OutputDirectory)
 $installer = [IO.Path]::GetFullPath($InstallerPath)
 $previousInstaller = Join-Path (Split-Path -Parent $installer) 'ARS-Previous-Setup.exe'
@@ -157,7 +157,7 @@ try {
         Get-Process ARS -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
     }
 
-    # --- an agent's bridge starts Deskweave in the background -------------------------------
+    # --- an agent's bridge starts ARS in the background -------------------------------------
     $clock.Restart()
     $session = StartBridge
     $hello = Ask 'initialize' @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'claude-code'; version = '1' } } 30
@@ -243,7 +243,7 @@ public static class InstallerProviderFixture {
         Check ((Test-Path -LiteralPath $codexConfiguration) -and (Get-FileHash -LiteralPath $codexConfiguration).Hash -eq $codexConfigurationBefore) 'The complete install, workspace and uninstall sequence preserves the existing Codex configuration byte for byte'
     }
 
-    # --- reinstall, then Settings > Uninstall Deskweave --------------------------------------
+    # --- reinstall, then Settings > Uninstall ARS --------------------------------------------
     # The same steps the Settings row takes: quit, delete both data folders, run Update.exe.
     $setup = Start-Process -FilePath $installer -ArgumentList '--silent' -PassThru -WindowStyle Hidden
     Check ($setup.WaitForExit(300000) -and $setup.ExitCode -eq 0) 'Reinstalling over kept data succeeds'

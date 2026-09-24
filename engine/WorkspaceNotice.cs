@@ -5,13 +5,13 @@ using System.Windows.Interop;
 namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Tells the owner, on his own desktop, that a workspace finished, failed, needs him, or was
-/// interrupted. A workspace runs with its panel closed and Deskweave minimised, so an outcome that
+/// Tells the owner, on their own desktop, that a workspace finished, failed, needs them, or was
+/// interrupted. A workspace runs with its panel closed and ARS minimised, so an outcome that
 /// only exists inside the panel is an outcome nobody sees for hours.
 ///
 /// This is a Shell_NotifyIcon balloon, which Windows 10 renders as an ordinary toast in the Action
 /// Center. The icon is registered only for as long as the balloon is up and then removed, so the
-/// module never leaves a second permanent icon beside Deskweave's own in the notification area.
+/// module never leaves a second permanent icon beside ARS's own in the notification area.
 /// </summary>
 internal static class WorkspaceNotice
 {

@@ -11,8 +11,8 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave;
 
 /// <summary>
-/// First launch (reference 07-first-launch.png). It shows what
-/// Deskweave does before it asks for anything, lists the supported agents found on this PC with
+/// First launch. It shows what
+/// ARS does before it asks for anything, lists the supported agents found on this PC with
 /// their switches already on, and has one button. Nothing reaches an agent's own configuration
 /// until Start is pressed: closing the window connects nothing, and there is no second prompt
 /// either way. Start is also the consent for agents installed later
@@ -29,7 +29,7 @@ public sealed class FirstRunWindow : Window
     internal const string ConnectedTitle = "Your agents are connected";
     internal const string RestartLine = "Restart agent sessions already open so they pick it up. ARS keeps running in the tray.";
 
-    /// <summary>The agent apps this screen offers, in reference order, with their tile.</summary>
+    /// <summary>The agent apps this screen offers, in display order, with their tile.</summary>
     static readonly (WorkspaceConnections.AgentApp App, string Letter, Color Tile)[] Candidates =
     [
         (WorkspaceConnections.AgentApp.ClaudeCode, "C", Color.FromRgb(0x8A, 0x5A, 0x44)),
@@ -45,7 +45,7 @@ public sealed class FirstRunWindow : Window
     readonly Border _illustration;
     readonly System.Windows.Media.Effects.DropShadowEffect _cornerShadow = new()
     {
-        // The reference's window shadow: 0 24px 60px rgba(15,23,42,.20), deeper in the dark theme.
+        // The window shadow: 0 24px 60px rgba(15,23,42,.20), deeper in the dark theme.
         BlurRadius = 60, ShadowDepth = 24, Direction = 270, Color = Color.FromRgb(0x0F, 0x17, 0x2A),
     };
     bool _started;
@@ -62,7 +62,7 @@ public sealed class FirstRunWindow : Window
         ShowInTaskbar = true;
         // Deliberately not UseLayoutRounding: a settings row is 51.075 DIP tall (13 and 11.5 DIP
         // text at 1.35 over 9 DIP padding), and rounding each row to a whole pixel walks the card
-        // and everything under it away from the reference by a pixel a row.
+        // and everything under it away from the design by a pixel a row.
         TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         SetResourceReference(FontFamilyProperty, "SkinFontFamily");
         FontSize = 13;
@@ -120,8 +120,8 @@ public sealed class FirstRunWindow : Window
         Repaint();
         AppearanceManager.Changed += Repaint;
         Closed += (_, _) => AppearanceManager.Changed -= Repaint;
-        // Answered either way: by Start, or by closing it. There is no second prompt (MVP_SPEC,
-        // Surfaces 5). Only Start writes to an agent's configuration.
+        // Answered either way: by Start, or by closing it. There is no second prompt.
+        // Only Start writes to an agent's configuration.
         Closing += (_, _) => AppSettingsStore.Update(s => s with { FirstRunDone = true });
         // Escape is the close button. The window has no title bar of its own to press Alt+F4 on and
         // no other way out from the keyboard, which left first launch the one surface a keyboard
@@ -176,7 +176,7 @@ public sealed class FirstRunWindow : Window
     // --- the illustration -------------------------------------------------------------------
 
     /// <summary>
-    /// What Deskweave does, before a word of explanation: the owner's editor with an agent's own
+    /// What ARS does, before a word of explanation: the owner's editor with an agent's own
     /// screen beside it in a corner window. Drawn, not photographed, so it costs one small image.
     /// </summary>
     Border Illustration()
@@ -286,7 +286,7 @@ public sealed class FirstRunWindow : Window
     }
 
     /// <summary>
-    /// The desktop behind the illustration: the reference page's wallpaper, two soft washes over a
+    /// The desktop behind the illustration: a wallpaper of two soft washes over a
     /// flat ground. Built here rather than as a theme token; nothing else in the app draws a desktop.
     /// </summary>
     static Brush Wall()
@@ -333,9 +333,9 @@ public sealed class FirstRunWindow : Window
     }
 
     /// <summary>
-    /// The reference sets its headings -0.01em. WPF has no letter spacing, so take the same width
+    /// The design sets its headings -0.01em. WPF has no letter spacing, so take the same width
     /// out of the line as a whole: at this size it is a fortieth of a pixel per glyph, invisible,
-    /// and the line ends where the reference ends it instead of nine pixels further on.
+    /// and the line ends where the design ends it instead of nine pixels further on.
     /// </summary>
     static void Tighten(TextBlock text, double em)
     {
@@ -417,7 +417,7 @@ public sealed class FirstRunWindow : Window
         text.Children.Add(found);
         text.Children.Add(error);
 
-        // On by default: the owner came here to connect what he has, not to pick from a list.
+        // On by default: the owner came here to connect what they have, not to pick from a list.
         var toggle = new CheckBox { IsChecked = true, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
         toggle.SetResourceReference(StyleProperty, "ToggleSwitch");
         AutomationProperties.SetName(toggle, "Connect " + name);
@@ -466,7 +466,7 @@ public sealed class FirstRunWindow : Window
 
     /// <summary>
     /// The one button: it is the consent and the connection in a single press. Every switched-on
-    /// agent gets Deskweave in its own configuration, replacing an entry from an earlier launch
+    /// agent gets ARS in its own configuration, replacing an entry from an earlier launch
     /// rather than adding a second. An agent that refuses says so on its own row and the window
     /// stays open; the ones that worked are connected and stay connected.
     /// </summary>
@@ -493,7 +493,7 @@ public sealed class FirstRunWindow : Window
         }
         WorkspaceConnections.KeepUp();
         // Agents read their tools when a session starts, so one already open has not heard of
-        // Deskweave yet. Said once, where it cannot clutter a screen: the tray's notification.
+        // ARS yet. Said once, where it cannot clutter a screen: the tray's notification.
         if (_connected.Count > 0 && Application.Current is App deskweave) deskweave.Tell(ConnectedTitle, RestartLine);
         if (_rows.All(row => row.Error.Visibility != Visibility.Visible)) { Close(); return; }
         // Recovery, not a dead end: one more try for the rows that said why, their switch back so

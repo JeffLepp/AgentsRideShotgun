@@ -15,7 +15,7 @@ static partial class Native
     /// <summary>
     /// True only when Windows trusts the file's Authenticode signature and its signing
     /// certificate has the exact expected display name. Trust and publisher identity are separate
-    /// gates: a different, validly signed executable must not become something Deskweave executes.
+    /// gates: a different, validly signed executable must not become something ARS executes.
     /// </summary>
     public static bool VerifyAuthenticode(string path, string expectedPublisher)
     {
@@ -150,7 +150,7 @@ static partial class Native
     public const int HtClient = 1;
     // Posting the NC pair is not enough for the caption buttons: DefWindowProc answers them with a
     // modal loop that reads the real cursor, which is on the owner's desktop and nowhere near them.
-    // WM_SYSCOMMAND is the same command without the loop. Measured 2026-08-23.
+    // WM_SYSCOMMAND is the same command without the loop, measured.
     public const int HtMinButton = 8, HtMaxButton = 9, HtClose = 20;
     // The same trap on the rest of the frame: a title bar starts a move loop and a resize edge or a
     // system menu starts one of its own, all of them reading that same motionless cursor. None of
@@ -214,7 +214,7 @@ static partial class Native
     public const int UoiName = 2;
     public const int SmCyScreen = 1;
 
-    // --- the scheduler: a workspace waits on a Windows event, not on a loop (Milestone 3) --------
+    // --- the scheduler: a workspace waits on a Windows event, not on a loop --------------------
 
     public const uint EventObjectShow = 0x8002;
     public const uint EventObjectCreate = 0x8000;
@@ -432,7 +432,7 @@ static partial class Native
     [DllImport("kernel32.dll")]
     public static extern void DeleteProcThreadAttributeList(nint list);
 
-    // --- clipboard broker (Milestone 1C) -------------------------------------------------------
+    // --- clipboard broker -------------------------------------------------------------------
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool AddClipboardFormatListener(nint window);
@@ -536,7 +536,7 @@ static partial class Native
 
     // --- the corner view's global hotkey ------------------------------------------------------
     //
-    // One key combination, owned by Deskweave for as long as the module is loaded. NOREPEAT so
+    // One key combination, owned by ARS for as long as the module is loaded. NOREPEAT so
     // holding it down is one press, which is what a toggle wants.
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -549,7 +549,7 @@ static partial class Native
         ModNoRepeat = 0x4000;
     public const int WmHotKey = 0x0312;
 
-    // --- low integrity launch (Milestone 1C) -------------------------------------------------
+    // --- low integrity launch -------------------------------------------------------------
 
     [DllImport("advapi32.dll", SetLastError = true)]
     public static extern bool OpenProcessToken(nint process, uint access, out nint token);
@@ -567,7 +567,7 @@ static partial class Native
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetUserObjectSecurity(nint handle, ref int information, byte[] descriptor);
 
-    // --- job object limits (Milestone 1C) -----------------------------------------------------
+    // --- job object limits -----------------------------------------------------------------
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern nint CreateJobObjectW(nint attributes, string? name);

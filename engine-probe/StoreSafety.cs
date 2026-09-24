@@ -6,7 +6,7 @@ using Deskweave.AgentWorkspaces;
 /// <summary>
 /// A settings file or a workspace record that is only locked for a moment - a backup tool, an
 /// antivirus scan - must not be taken for a broken one and saved over. And settings written by a
-/// newer Deskweave are kept aside, not thrown away. Everything here runs on files in the probe's
+/// newer ARS are kept aside, not thrown away. Everything here runs on files in the probe's
 /// own fixture folder; nothing starts a desktop or a window.
 /// </summary>
 internal static class StoreSafety

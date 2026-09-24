@@ -42,7 +42,7 @@ try {
     }
 }
 finally { Remove-Item -LiteralPath $inspection -ErrorAction SilentlyContinue }
-$url = "https://github.com/JeffLepp/Deskweave/releases/download/$ReleaseTag/$name"
+$url = "https://github.com/JeffLepp/AgentsRideShotgun/releases/download/$ReleaseTag/$name"
 if ($VerifyPublicDownload) {
     $installerFolder = Join-Path $root ("artifacts\installer\" + $Version)
     $installer = Join-Path $installerFolder 'ARS-Setup.exe'
@@ -70,7 +70,7 @@ if ($VerifyPublicDownload) {
         if ($remoteHash -ne $hash) { throw "Public download SHA-256 differs from the local bundle: $url" }
     }
     finally { Remove-Item -LiteralPath $download -ErrorAction SilentlyContinue }
-    $installerUrl = "https://github.com/JeffLepp/Deskweave/releases/download/$ReleaseTag/ARS-Setup.exe"
+    $installerUrl = "https://github.com/JeffLepp/AgentsRideShotgun/releases/download/$ReleaseTag/ARS-Setup.exe"
     $installerDownload = Join-Path $folder ("verify-installer-" + [Guid]::NewGuid().ToString('N') + '.exe')
     try {
         Invoke-WebRequest -Uri $installerUrl -MaximumRedirection 10 -OutFile $installerDownload
@@ -86,7 +86,7 @@ $metadata = [ordered]@{
     name = 'io.github.JeffLepp/ars'
     title = 'ARS'
     description = 'Connect agents to a second Windows desktop. Requires the ARS app on Windows x64.'
-    repository = [ordered]@{ url = 'https://github.com/JeffLepp/Deskweave'; source = 'github' }
+    repository = [ordered]@{ url = 'https://github.com/JeffLepp/AgentsRideShotgun'; source = 'github' }
     version = $Version
     packages = @([ordered]@{
         registryType = 'mcpb'
