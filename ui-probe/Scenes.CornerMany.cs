@@ -67,7 +67,7 @@ static class CornerManyScenes
         // Both kinds of program request name the same program now that the question tells them
         // apart, so being pending at once must not make one of them answer for the other.
         WorkspaceHandoffs asking = WorkspaceRuntime.Of(made[0].Id)!.Access!.Handoffs;
-        WorkspaceHandoff open = asking.Request("program", "Notepad", "he asked for it");
+        WorkspaceHandoff open = asking.Request("program", "Notepad", "they asked for it");
         WorkspaceHandoff take = asking.Request("takeover", "Notepad", "it is already running outside");
         Program.Check(open.Id != take.Id && open.Kind == "program" && take.Kind == "takeover",
             "Opening a program on the owner's desktop and taking their copy into the workspace stay two separate questions");

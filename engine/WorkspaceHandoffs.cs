@@ -138,7 +138,7 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
                     if (Perform!(request) is { } refused) throw new InvalidOperationException(refused);
                     return Replace(index, request with { State = "opened", Detail = request.Kind == "program"
                         ? "The owner approved. Windows started it on their desktop."
-                        : "The owner approved. His copy closed and the workspace started its own." });
+                        : "The owner approved. Their copy closed and the workspace started its own." });
                 }
                 (open ?? OpenOnDesktop)(target);
                 return Replace(index, request with { State = "opened", Detail = snapshot is null
