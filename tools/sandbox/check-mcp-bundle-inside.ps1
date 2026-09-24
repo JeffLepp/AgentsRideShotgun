@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $inputFolder = 'C:\Users\WDAGUtilityAccount\Desktop\mcp-input'
 $results = 'C:\Users\WDAGUtilityAccount\Desktop\mcp-results'
 $installer = Join-Path $inputFolder 'ARS-Setup.exe'
-$bundle = Join-Path $inputFolder 'Deskweave.mcpb'
+$bundle = Join-Path $inputFolder 'ARS.mcpb'
 function Mark([string]$step) {
     try { Add-Content -LiteralPath (Join-Path $results 'progress.txt') -Value ((Get-Date).ToString('o') + ' ' + $step) }
     catch [IO.IOException] { }

@@ -37,7 +37,7 @@ New-Item -ItemType Directory -Force $setupDir, $results | Out-Null
 Copy-Item -LiteralPath $Installer -Destination (Join-Path $setupDir 'ARS-Setup.exe') -Force
 if ($PreviousInstaller) {
     if (-not (Test-Path -LiteralPath $PreviousInstaller -PathType Leaf)) { throw "No previous installer: $PreviousInstaller" }
-    Copy-Item -LiteralPath $PreviousInstaller -Destination (Join-Path $setupDir 'Deskweave-Previous-Setup.exe')
+    Copy-Item -LiteralPath $PreviousInstaller -Destination (Join-Path $setupDir 'ARS-Previous-Setup.exe')
 }
 $scripts = Join-Path $PSScriptRoot 'sandbox'
 $inside = 'C:\Users\WDAGUtilityAccount\Desktop'

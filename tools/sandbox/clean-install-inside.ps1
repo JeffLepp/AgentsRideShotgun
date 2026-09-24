@@ -25,7 +25,7 @@ $codexConfigurationBefore = if (Test-Path -LiteralPath $codexConfiguration) { (G
 if ($codexConfigurationBefore -and -not $PreserveExistingCodexConfiguration) { throw 'This gate requires a fresh Codex configuration or explicit VM preservation mode.' }
 $results = [IO.Path]::GetFullPath($OutputDirectory)
 $installer = [IO.Path]::GetFullPath($InstallerPath)
-$previousInstaller = Join-Path (Split-Path -Parent $installer) 'Deskweave-Previous-Setup.exe'
+$previousInstaller = Join-Path (Split-Path -Parent $installer) 'ARS-Previous-Setup.exe'
 $initialInstaller = if (Test-Path -LiteralPath $previousInstaller) { $previousInstaller } else { $installer }
 New-Item -ItemType Directory -Force $results | Out-Null
 Start-Transcript -Path (Join-Path $results 'transcript.txt') | Out-Null
@@ -56,7 +56,7 @@ function WaitFor([scriptblock]$condition, [int]$seconds) {
 $local = $env:LOCALAPPDATA
 $app = Join-Path $local 'ARSApp\current\ARS.exe'
 $bridge = Join-Path $local 'ARSApp\current\Bridge\ARS.WorkspaceBridge.exe'
-$ticket = Join-Path $local 'Deskweave\agent-workspaces.access\router.json'
+$ticket = Join-Path $local 'ARS\agent-workspaces.access\router.json'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARSApp'
 $project = Join-Path $results 'project'
 New-Item -ItemType Directory -Force (Join-Path $project '.git') | Out-Null
@@ -82,8 +82,8 @@ function Ask([string]$method, $params, [int]$seconds = 90) {
 }
 $failure = $null
 try {
-    Check (-not (Test-Path $app)) 'This user has no existing Deskweave installation'
-    Check (-not (Test-Path (Join-Path $local 'ARS'))) 'This user has no existing Deskweave data'
+    Check (-not (Test-Path $app)) 'This user has no existing ARS installation'
+    Check (-not (Test-Path (Join-Path $local 'ARS'))) 'This user has no existing ARS data'
     # --- install ---------------------------------------------------------------------------
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $setup = Start-Process -FilePath $initialInstaller -ArgumentList ('--silent --log "' + (Join-Path $results 'setup.log') + '"') -PassThru -WindowStyle Hidden
@@ -91,22 +91,22 @@ try {
     $report.setupExitCode = $setup.ExitCode
     Check ($setup.ExitCode -eq 0) 'Setup returns success'
     $report.installSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
-    Check (Test-Path $app) 'Deskweave installs per user under LocalAppData, no admin'
+    Check (Test-Path $app) 'ARS installs per user under LocalAppData, no admin'
     Check (Test-Path $bridge) 'The agent bridge is installed beside it'
     $report.appVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
     $report.appSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'ARS.dll')).Hash
     $report.engineSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'Deskweave.AgentWorkspaces.dll')).Hash
     $report.bridgeSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $bridge) 'ARS.WorkspaceBridge.dll')).Hash
-    $shortcut = @(Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*.lnk' | Where-Object { $_.Name -like 'Deskweave*' })
+    $shortcut = @(Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*.lnk' | Where-Object { $_.Name -clike 'ARS*' })
     Check ($shortcut.Count -ge 1) 'A Start menu shortcut is created'
-    Check (-not (Test-Path "$env:USERPROFILE\Desktop\Deskweave.lnk")) 'No desktop icon is added'
+    Check (-not (Test-Path "$env:USERPROFILE\Desktop\ARS.lnk")) 'No desktop icon is added'
     Check (Test-Path $uninstallKey) 'An Apps & features uninstall entry is registered'
     $report.displayName = (Get-ItemProperty $uninstallKey).DisplayName
 
     # --- first launch: Setup starts the app, which asks once before touching anything -------
     $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30
     if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
-    Check $started 'Deskweave starts after install'
+    Check $started 'ARS starts after install'
     $clock.Restart()
     $firstWindowReady = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle }).Count -gt 0 } 60
     $report.firstWindowWaitSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
@@ -124,7 +124,7 @@ try {
     if ($initialInstaller -ne $installer) {
         $report.previousVersion = $report.appVersion
         $report.previousInstallerSha256 = (Get-FileHash -LiteralPath $initialInstaller).Hash
-        $upgradeMarker = Join-Path $local 'Deskweave\upgrade-retained.txt'
+        $upgradeMarker = Join-Path $local 'ARS\upgrade-retained.txt'
         Set-Content -LiteralPath $upgradeMarker -Value 'saved before upgrade' -Encoding UTF8
         $session = StartBridge
         $beforeUpgrade = Ask 'initialize' @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'install-upgrade-check'; version = '1' } } 30
@@ -147,7 +147,7 @@ try {
             Check ($session.WaitForExit(10000) -and $session.ExitCode -eq 0) 'The surviving upgrade bridge closes cleanly'
         }
         $session.Dispose(); $session = $null
-        Check ((Get-Content -Raw -LiteralPath $upgradeMarker).Trim() -eq 'saved before upgrade') 'An upgrade preserves existing Deskweave data'
+        Check ((Get-Content -Raw -LiteralPath $upgradeMarker).Trim() -eq 'saved before upgrade') 'An upgrade preserves existing ARS data'
         $report.appVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
         Check ($report.appVersion -ne $report.previousVersion) 'The installed version changes after upgrade'
         $report.appSha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path $app) 'ARS.dll')).Hash
@@ -162,7 +162,7 @@ try {
     $session = StartBridge
     $hello = Ask 'initialize' @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'claude-code'; version = '1' } } 30
     $report.coldStartSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
-    Check ($hello.result.serverInfo.name -eq 'ars') "With Deskweave closed, an agent's bridge starts it and connects ($($report.coldStartSeconds) s)"
+    Check ($hello.result.serverInfo.name -eq 'ars') "With ARS closed, an agent's bridge starts it and connects ($($report.coldStartSeconds) s)"
     if ($initialInstaller -ne $installer) { $report.upgradeBridge.newClientConnected = $true }
     $tools = Ask 'tools/list' @{}
     $names = @($tools.result.tools | ForEach-Object { $_.name })
@@ -187,15 +187,15 @@ try {
     $session.StandardInput.Close(); Check ($session.WaitForExit(10000) -and $session.ExitCode -eq 0) 'The installed bridge exits cleanly when its agent disconnects'
     Get-Process ARS -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
     # The desktop owns browser children; killing the host app must release them too.
-    Check (WaitFor { @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*Deskweave*' }).Count -eq 0 } 15) 'Closing Deskweave releases its workspace browser processes'
+    Check (WaitFor { @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*\ARS\agent-workspaces*' }).Count -eq 0 } 15) 'Closing ARS releases its workspace browser processes'
 
     # --- uninstall ------------------------------------------------------------------------------
     $update = Join-Path $local 'ARSApp\Update.exe'
     Check (Test-Path $update) 'The uninstaller is present'
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     New-Item -Path $runKey -Force | Out-Null
-    New-ItemProperty -Path $runKey -Name Deskweave -Value ('"' + $app + '" --background') -PropertyType String -Force | Out-Null
-    $retained = Join-Path $local 'Deskweave\agent-workspaces\install-test-retained.txt'
+    New-ItemProperty -Path $runKey -Name ARS -Value ('"' + $app + '" --background') -PropertyType String -Force | Out-Null
+    $retained = Join-Path $local 'ARS\agent-workspaces\install-test-retained.txt'
     Set-Content -LiteralPath $retained -Value 'saved work survives uninstall' -Encoding UTF8
     # A provider-shaped local fixture verifies that the real uninstall hook calls the provider
     # and leaves unrelated configuration alone. No provider account or model is involved.
@@ -203,7 +203,7 @@ try {
     New-Item -ItemType Directory -Force $fixtureBin | Out-Null
     $providerConfig = Join-Path $env:USERPROFILE '.claude.json'
     $providerFixture = @{ retainedPreference = 'keep'; mcpServers = @{
-        deskweave = @{ type = 'stdio'; command = $bridge; args = @('--workspace', $ticket) }
+        ars = @{ type = 'stdio'; command = $bridge; args = @('--workspace', $ticket) }
         another_server = @{ command = 'unrelated.exe' }
     } } | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText($providerConfig, $providerFixture, (New-Object Text.UTF8Encoding $false))
@@ -214,7 +214,7 @@ using System.Collections.Generic;
 using System.Web.Script.Serialization;
 public static class InstallerProviderFixture {
     public static int Main(string[] args) {
-        if (string.Join(" ", args) != "mcp remove --scope user deskweave") return 2;
+        if (string.Join(" ", args) != "mcp remove --scope user ars") return 2;
         string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json");
         var serializer = new JavaScriptSerializer();
         var config = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
@@ -231,14 +231,14 @@ public static class InstallerProviderFixture {
     Start-Sleep -Seconds 3
     Check (-not (Test-Path $app)) 'Uninstall removes the app'
     Check (-not (Test-Path $uninstallKey)) 'Uninstall removes the Apps & features entry'
-    $left = @(Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*.lnk' | Where-Object { $_.Name -like 'Deskweave*' })
+    $left = @(Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*.lnk' | Where-Object { $_.Name -clike 'ARS*' })
     Check ($left.Count -eq 0) 'Uninstall removes the Start menu shortcut'
-    Check (Test-Path (Join-Path $local 'Deskweave\agent-workspaces')) "Uninstall keeps the owner's workspaces and settings"
+    Check (Test-Path (Join-Path $local 'ARS\agent-workspaces')) "Uninstall keeps the owner's workspaces and settings"
     Check ((Get-Content -Raw -LiteralPath $retained).Trim() -eq 'saved work survives uninstall') 'Uninstall preserves saved workspace file contents'
     $providerAfter = Get-Content -Raw -LiteralPath $providerConfig | ConvertFrom-Json
-    Check ($null -eq $providerAfter.mcpServers.deskweave) 'Uninstall removes its owned MCP entry through the provider command'
+    Check ($null -eq $providerAfter.mcpServers.ars) 'Uninstall removes its owned MCP entry through the provider command'
     Check ($providerAfter.retainedPreference -eq 'keep' -and $providerAfter.mcpServers.another_server.command -eq 'unrelated.exe') 'Uninstall preserves unrelated provider settings and MCP entries'
-    Check ($null -eq (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).Deskweave) 'Nothing is left starting with Windows'
+    Check ($null -eq (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).ARS) 'Nothing is left starting with Windows'
     if ($codexConfigurationBefore) {
         Check ((Test-Path -LiteralPath $codexConfiguration) -and (Get-FileHash -LiteralPath $codexConfiguration).Hash -eq $codexConfigurationBefore) 'The complete install, workspace and uninstall sequence preserves the existing Codex configuration byte for byte'
     }
@@ -249,7 +249,7 @@ public static class InstallerProviderFixture {
     Check ($setup.WaitForExit(300000) -and $setup.ExitCode -eq 0) 'Reinstalling over kept data succeeds'
     $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30
     if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
-    Check $started 'Deskweave starts after the reinstall'
+    Check $started 'ARS starts after the reinstall'
     [IO.File]::WriteAllText($providerConfig, $providerFixture, (New-Object Text.UTF8Encoding $false))
     Get-Process ARS -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }
     foreach ($folder in @((Join-Path $local 'ARS'), (Join-Path $env:APPDATA 'ARS'))) {
@@ -261,15 +261,15 @@ public static class InstallerProviderFixture {
     $leftovers = @(
         @($local, $env:APPDATA, $env:TEMP, "$env:APPDATA\Microsoft\Windows\Start Menu\Programs", "$env:USERPROFILE\Desktop") |
             Where-Object { Test-Path $_ } |
-            ForEach-Object { Get-ChildItem -LiteralPath $_ -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*Deskweave*' } } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_ -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -clike 'ARS*' -or $_.Name -like '*Deskweave*' } } |
             ForEach-Object { $_.FullName })
     $report.fullUninstallLeftovers = $leftovers
     Shot 'after-full-uninstall'
-    Check ($leftovers.Count -eq 0) ('Full uninstall leaves no Deskweave files or folders' + $(if ($leftovers) { ': ' + ($leftovers -join ', ') }))
+    Check ($leftovers.Count -eq 0) ('Full uninstall leaves no ARS files or folders' + $(if ($leftovers) { ': ' + ($leftovers -join ', ') }))
     Check (-not (Test-Path $uninstallKey)) 'Full uninstall removes the Apps & features entry'
-    Check ($null -eq (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).Deskweave) 'Full uninstall leaves nothing starting with Windows'
-    Check ($null -eq (Get-Content -Raw -LiteralPath $providerConfig | ConvertFrom-Json).mcpServers.deskweave) 'Full uninstall disconnects the agent'
-    Check (@(Get-Process ARS, ARS.WorkspaceBridge -ErrorAction SilentlyContinue).Count -eq 0) 'No Deskweave process is left running'
+    Check ($null -eq (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).ARS) 'Full uninstall leaves nothing starting with Windows'
+    Check ($null -eq (Get-Content -Raw -LiteralPath $providerConfig | ConvertFrom-Json).mcpServers.ars) 'Full uninstall disconnects the agent'
+    Check (@(Get-Process ARS, ARS.WorkspaceBridge -ErrorAction SilentlyContinue).Count -eq 0) 'No ARS process is left running'
 }
 catch { $failure = $_.ToString() }
 finally {

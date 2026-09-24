@@ -27,7 +27,7 @@ $inputFolder = Join-Path $output 'input'
 $results = Join-Path $output 'results'
 New-Item -ItemType Directory -Force -Path $inputFolder,$results | Out-Null
 Copy-Item -LiteralPath $Installer -Destination (Join-Path $inputFolder 'ARS-Setup.exe')
-Copy-Item -LiteralPath $Bundle -Destination (Join-Path $inputFolder 'Deskweave.mcpb')
+Copy-Item -LiteralPath $Bundle -Destination (Join-Path $inputFolder 'ARS.mcpb')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'check-mcp-connector.ps1') -Destination (Join-Path $inputFolder 'check-mcp-connector.ps1')
 $inside = 'C:\Users\WDAGUtilityAccount\Desktop'
 $xmlInput = [Security.SecurityElement]::Escape($inputFolder)
