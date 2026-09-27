@@ -516,8 +516,18 @@ public sealed partial class WorkspaceBrowser : IDisposable
     /// from what the page already has - an id, a distinctive attribute, else its place in the
     /// tree - without marking the page, which is the app being tested.
     /// </summary>
-    public Task<string> Read(int limit = 20000, CancellationToken cancel = default) => Evaluate($$"""
+    /// <param name="scope">Only the part of the page under this CSS selector, text and controls both.</param>
+    /// <param name="offset">Where to continue the text. Controls are listed only on the first page.</param>
+    public Task<string> Read(int limit = 12000, CancellationToken cancel = default, string? scope = null,
+        int offset = 0, bool controls = true) => Evaluate($$"""
         (() => {
+          const head = document.title + '\n' + location.href + '\n\n';
+          let root = document.body;
+          const scope = {{Json(scope ?? "")}};
+          if (scope) {
+            try { root = document.querySelector(scope); } catch { return head + 'That selector is not valid CSS.'; }
+            if (!root) return head + 'Nothing on the page matched ' + scope + '.';
+          }
           const one = sel => { try { return document.querySelectorAll(sel).length === 1; } catch { return false; } };
           const quote = v => '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
           const pick = el => {
@@ -536,18 +546,27 @@ public sealed partial class WorkspaceBrowser : IDisposable
             }
             return 'body > ' + path;
           };
+          // Measured: a YouTube results page came back as 63k characters and overflowed the
+          // agent's tool output. The text now says when it was cut and how to go on, and the
+          // controls say how many were left out, so a smaller page costs nothing silently.
+          const all = root ? root.innerText : '';
+          const text = all.slice({{offset}}, {{offset}} + {{limit}});
+          const rest = all.length - {{offset}} - text.length;
+          let out = head + text + (rest > 0 ? '\n\n[' + rest + ' more characters: read again with offset='
+                    + ({{offset}} + text.length) + ', or narrow it with selector]' : '');
+          if (!{{(controls && offset == 0 ? "true" : "false")}} || !root) return out;
           const seen = [];
-          for (const el of document.querySelectorAll('a[href],button,input,textarea,select,[role=button]')) {
+          let skipped = 0;
+          for (const el of root.querySelectorAll('a[href],button,input,textarea,select,[role=button]')) {
             const box = el.getBoundingClientRect();
             if (box.width === 0 || box.height === 0) continue;
+            if (seen.length >= 120) { skipped++; continue; }
             const what = (el.innerText || el.value || el.placeholder || el.name ||
                           el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-            seen.push(pick(el) + '  "' + what + '"' + (el.href ? ' -> ' + el.href : ''));
-            if (seen.length > 200) break;
+            seen.push(pick(el) + '  "' + what + '"' + (el.href ? ' -> ' + el.href.slice(0, 150) : ''));
           }
-          return document.title + '\n' + location.href + '\n\n' +
-                 (document.body ? document.body.innerText : '').slice(0, {{limit}}) +
-                 '\n\n-- controls --\n' + seen.join('\n');
+          return out + '\n\n-- controls --\n' + seen.join('\n') +
+                 (skipped ? '\n[' + skipped + ' more controls: narrow it with selector]' : '');
         })()
         """, cancel);
 

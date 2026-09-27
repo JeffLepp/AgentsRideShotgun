@@ -21,8 +21,21 @@ public sealed partial class WorkspaceBrowser
     internal async Task<BitmapSource?> Screenshot(CancellationToken cancel)
     {
         await Follow(cancel).ConfigureAwait(false);
-        JsonNode? metrics = await Call("Page.getLayoutMetrics", null, cancel, _session).ConfigureAwait(false);
-        JsonNode? viewport = metrics?["cssVisualViewport"];
+        // A wheel scroll keeps animating after its input call returns. A clip taken from a position
+        // read mid-animation points at content that has already scrolled out of the viewport, and
+        // with captureBeyondViewport off that comes back as a blank frame (measured: two 1400px
+        // wheel scrolls on a long page). Wait until the position holds for one beat.
+        JsonNode? viewport = null;
+        double pageX = double.NaN, pageY = double.NaN;
+        for (int read = 0; read < 20; read++)
+        {
+            JsonNode? metrics = await Call("Page.getLayoutMetrics", null, cancel, _session).ConfigureAwait(false);
+            viewport = metrics?["cssVisualViewport"];
+            double x = viewport?["pageX"]?.GetValue<double>() ?? 0, y = viewport?["pageY"]?.GetValue<double>() ?? 0;
+            if (x == pageX && y == pageY) break;
+            (pageX, pageY) = (x, y);
+            await Task.Delay(50, cancel).ConfigureAwait(false);
+        }
         int width = (int)(viewport?["clientWidth"]?.GetValue<double>() ?? 0);
         int height = (int)(viewport?["clientHeight"]?.GetValue<double>() ?? 0);
         if (width <= 0 || height <= 0) return null;
@@ -31,8 +44,7 @@ public sealed partial class WorkspaceBrowser
             ["format"] = "png", ["captureBeyondViewport"] = false,
             // Clip away scrollbars instead of squeezing them into the content width. pageX/Y keep
             // the image origin at the visible viewport after scrolling, not the document origin.
-            ["clip"] = new JsonObject { ["x"] = viewport?["pageX"]?.GetValue<double>() ?? 0,
-                ["y"] = viewport?["pageY"]?.GetValue<double>() ?? 0,
+            ["clip"] = new JsonObject { ["x"] = pageX, ["y"] = pageY,
                 ["width"] = width, ["height"] = height, ["scale"] = 1 },
         }, cancel, _session).ConfigureAwait(false);
         string? data = result?["data"]?.GetValue<string>();

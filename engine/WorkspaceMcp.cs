@@ -63,7 +63,7 @@ public sealed class WorkspaceMcp : IDisposable
             [], false),
         new("look", "A close-up at full detail: one window, or the whole screen at full size, for reading small text. "
             + "It costs about twice a computer screenshot, so use computer for ordinary looking. marks=true numbers the controls; "
-            + "click one with computer's control. Its pixels are not click coordinates.",
+            + "click one with computer's control. Its pixels are not computer's; the reply says how to convert.",
             [("window", "number", "a window number, or omit for the whole screen"),
                 ("marks", "boolean", "number the controls on the picture")], [], false),
         new("computer", "Look and act: up to 16 actions, then one screenshot of at most 1280x720. Omit actions just to look. "
@@ -108,8 +108,10 @@ public sealed class WorkspaceMcp : IDisposable
             [("tab", "number", "a tab number, or 0; omit to list them")], [], false),
         new("page", "Reads the current page's text and the things on it that can be clicked or typed into, each with "
             + "its own selector, or clicks (action=click) or types into (action=type) one of them by that selector.",
-            [("action", "string", "read (default), click or type"), ("selector", "string", "a CSS selector, for click and type"),
-                ("text", "string", "")], [], false),
+            [("action", "string", "read (default), click or type"),
+                ("selector", "string", "a CSS selector: what to click or type into, or for read only that part of the page"),
+                ("text", "string", ""), ("offset", "number", "read: where to continue the text"),
+                ("text_only", "boolean", "read: leave out the controls")], [], false),
         new("wait", "Waits without spending tokens: for up to the given seconds, or until a window whose title contains "
             + "the given text appears. Use it instead of looking again and again.",
             [("seconds", "number", "how long to wait at most, 30 if not given"), ("window", "string", "part of a window title to wait for")], [], false),
@@ -315,7 +317,15 @@ public sealed class WorkspaceMcp : IDisposable
                 if (window == 0 && _control.ScreenState.Note is { Length: > 0 } stale) what += ". " + stale;
                 // Its pixels are not the ones computer takes, and an agent that forgets which picture a
                 // point came from clicks beside what it meant to. Say so where it is read.
-                return Picture(frame, what, "For reading only: click with computer, by control number or its own picture's pixels.");
+                if (window != 0)
+                    return Picture(frame, what, "For reading only: click with computer, by control number or its own picture's pixels.");
+                // The whole screen is the same source computer shrinks to its cap, so the factor is
+                // known: give it, rather than leave the agent to guess why its click landed beside.
+                double scale = WorkspaceMarks.Fit(frame.PixelWidth, frame.PixelHeight,
+                    WorkspaceMarks.ActionWidth, WorkspaceMarks.ActionHeight).Scale;
+                return Picture(frame, what, scale >= 1 ? "Its pixels are the same as computer's desktop pixels."
+                    : $"To click a point from this picture with computer (target desktop), multiply its x and y by {scale.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}, "
+                        + "or click by control number.");
             }
 
             case "controls":
@@ -446,7 +456,8 @@ public sealed class WorkspaceMcp : IDisposable
                 {
                     case "" or "read":
                     {
-                        string text = await _control.PageText(cancel).ConfigureAwait(false);
+                        string text = await _control.PageText(Str(arguments, "selector") is { Length: > 0 } part ? part : null,
+                            Int(arguments, "offset"), !Bool(arguments, "text_only"), cancel).ConfigureAwait(false);
                         return text.Length == 0 ? Fail("no browser is open. Call browse first.")
                             : Say("at " + await _control.Address(cancel).ConfigureAwait(false) + "\n\n" + text);
                     }

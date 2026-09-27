@@ -934,10 +934,10 @@ public sealed partial class WorkspaceControl : IDisposable
     internal WorkspaceBrowser? Browser => _browser;
 
     /// <summary>The page's real text and the things on it that can be acted on.</summary>
-    public async Task<string> PageText(CancellationToken cancel = default)
+    public async Task<string> PageText(string? scope = null, int offset = 0, bool controls = true, CancellationToken cancel = default)
     {
         if (_browser is null) return string.Empty;
-        string text = await _browser.Read(20000, cancel).ConfigureAwait(false);
+        string text = await _browser.Read(cancel: cancel, scope: scope, offset: Math.Max(0, offset), controls: controls).ConfigureAwait(false);
         string at = await Address(cancel).ConfigureAwait(false);
         _evidence.Note("page", at, text.Length + " characters read");
         return text;

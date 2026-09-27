@@ -110,6 +110,7 @@ internal static class PageReadProbe
         string? failure = null;
         var lines = new List<string>();
         string log = "";
+        var checks = new Dictionary<string, bool>();
         try
         {
             using AgentDesktop desktop = AgentDesktop.Create("read-" + Guid.NewGuid().ToString("N")[..8]);
@@ -147,13 +148,49 @@ internal static class PageReadProbe
                 }
                 string after = browser.Read().GetAwaiter().GetResult();
                 log = after.Split('\n').FirstOrDefault(l => l.StartsWith('|')) ?? "";
+
+                // A long page: the read says where it was cut and how to go on, a selector narrows
+                // it, and a big wheel scroll still photographs the content rather than a blank frame.
+                string longPage = Path.Combine(desktop.Folder!, "long.html");
+                File.WriteAllText(longPage, "<!doctype html><title>long</title><body style='margin:0;background:#fff'>"
+                    + "<div id='part'>only this part <a href='#top'>top</a></div>"
+                    + string.Concat(Enumerable.Range(0, 400).Select(i =>
+                        $"<p style='margin:0;padding:8px;background:hsl({i * 37 % 360},70%,50%)'>row {i} <a href='#r{i}'>link {i}</a> "
+                        + new string('x', 60) + "</p>")) + "</body>");
+                if (!browser.Go(new Uri(longPage).AbsoluteUri).GetAwaiter().GetResult()) throw new InvalidOperationException("long page did not load");
+                string whole = browser.Read().GetAwaiter().GetResult();
+                string next = browser.Read(offset: 12000).GetAwaiter().GetResult();
+                string part = browser.Read(scope: "#part").GetAwaiter().GetResult();
+                string bare = browser.Read(controls: false).GetAwaiter().GetResult();
+                string none = browser.Read(scope: "#nope").GetAwaiter().GetResult();
+                File.WriteAllText(Path.Combine(output, "long-read.txt"), whole);
+                checks["cut text says how to go on"] = whole.Contains("more characters: read again with offset=12000");
+                checks["controls past the cap are counted"] = whole.Contains("[281 more controls");
+                checks["offset continues without controls"] = next.Contains("row ") && !next.Contains("-- controls --");
+                checks["selector narrows text and controls"] = part.Contains("only this part") && !part.Contains("row 1 ")
+                    && part.Contains("\"top\"") && !part.Contains("link 0");
+                checks["text only leaves out controls"] = !bare.Contains("-- controls --");
+                checks["unmatched selector says so"] = none.Contains("Nothing on the page matched #nope");
+                for (int turn = 0; turn < 2; turn++)
+                    browser.ComputerInput(new ComputerAction("scroll", 300, 300, ScrollY: 1400), default).GetAwaiter().GetResult();
+                var shot = browser.Screenshot(default).GetAwaiter().GetResult();
+                checks["big scroll photographs content"] = shot is not null && !Blank(shot);
             }
         }
         catch (Exception ex) { failure = ex.ToString(); }
         string expected = "|1:One|2:One again|3:Two|4:Save|5:Save|6:Delete|7:Delete|8:Name|9:Name|10:Go|11:Say \"hi\"";
-        bool passed = failure is null && log == expected;
-        File.WriteAllText(Path.Combine(output, "report.json"), JsonSerializer.Serialize(new { passed, lines, log, expected, failure },
+        bool passed = failure is null && log == expected && checks.Count > 0 && checks.Values.All(ok => ok);
+        File.WriteAllText(Path.Combine(output, "report.json"), JsonSerializer.Serialize(new { passed, lines, log, expected, checks, failure },
             new JsonSerializerOptions { WriteIndented = true }));
         return passed ? 0 : 1;
+    }
+
+    /// <summary>Every pixel the same colour: what a clip taken mid-scroll came back as.</summary>
+    static bool Blank(System.Windows.Media.Imaging.BitmapSource frame)
+    {
+        var bgra = new System.Windows.Media.Imaging.FormatConvertedBitmap(frame, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+        int[] pixels = new int[bgra.PixelWidth * bgra.PixelHeight];
+        bgra.CopyPixels(pixels, bgra.PixelWidth * 4, 0);
+        return pixels.All(p => p == pixels[0]);
     }
 }
