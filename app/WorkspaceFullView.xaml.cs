@@ -71,8 +71,6 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             if (IsVisible) { _screenTimer.Start(); ScreenTick(null, EventArgs.Empty); }
             else _screenTimer.Stop();
         };
-        // The pointer arriving speeds the picture up now, not at the end of a glance-paced wait.
-        ScreenImage.MouseEnter += (_, _) => { if (_screenTimer is { IsEnabled: true }) ScreenTick(null, EventArgs.Empty); };
         Unloaded += (_, _) => StopLive();
     }
 
@@ -169,7 +167,12 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     // The owner pressing the picture (WorkspaceScreenInput.OwnerActed) already runs on this page's
     // own UI thread, so this one updates the toast directly rather than hopping through the dispatcher.
-    void OwnerActed() => UpdateControlToast(WorkspaceRuntime.Of(_id ?? ""));
+    void OwnerActed()
+    {
+        UpdateControlToast(WorkspaceRuntime.Of(_id ?? ""));
+        // Taking control speeds the picture up now, not at the end of a glance-paced wait.
+        if (_screenTimer is { IsEnabled: true }) ScreenTick(null, EventArgs.Empty);
+    }
 
     /// <summary>"You have control": visible for exactly as long as
     /// WorkspaceControl.Driving says the owner is the one driving.</summary>
@@ -267,8 +270,10 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         ScreenTick(null, EventArgs.Empty);
     }
 
-    /// <summary>The pointer is on the picture or this page holds control, so it redraws fast enough to drive.</summary>
-    bool HandsOn => ScreenImage.IsMouseOver || _input?.OwnsControl == true;
+    /// <summary>This page holds control, so it redraws fast enough to drive. Not the pointer being on
+    /// the picture: here the picture fills most of the window, so hovering meant watching at the
+    /// driving pace, and every fast frame queues on the thread the agent's own actions use.</summary>
+    bool HandsOn => _input?.OwnsControl == true;
     long _livedAt;
 
     async void ScreenTick(object? sender, EventArgs e)
