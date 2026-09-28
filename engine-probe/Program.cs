@@ -276,6 +276,7 @@ internal static class Program
             PrewarmProbe.Run(Check);
             OpenRouteProbe.Run(Check);
             PopOutProbe.Run(Check, Path.Combine(fixture, "popout"));
+            BridgeQuit.Run(Check, fixture);
         }
         catch (Exception ex) { failure = ex.ToString(); }
         finally

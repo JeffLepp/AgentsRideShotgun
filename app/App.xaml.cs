@@ -54,6 +54,7 @@ public partial class App : Application
             SessionEnding += (_, _) => _quitting = true;
             // Only now, holding the lock: no other copy is using the old folders while they move.
             FormerName.MoveData();
+            WorkspaceAccessStore.ClearQuit();
             ModuleEntry.Initialize();
             var window = new MainWindow();
             MainWindow = window;
@@ -209,6 +210,8 @@ public partial class App : Application
     internal void ShutdownAfterConfirmedQuit()
     {
         _quitting = true;
+        // Before the lock goes: a bridge that finds ARS gone must already see that it was quit.
+        WorkspaceAccessStore.MarkQuit();
         Shutdown();
     }
 
@@ -286,7 +289,8 @@ internal static class TrayMenu
 internal static class QuitQuestion
 {
     internal const string Title = "Quit ARS?";
-    internal const string Body = "Agents working now will stop. Your files stay. ARS starts again in the background when an agent needs it.";
+    internal static string Body => "Agents working now will stop. Your files stay. Agents can't reopen it: ARS stays closed until you open it"
+        + (AppSettingsStore.Current.StartWithWindows ? " or sign in again." : ".");
     internal const string QuitLabel = "Quit";
     internal const string CancelLabel = "Cancel";
     internal static Func<bool>? ConfirmForTests;

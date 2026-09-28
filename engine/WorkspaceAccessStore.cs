@@ -57,6 +57,24 @@ internal static class WorkspaceAccessStore
     internal static void PublishRouter(WorkspacePipeServer server) => WriteJson(RouterTicket, Ticket(server));
     internal static void WithdrawRouter(WorkspacePipeServer server) => WithdrawTicket(RouterTicket, server);
 
+    /// <summary>
+    /// Left by the owner's Quit, beside the router ticket. While it is there an agent's bridge does not
+    /// start ARS again, and the agent carries on without it. Any start of ARS removes it: the bridge
+    /// never starts one while it is there, so a start is the owner's or Windows' at sign-in.
+    /// Must match the bridge's QuitMark.
+    /// </summary>
+    internal static string QuitMark => Path.Combine(Root, "quit");
+    internal static void MarkQuit()
+    {
+        try { Directory.CreateDirectory(Root); File.WriteAllBytes(QuitMark, []); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+    internal static void ClearQuit()
+    {
+        try { File.Delete(QuitMark); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
     static object Ticket(WorkspacePipeServer server) => new { schema = 1, pipe = server.Name, capability = server.Capability };
 
     /// <summary>The pipe a ticket names, or null when there is no readable ticket.</summary>

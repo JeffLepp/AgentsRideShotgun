@@ -14,6 +14,9 @@ const string NotOpen = "ARS isn't open.";
 const string NotAnswering = "ARS isn't answering.";
 const string Closed = "ARS closed while this was running.";
 const string Mismatched = "This MCP entry doesn't match the ARS on this PC. Connect the agent again from ARS's Settings.";
+const string Off = "The user turned ARS off.";
+// Beside the ticket, left by the owner's Quit. Must match WorkspaceAccessStore.QuitMark.
+const string QuitMark = "quit";
 
 string? capability = Environment.GetEnvironmentVariable("DESKWEAVE_WORKSPACE_PIPE_KEY");
 Environment.SetEnvironmentVariable("DESKWEAVE_WORKSPACE_PIPE_KEY", null);
@@ -43,13 +46,16 @@ bool mayLaunchApp = PreventStandardPipeInheritance();
 // this bridge starts itself; one not running at all is started in the background. Both stay under
 // Codex's 10 s MCP startup timeout. Past that, the client hears one line rather than a long hang.
 (Link? link, string why) = await Reach(TimeSpan.FromSeconds(9));
-if (link is null) return await Say(why switch
+// The owner quit ARS. This session gets no tools and no instructions, so the agent works as if
+// ARS were not installed; a failed server would only put a warning in front of the owner.
+bool quiet = link is null && why == Off;
+if (link is null && !quiet) return await Say(why switch
 {
     NotOpen => why + " Open ARS, then reconnect this MCP server.",
     NotAnswering => why + " Restart ARS, then reconnect this MCP server.",
     _ => why,
 }, why == Mismatched ? 2 : 1);
-if (link.Send(context, new(null, "deskweave/context", Discard: true)) is { } sent) await sent;
+if (link?.Send(context, new(null, "deskweave/context", Discard: true)) is { } sent) await sent;
 
 try
 {
@@ -84,6 +90,11 @@ finally { link?.Dispose(); }
 async Task Forward(string message)
 {
     Expect expect = Read(message);
+    if (quiet)
+    {
+        Answer(expect);
+        return;
+    }
     if (expect.Method == "initialize") hello = message;
     if (link is null || link.Broken)
     {
@@ -108,6 +119,7 @@ void Unreachable(Expect expect, string reason)
     {
         NotAnswering => reason + " Ask the owner to restart ARS, then try again.",
         Mismatched => reason,
+        Off => reason + " Carry on with your own tools as if ARS were not installed.",
         _ => reason + " Ask the owner to open ARS, then try again.",
     };
     string reply = expect.Method == "tools/call"
@@ -115,6 +127,21 @@ void Unreachable(Expect expect, string reason)
             + JsonEncodedText.Encode(text) + "\"}],\"isError\":true}}"
         : "{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"error\":{\"code\":-32000,\"message\":\"" + JsonEncodedText.Encode(text) + "\"}}";
     Write(reply);
+}
+
+// A session that began with ARS quit: an empty server, answered here without ARS.
+void Answer(Expect expect)
+{
+    if (expect.Id is null) return;
+    string? result = expect.Method switch
+    {
+        "initialize" => "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"ars\",\"version\":\"1\"}}",
+        "tools/list" => "{\"tools\":[]}",
+        "ping" => "{}",
+        _ => null,
+    };
+    if (result is null) Unreachable(expect, Off);
+    else Write("{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"result\":" + result + "}");
 }
 
 void Write(string json)
@@ -140,9 +167,16 @@ static Expect Read(string message)
 // Joins ARS, starting it first when it is not running: an agent that needs a screen should not
 // have to ask the owner to open an app. An ARS that is running but still starting gets the
 // patience. Only the real install's router ticket is started or waited on that long; any other
-// ticket (a probe's fixture store) gets two seconds and never starts an app.
+// ticket (a probe's fixture store) gets two seconds and never starts an app. One the owner quit
+// is not started or waited on: it stays closed until they open it.
 async Task<(Link?, string)> Reach(TimeSpan patience)
 {
+    if (ticket is not null && File.Exists(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ticket))!, QuitMark)))
+    {
+        // Still quitting, or a mark its start could not remove: an ARS that answers wins.
+        (Link? now, string closed) = await Open(TimeSpan.Zero);
+        return now is null && closed == NotOpen ? (null, Off) : (now, closed);
+    }
     if (App() is not { } app) return await Open(TimeSpan.FromSeconds(Math.Min(patience.TotalSeconds, 2)));
     bool running = Running();
     (Link? found, string reason) = await Open(running ? patience : TimeSpan.Zero);
