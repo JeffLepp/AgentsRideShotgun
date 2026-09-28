@@ -17,8 +17,11 @@ internal static class WorkspacePeekPolicy
     /// <param name="held">The owner's pointer, a drag or their input is on it right now.</param>
     /// <param name="busy">A workspace waits on the owner: a question, or a workspace they hold.</param>
     /// <param name="quiet">How long since the last thing any workspace did.</param>
+    /// <param name="showable">Its screen has something the owner would have seen on their own desktop,
+    /// or a question for them. Comes and goes stays away for work that never shows a window.</param>
     internal static bool Wanted(CornerShow show, bool running, bool hub, bool dismissed, bool summoned,
-        bool pinned, bool held, bool busy, TimeSpan quiet, TimeSpan fade, bool presentation = false, bool explicitlyRequested = false)
+        bool pinned, bool held, bool busy, TimeSpan quiet, TimeSpan fade, bool presentation = false, bool explicitlyRequested = false,
+        bool showable = true)
     {
         if (!running || hub || dismissed) return false;
         if (presentation && !explicitlyRequested) return false;
@@ -26,7 +29,7 @@ internal static class WorkspacePeekPolicy
         return show switch
         {
             CornerShow.Always => true,
-            CornerShow.ComesAndGoes => pinned || busy || quiet < fade,
+            CornerShow.ComesAndGoes => pinned || showable && (busy || quiet < fade),
             _ => false,
         };
     }

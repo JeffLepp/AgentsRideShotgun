@@ -216,12 +216,15 @@ public sealed partial class AgentDesktop : IDisposable
 
     /// <summary>The same launch, with the process also placed in a command's own nested job, so
     /// cancelling that command reaches descendants whose parent has already exited.</summary>
-    internal int Launch(string exe, string? arguments, long lease, WorkspaceProcessGroup? group, (nint In, nint Out)? handles = null)
+    /// <param name="windowless">A console program gets no console window at all, as in an agent's
+    /// own shell; windows it opens itself still land on this desktop.</param>
+    internal int Launch(string exe, string? arguments, long lease, WorkspaceProcessGroup? group,
+        (nint In, nint Out)? handles = null, bool windowless = false)
     {
         lock (_lifecycle)
         {
             if (_disposed || Revoked(lease)) return 0;
-            return LaunchCore(exe, arguments, handles, lease, _limits, group: group);
+            return LaunchCore(exe, arguments, handles, lease, _limits, group: group, windowless: windowless);
         }
     }
 
@@ -242,18 +245,18 @@ public sealed partial class AgentDesktop : IDisposable
     }
 
     int LaunchCore(string exe, string? arguments, (nint In, nint Out)? handles, long lease,
-        WorkspaceLimits? limits, bool pipeHandlesOnly = false, WorkspaceProcessGroup? group = null)
+        WorkspaceLimits? limits, bool pipeHandlesOnly = false, WorkspaceProcessGroup? group = null, bool windowless = false)
     {
         // A WPF program chooses how it draws while it starts, and only a software renderer leaves
         // pixels a desktop Windows does not compose can hand back. On before the process runs, off
         // again once it is up: see WorkspaceRenderMode.
         IDisposable? softened = WorkspaceRenderMode.Soften();
-        try { return LaunchCore(exe, arguments, handles, lease, limits, ref softened, pipeHandlesOnly, group); }
+        try { return LaunchCore(exe, arguments, handles, lease, limits, ref softened, pipeHandlesOnly, group, windowless); }
         finally { softened?.Dispose(); }
     }
 
     int LaunchCore(string exe, string? arguments, (nint In, nint Out)? handles, long lease,
-        WorkspaceLimits? limits, ref IDisposable? softened, bool pipeHandlesOnly, WorkspaceProcessGroup? group)
+        WorkspaceLimits? limits, ref IDisposable? softened, bool pipeHandlesOnly, WorkspaceProcessGroup? group, bool windowless)
     {
         // Inspect the exact image we will start. A visible console can otherwise be delegated to
         // Windows Terminal through COM on Default, despite lpDesktop naming this workspace.
@@ -269,7 +272,11 @@ public sealed partial class AgentDesktop : IDisposable
         // CREATE_UNICODE_ENVIRONMENT is required whenever an environment block is passed at all.
         uint flags = Native.CreateSuspended | Native.CreateNewConsole | Native.CreateUnicodeEnvironment;
         string? consoleTitle = null;
-        if (console && handles is null)
+        // CREATE_NO_WINDOW gives it a console that is never shown, so there is nothing to hand to
+        // Terminal either. It is ignored beside CREATE_NEW_CONSOLE, so it replaces it.
+        if (console && handles is null && windowless)
+            flags = Native.CreateSuspended | Native.CreateUnicodeEnvironment | ConsoleCreateNoWindow;
+        else if (console && handles is null)
         {
             // The inbox console explicitly refuses default-terminal handoff for minimized startup.
             // This takes effect before console allocation; hiding an already delegated window is late.
@@ -394,6 +401,9 @@ public sealed partial class AgentDesktop : IDisposable
     /// <summary>An empty list means the pump did not answer in time, which reads the same to a
     /// caller as an empty desktop and is the only honest answer either way.</summary>
     public IReadOnlyList<AgentWindow> Windows() => Run(WindowsOnScreen) ?? [];
+
+    /// <summary>The same list, or null when the pump did not answer inside the bound.</summary>
+    internal IReadOnlyList<AgentWindow>? Windows(TimeSpan bound) => Run(WindowsOnScreen, bound);
 
     /// <summary>Whether one process has put a window on this desktop yet.</summary>
     internal bool HasWindow(int pid) => Windows().Any(window =>

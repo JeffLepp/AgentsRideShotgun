@@ -89,6 +89,9 @@ static class Program
         }
         _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking || storage || lifecycle || scaling ? args[1] : args[0]);
         Directory.CreateDirectory(_output);
+        // The corner scenes drive empty fixture workspaces; CornerScenes.EmptyScreenChecks turns this
+        // off to check that an empty screen really keeps the corner away.
+        WorkspacePeekHost.ShowEmptyForTests = true;
         // The scenes stand in for every agent seam; if one is ever missed, what it writes lands here and
         // not in the owner's own configuration.
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", Path.Combine(_output, "agents", "claude"));

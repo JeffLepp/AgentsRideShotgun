@@ -165,6 +165,7 @@ static partial class CornerScenes
         DropChromeChecks();
         await RenderingLifecycleChecks();
         await DockTransitionChecks();
+        await EmptyScreenChecks();
         await DockPolicyChecks();
         await IntegrationChecks();
         // These drive the real WorkspacePeekHost and a
@@ -208,6 +209,44 @@ static partial class CornerScenes
         Program.Check(
             !WorkspacePeekPolicy.Wanted(CornerShow.Always, true, false, true, false, false, false, false, TimeSpan.Zero, fade),
             "Hide dismisses it until the next activity");
+        Program.Check(
+            !WorkspacePeekPolicy.Wanted(CornerShow.ComesAndGoes, true, false, false, false, false, false, true, TimeSpan.Zero, fade, showable: false)
+            && !WorkspacePeekPolicy.Wanted(CornerShow.ComesAndGoes, true, false, false, false, false, false, false, TimeSpan.FromSeconds(1), fade, showable: false),
+            "Comes and goes stays away for agent work that shows no window");
+        Program.Check(
+            WorkspacePeekPolicy.Wanted(CornerShow.ComesAndGoes, true, false, false, true, false, false, false, TimeSpan.Zero, fade, showable: false)
+            && WorkspacePeekPolicy.Wanted(CornerShow.Always, true, false, false, false, false, false, true, TimeSpan.Zero, fade, showable: false),
+            "A summon or Always still shows a workspace with no window on it");
+    }
+
+    /// <summary>An agent at work on a screen with no window on it - a command, a browser still
+    /// warming up - leaves the corner away, through the real host rather than the policy alone.</summary>
+    static async Task EmptyScreenChecks()
+    {
+        AppSettings saved = AppSettingsStore.Current;
+        StoredWorkspace stored = WorkspaceStore.Create("Empty screen fixture");
+        using WorkspaceRuntime runtime = WorkspaceRuntime.Start(stored);
+        WorkspacePeekHost.Stop();
+        WorkspacePeekHost.ShowEmptyForTests = false;
+        try
+        {
+            ModuleEntry.HubShowing = false;
+            AppSettingsStore.Update(s => s with { CornerShow = CornerShow.ComesAndGoes, CornerPinned = false });
+            WorkspacePeekHost.Start();
+            Program.Check(runtime.Plane!.AgentTakes(), "The empty screen fixture's agent holds its workspace");
+            InvokeHost("StirFrom", stored.Id);
+            // Longer than two rounds of the host's half-second window check.
+            await Task.Delay(1500);
+            Program.Check(GateWindow() is not { IsVisible: true },
+                "An agent at work on a screen with no window on it leaves the corner away");
+            runtime.Plane.Release();
+        }
+        finally
+        {
+            WorkspacePeekHost.ShowEmptyForTests = true;
+            WorkspacePeekHost.Stop();
+            AppSettingsStore.Update(_ => saved);
+        }
     }
 
     static void SizeChecks()

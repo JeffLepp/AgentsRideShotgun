@@ -36,6 +36,14 @@ internal static class WorkspacePeekHost
     // The ids Pause every agent itself took control of, so a second press hands back only those and
     // not a workspace the owner was already driving before they paused.
     static readonly HashSet<string> _pausedByUs = [];
+    // Which workspaces have a window worth showing, by id, and which are being checked. Read off the
+    // UI thread while an agent works: listing a workspace's windows waits on its desktop.
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _showable = new();
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _checking = new();
+
+    /// <summary>For the UI gate, whose fixture workspaces are empty on purpose: every screen counts as
+    /// having something to show. The rule itself is checked with this off.</summary>
+    internal static bool ShowEmptyForTests;
 
     // The workspace the owner picked from the tabs. It wins over whatever is busiest for as long as
     // this look lasts; once the corner goes away, the next one leads with what is working again.
@@ -97,6 +105,7 @@ internal static class WorkspacePeekHost
         foreach (string id in _followed.Keys.ToArray()) Unfollow(id);
         _recent.Clear();
         _pausedByUs.Clear();
+        _showable.Clear();
         StopBeat();
         _presentationWatch?.Stop();
         _presentationWatch = null;
@@ -180,6 +189,7 @@ internal static class WorkspacePeekHost
             { Interval = TimeSpan.FromMilliseconds(500) };
         _presentationWatch.Tick += (_, _) =>
         {
+            foreach (Follow follow in _followed.Values) if (Busy(follow.Runtime)) CheckShowable(follow.Runtime);
             bool presentation = WorkspacePresentation.Suppressed;
             if (presentation == _lastPresentation) return;
             _lastPresentation = presentation;
@@ -204,8 +214,29 @@ internal static class WorkspacePeekHost
         if (runtime.Access?.HasDriver == true) _runStarted[runtime.Id] = DateTimeOffset.Now;
     }
 
+    /// <summary>
+    /// Finds out, off the UI thread, whether a workspace's screen has a window to show, and reconsiders
+    /// the corner when that changes. A desktop that does not answer in time keeps its last answer.
+    /// </summary>
+    static void CheckShowable(WorkspaceRuntime runtime)
+    {
+        string id = runtime.Id;
+        if (runtime.Plane is not { } plane || !_checking.TryAdd(id, true)) return;
+        _ = Task.Run(() =>
+        {
+            bool? shows = null;
+            try { shows = plane.HasSomethingToShow(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { }
+            finally { _checking.TryRemove(id, out _); }
+            if (shows is not { } now || _showable.TryGetValue(id, out bool was) && was == now) return;
+            _showable[id] = now;
+            _owner?.BeginInvoke(Rethink);
+        });
+    }
+
     static void Unfollow(string id)
     {
+        _showable.TryRemove(id, out _);
         if (_followed.Remove(id, out Follow? follow)) follow.Detach();
         _recent.Remove(id);
         _runStarted.Remove(id);
@@ -223,6 +254,7 @@ internal static class WorkspacePeekHost
         if (!_followed.TryGetValue(id, out Follow? follow)) return;
         if (who == Driver.Agent)
         {
+            CheckShowable(follow.Runtime);
             _runStarted[id] = DateTimeOffset.Now;
             if (_resultForId == id) _resultForId = null;
         }
@@ -292,9 +324,13 @@ internal static class WorkspacePeekHost
         TimeSpan fade = TimeSpan.FromSeconds(5);
         // The hub can't answer a desktop request, so a question shows here even while it is open.
         bool asking = front?.Access?.Handoffs.All.Any(request => request.State == "pending") == true;
+        // Work that would never have put a window on the owner's desktop (a command, the browser
+        // warming up) does not bring the corner up either. Unknown yet counts as nothing to show.
+        bool showable = asking || ShowEmptyForTests
+            || front is not null && _showable.TryGetValue(front.Id, out bool shows) && shows;
         bool wanted = WorkspacePeekPolicy.Wanted(_settings.CornerShow, front is not null,
             ModuleEntry.HubShowing && !asking, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade,
-            presentation, _summoned && _explicitSummon);
+            presentation, _summoned && _explicitSummon, showable);
         // A tray summon's own grace period (held or within the fixed fade after the last activity)
         // has ended: stop treating it as summoned, or it would keep forcing ComesAndGoes-like timing
         // on a mode (Off, say) that means something else once a later Settings change picks it up.

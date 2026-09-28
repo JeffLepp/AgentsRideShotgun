@@ -201,11 +201,13 @@ public sealed class WorkspaceCommands : IDisposable
         // Disable Command Processor AutoRun and quote the whole /s command expression. Capture the
         // shell as well as the script, so a failure before the script starts is still readable.
         // < NUL is the one thing keeping a command that asks a question from waiting for an answer
-        // forever now that nothing kills it on a timer.
+        // forever now that nothing kills it on a timer. No console window: everything it prints goes
+        // to the file, so the window only ever showed an empty console, and it put a workspace on
+        // the owner's corner for a command that shows nothing. Windows the command opens still appear.
         try { job.Group = new WorkspaceProcessGroup(); }
         catch (InvalidOperationException) { }   // cancelling falls back to the live process tree
         int pid = _control.Open("cmd.exe",
-            "/d /s /c \"" + Quote(script) + " > " + Quote(output) + " 2>&1 < NUL\"", true, out _, job.Group);
+            "/d /s /c \"" + Quote(script) + " > " + Quote(output) + " 2>&1 < NUL\"", true, out _, job.Group, windowless: true);
         if (pid == 0)
         {
             job.Group?.Dispose();

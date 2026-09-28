@@ -229,6 +229,26 @@ public sealed partial class WorkspaceControl : IDisposable
     public IReadOnlyList<AgentWindow> Windows() => _desktop.Windows();
 
     /// <summary>
+    /// Whether the screen has something the owner would have seen on their own desktop: any window
+    /// but the browser warmed up on a blank page, which only exists so the first browse is fast.
+    /// Null when the desktop did not answer in time.
+    /// </summary>
+    internal bool? HasSomethingToShow()
+    {
+        IReadOnlyList<AgentWindow>? open;
+        try { open = _desktop.Windows(TimeSpan.FromMilliseconds(500)); }
+        catch (ObjectDisposedException) { return false; }
+        if (open is null) return null;
+        int blank = _browser is { HasContent: false } warm ? warm.ProcessId : 0;
+        return open.Any(window =>
+        {
+            if (blank == 0) return true;
+            Native.GetWindowThreadProcessId(window.Handle, out int owner);
+            return owner != blank;
+        });
+    }
+
+    /// <summary>
     /// Layer 1. One window's controls. Deliberately not the whole desktop: measured, all
     /// the trees on a four-application desktop together cost more than a picture of that desktop.
     /// </summary>
@@ -600,7 +620,9 @@ public sealed partial class WorkspaceControl : IDisposable
         Open(exe, arguments, quiet, out started, null);
 
     /// <param name="group">A command's own nested job, from <see cref="WorkspaceCommands"/>.</param>
-    internal int Open(string exe, string? arguments, bool quiet, out string started, WorkspaceProcessGroup? group)
+    /// <param name="windowless">No console window for a console program, as for a command from run.</param>
+    internal int Open(string exe, string? arguments, bool quiet, out string started, WorkspaceProcessGroup? group,
+        bool windowless = false)
     {
         started = exe;
         if (_requiredLease.Value is { } expected && (expected == 0 || Ticket != expected)) return 0;
@@ -612,7 +634,7 @@ public sealed partial class WorkspaceControl : IDisposable
             _evidence.Note("open", Path.GetFileName(exe), "refused: Windows shell activation requires the owner's desktop");
             return 0;
         }
-        int pid = _desktop.Launch(exe, arguments, _requiredLease.Value ?? 0, group);
+        int pid = _desktop.Launch(exe, arguments, _requiredLease.Value ?? 0, group, windowless: windowless);
         if (!quiet)
             Note("open", Path.GetFileName(exe) + (arguments is null ? "" : " " + arguments),
                 pid == 0 ? "REFUSED" : "pid " + pid);
