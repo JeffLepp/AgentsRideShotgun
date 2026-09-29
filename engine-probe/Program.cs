@@ -103,6 +103,8 @@ internal static class Program
             return ClipboardIsolation.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--tool-hangs" && Path.IsPathFullyQualified(args[1]))
             return ToolHangs.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--render-mode" && Path.IsPathFullyQualified(args[1]))
+            return RenderModeProbe.RunStandalone(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--quiet-work" && Path.IsPathFullyQualified(args[1]))
             return QuietWork.Run(Path.GetFullPath(args[1]));
         if (args.Length != 1 || !Path.IsPathFullyQualified(args[0])) return 2;

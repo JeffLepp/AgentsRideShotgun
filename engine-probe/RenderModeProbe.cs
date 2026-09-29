@@ -11,11 +11,34 @@ using Setting = Deskweave.AgentWorkspaces.WorkspaceRenderMode.Setting;
 ///     return RenderModeProbe.Child(args[1], args[2]);</summary>
 internal static class RenderModeProbe
 {
+    internal static int RunStandalone(string output)
+    {
+        Directory.CreateDirectory(output);
+        var claims = new List<string>();
+        string? failure = null;
+        try { Run(Check, output); }
+        catch (Exception ex) { failure = ex.ToString(); }
+        File.WriteAllText(Path.Combine(output, "render-mode.json"), JsonSerializer.Serialize(new
+        {
+            status = failure is null ? "passed" : "failed", observedAt = DateTimeOffset.UtcNow, claims, failure,
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        return failure is null ? 0 : 1;
+
+        void Check(bool passed, string claim)
+        {
+            claims.Add((passed ? "PASS " : "FAIL ") + claim);
+            if (!passed) failure ??= claim;
+        }
+    }
+
+    const string OwnerOne = """{"Schema":1,"Value":1,"Healed":false}""";
+
     internal static void Run(Action<bool, string> check, string output)
     {
         foreach (int? previous in new int?[] { null, 0, 1, 37, -1 })
         {
-            var store = new MemoryStore { Value = Setting.Previous(previous) };
+            // A 1 counts as the owner's only once ARS has it recorded as the owner's baseline.
+            var store = new MemoryStore { Value = Setting.Previous(previous), Baseline = previous == 1 ? OwnerOne : null };
             var owner = Owner(store, 10);
             IDisposable? hold = owner.Acquire();
             check(hold is not null && store.Value.Forced, "Renderer holds software mode after journaling the prior setting");
@@ -137,7 +160,81 @@ internal static class RenderModeProbe
         check(legacyLive.Value == Setting.Previous(0) && legacyLive.Legacy is null,
             "A valid legacy record restores only after its older owner is gone");
 
+        Baselines(check);
+        Temporaries(check, Path.Combine(output, "renderer-temp-" + Guid.NewGuid().ToString("N")));
         AcrossProcesses(check, Path.Combine(output, "renderer-fixture-" + Guid.NewGuid().ToString("N")));
+    }
+
+    static void Baselines(Action<bool, string> check)
+    {
+        var leak = new MemoryStore { Value = new(true, 1) };
+        var leakOwner = Owner(leak, 40);
+        IDisposable? held = leakOwner.Acquire();
+        check(held is not null && leak.Value.Forced && leak.Journal!.Contains("\"Previous\":null", StringComparison.Ordinal),
+            "A forced value with no journal or record is not journaled as the baseline");
+        held!.Dispose();
+        check(leak.Value == Setting.Previous(null) && leak.Journal is null,
+            "Releasing over an unaccounted forced value leaves the setting absent");
+
+        var recorded = new MemoryStore { Value = new(true, 1), Baseline = """{"Schema":1,"Value":0,"Healed":false}""" };
+        Owner(recorded, 41).Recover();
+        check(recorded.Value == Setting.Previous(0), "Startup recovery puts an unjournaled forced value back to the recorded baseline");
+        recorded.Value = new(true, 1);
+        var again = Owner(recorded, 42);
+        again.Recover();
+        check(recorded.Value.Forced, "A forced value set again after one repair is the owner's and is kept");
+        IDisposable cycle = again.Acquire()!;
+        cycle.Dispose();
+        check(recorded.Value.Forced && recorded.Journal is null && recorded.Baseline!.Contains("\"Value\":1", StringComparison.Ordinal),
+            "The owner's restated 1 becomes the recorded baseline and survives a renderer cycle");
+        recorded.Value = Setting.Previous(null);
+        Owner(recorded, 43).Recover();
+        check(recorded.Baseline!.Contains("\"Value\":null", StringComparison.Ordinal)
+            && recorded.Baseline.Contains("\"Healed\":false", StringComparison.Ordinal),
+            "A later owner change to the setting replaces the recorded baseline");
+
+        var chosen = new MemoryStore { Value = new(true, 1), Baseline = OwnerOne };
+        var chosenOwner = Owner(chosen, 44);
+        chosenOwner.Recover();
+        IDisposable kept = chosenOwner.Acquire()!;
+        kept.Dispose();
+        check(chosen.Value.Forced && chosen.SettingWrites == 0 && chosen.Journal is null,
+            "An owner's 1 recorded as the baseline is never written over");
+
+        var stale = new MemoryStore
+        {
+            Value = new(true, 1), Journal = """{"Schema":2,"Previous":1,"Holds":[]}""",
+            Baseline = """{"Schema":1,"Value":null,"Healed":false}""",
+        };
+        Owner(stale, 45).Recover();
+        check(stale.Value == Setting.Previous(null) && stale.Journal is null,
+            "A journal that adopted a leaked 1 no longer keeps it once restored");
+
+        var broken = new MemoryStore { Value = new(true, 1), Baseline = "{" };
+        check(Owner(broken, 46).Acquire() is null && broken.SettingWrites == 0 && broken.Baseline == "{",
+            "A malformed baseline record never lets ARS guess over a forced value");
+        broken.Value = Setting.Previous(0);
+        IDisposable repaired = Owner(broken, 47).Acquire()!;
+        repaired.Dispose();
+        check(broken.Value == Setting.Previous(0) && broken.Baseline!.Contains("\"Value\":0", StringComparison.Ordinal),
+            "A malformed baseline record is replaced from an unforced value");
+    }
+
+    static void Temporaries(Action<bool, string> check, string folder)
+    {
+        Directory.CreateDirectory(folder);
+        string journal = Path.Combine(folder, "renderer-state.json");
+        string orphan = journal + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        string foreign = Path.Combine(folder, "renderer-state.json.keep.tmp");
+        string other = Path.Combine(folder, "router.json." + Guid.NewGuid().ToString("N") + ".tmp");
+        foreach (string file in new[] { journal, orphan, foreign, other }) File.WriteAllText(file, "{}");
+        WorkspaceRenderMode.SweepTemporary(journal, TimeSpan.FromMinutes(1));
+        check(File.Exists(orphan), "A fresh temporary may belong to a live writer and is kept");
+        File.SetLastWriteTimeUtc(orphan, DateTime.UtcNow.AddMinutes(-5));
+        WorkspaceRenderMode.SweepTemporary(journal, TimeSpan.FromMinutes(1));
+        check(!File.Exists(orphan) && File.Exists(journal) && File.Exists(foreign) && File.Exists(other),
+            "An abandoned write temporary is swept and nothing else is touched");
+        Directory.Delete(folder, recursive: true);
     }
 
     static Coordinator Owner(MemoryStore store, int pid, long started = 1)
@@ -232,6 +329,9 @@ internal static class RenderModeProbe
             Monitor.Enter(_turn);
             return new Turn(() => Monitor.Exit(_turn));
         }
+        internal string? Baseline;
+        public string? ReadBaseline() => Baseline;
+        public void WriteBaseline(string json) => Baseline = json;
         public string? ReadJournal() => Journal;
         public void WriteJournal(string json)
         {
@@ -275,6 +375,9 @@ internal static class RenderModeProbe
         public string? ReadJournal() => File.Exists(Journal) ? File.ReadAllText(Journal) : null;
         public void WriteJournal(string json) => Atomic(Journal, json);
         public void DeleteJournal() => File.Delete(Journal);
+        string Baseline => Path.Combine(folder, "baseline.json");
+        public string? ReadBaseline() => File.Exists(Baseline) ? File.ReadAllText(Baseline) : null;
+        public void WriteBaseline(string json) => Atomic(Baseline, json);
         public Setting ReadSetting() => JsonSerializer.Deserialize<Setting>(File.ReadAllText(Value));
         public void WriteSetting(Setting setting) => Atomic(Value, JsonSerializer.Serialize(setting));
         static void Atomic(string path, string text)

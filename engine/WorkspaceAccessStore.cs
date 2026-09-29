@@ -112,6 +112,9 @@ internal static class WorkspaceAccessStore
             var tickets = Directory.EnumerateDirectories(Root).Select(folder => Path.Combine(folder, "connection.json")).Append(RouterTicket);
             foreach (string ticket in tickets)
             {
+                // A write killed between its temporary and its rename leaves the temporary for good.
+                // Another session's ARS may be mid-write, so only old ones go.
+                WorkspaceRenderMode.SweepTemporary(ticket, TimeSpan.FromMinutes(1));
                 if (!File.Exists(ticket) || TicketPipe(ticket) is { } pipe && WorkspacePipeServer.Exists(pipe)) continue;
                 try { File.Delete(ticket); removed++; }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }

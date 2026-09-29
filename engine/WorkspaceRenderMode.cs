@@ -74,6 +74,31 @@ internal static class WorkspaceRenderMode
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return true; }
     }
 
+    /// <summary>
+    /// A write killed before its rename, or whose rename and cleanup both hit a scanner holding the
+    /// new file, leaves its temporary behind. Renderer writes run inside the per-user turn, so any
+    /// temporary seen there belongs to a write that has already ended. A writer with no such turn
+    /// passes a minimum age instead. Never fails the caller.
+    /// </summary>
+    internal static void SweepTemporary(string path, TimeSpan minimumAge = default)
+    {
+        try
+        {
+            string prefix = Path.GetFileName(path) + ".";
+            foreach (string file in Directory.EnumerateFiles(Path.GetDirectoryName(path)!, prefix + "*.tmp"))
+            {
+                string name = Path.GetFileName(file);
+                if (name.Length <= prefix.Length + 4 || !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    || !name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)
+                    || !Guid.TryParseExact(name[prefix.Length..^4], "N", out _)
+                    || DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < minimumAge) continue;
+                try { File.Delete(file); }
+                catch (Exception ex) when (Expected(ex)) { }
+            }
+        }
+        catch (Exception ex) when (Expected(ex)) { }
+    }
+
     static bool Expected(Exception ex) => ex is IOException or InvalidDataException or UnauthorizedAccessException
         or SecurityException or JsonException or ArgumentException or InvalidOperationException
         or System.ComponentModel.Win32Exception;
@@ -93,6 +118,8 @@ internal static class WorkspaceRenderMode
         string? ReadJournal();
         void WriteJournal(string json);
         void DeleteJournal();
+        string? ReadBaseline();
+        void WriteBaseline(string json);
         Setting ReadSetting();
         void WriteSetting(Setting setting);
         bool IsAlive(int pid, long started);
@@ -126,7 +153,7 @@ internal static class WorkspaceRenderMode
                     if (journal is null)
                     {
                         RecoverLegacy();
-                        Setting previous = store.ReadSetting();
+                        Setting previous = Settle();
                         if (!previous.Supported) return null;
                         journal = new(2, previous.Dword, []);
                         changeSetting = !previous.Forced;
@@ -164,9 +191,9 @@ internal static class WorkspaceRenderMode
                     using IDisposable? turn = store.Enter();
                     if (turn is null) return;
                     Journal? journal = Read();
-                    if (journal is null) { RecoverLegacy(); return; }
+                    if (journal is null) { RecoverLegacy(); Settle(); return; }
                     Prune(journal);
-                    if (journal.Holds.Count == 0) Restore(journal);
+                    if (journal.Holds.Count == 0) { Restore(journal); Settle(); }
                     else Save(journal);
                 }
                 catch (Exception ex) when (Expected(ex)) { }
@@ -243,6 +270,59 @@ internal static class WorkspaceRenderMode
             store.DeleteJournal();
         }
 
+        /// <summary>
+        /// Runs only while no hold exists anywhere. A forced value with no journal was not set by a
+        /// hold ARS can account for: older code, a lost data folder, or the owner. Adopting it as the
+        /// baseline made one leak permanent for every WPF program on the PC, so it is put back to the
+        /// owner's recorded baseline (absent when none was ever recorded), once. If the value is forced
+        /// again after that, the owner set it, and it becomes the recorded baseline and is kept.
+        /// </summary>
+        Setting Settle()
+        {
+            Setting current = store.ReadSetting();
+            if (!current.Supported) return current;
+            Baseline? record = null;
+            bool broken = false;
+            try { record = ReadBaseline(); }
+            catch (Exception ex) when (ex is InvalidDataException or JsonException) { broken = true; }
+            if (!current.Forced)
+            {
+                // The value in front of us is the owner's, so it can also repair a broken record.
+                if (broken || record is null || record.Value != current.Dword) SaveBaseline(new(1, current.Dword, false));
+                return current;
+            }
+            if (broken) throw new InvalidDataException("Invalid renderer baseline record.");
+            if (record is null || record.Value != 1 && !record.Healed)
+            {
+                Setting owner = Setting.Previous(record?.Value);
+                // Registry first: a record that says healed while the value is still forced would
+                // make the leak look like the owner's choice.
+                store.WriteSetting(owner);
+                SaveBaseline(new(1, owner.Dword, true));
+                return owner;
+            }
+            if (record.Value != 1) SaveBaseline(new(1, 1, false));
+            return current;
+        }
+
+        Baseline? ReadBaseline()
+        {
+            string? json = store.ReadBaseline();
+            if (json is null) return null;
+            using JsonDocument document = JsonDocument.Parse(json);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("Schema", out JsonElement schema) || !schema.TryGetInt32(out int version) || version != 1
+                || !root.TryGetProperty("Value", out JsonElement value)
+                || !root.TryGetProperty("Healed", out JsonElement healed) || healed.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new InvalidDataException("Invalid renderer baseline record.");
+            if (value.ValueKind == JsonValueKind.Null) return new(1, null, healed.GetBoolean());
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int number)) return new(1, number, healed.GetBoolean());
+            throw new InvalidDataException("Invalid renderer baseline value.");
+        }
+
+        void SaveBaseline(Baseline record) => store.WriteBaseline(JsonSerializer.Serialize(record));
+
         void RecoverLegacy()
         {
             string? json = store.ReadLegacy();
@@ -257,6 +337,9 @@ internal static class WorkspaceRenderMode
 
         sealed record Hold(string Owner, string Token, int Pid, long Started);
         sealed record Journal(int Schema, int? Previous, List<Hold> Holds);
+        /// <summary>The owner's own value, kept apart from the journal and never deleted by a restore.
+        /// Healed means ARS already put this value back once over an unaccounted forced one.</summary>
+        sealed record Baseline(int Schema, int? Value, bool Healed);
         sealed class Token(Coordinator owner, string id) : IDisposable
         {
             int _done;
@@ -270,6 +353,7 @@ internal static class WorkspaceRenderMode
         const string ValueName = "DisableHWAcceleration";
         static readonly string Root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Deskweave.Product.ProductContext.DefaultFolderName);
         static readonly string JournalPath = Path.Combine(Root, "renderer-state.json");
+        static readonly string BaselinePath = Path.Combine(Root, "renderer-baseline.json");
         static readonly string LegacyPath = Path.Combine(Root, "agent-workspaces.access", "renderer.json");
         static readonly string MutexName = @"Global\Deskweave.WpfRenderer." + WindowsIdentity.GetCurrent().User!.Value;
 
@@ -290,6 +374,7 @@ internal static class WorkspaceRenderMode
 
         public string? ReadJournal() => ReadFile(JournalPath);
         public string? ReadLegacy() => ReadFile(LegacyPath);
+        public string? ReadBaseline() => ReadFile(BaselinePath);
         static string? ReadFile(string path)
         {
             if (!File.Exists(path)) return null;
@@ -297,10 +382,14 @@ internal static class WorkspaceRenderMode
             return File.ReadAllText(path);
         }
 
-        public void WriteJournal(string json)
+        public void WriteJournal(string json) => Write(JournalPath, json);
+        public void WriteBaseline(string json) => Write(BaselinePath, json);
+
+        static void Write(string path, string json)
         {
             Directory.CreateDirectory(Root);
-            string temporary = JournalPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            SweepTemporary(path);
+            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
@@ -310,7 +399,7 @@ internal static class WorkspaceRenderMode
                     file.Write(bytes);
                     file.Flush(flushToDisk: true);
                 }
-                File.Move(temporary, JournalPath, overwrite: true);
+                File.Move(temporary, path, overwrite: true);
             }
             finally
             {
