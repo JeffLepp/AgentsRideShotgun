@@ -47,8 +47,10 @@ bool mayLaunchApp = PreventStandardPipeInheritance();
 // Codex's 10 s MCP startup timeout. Past that, the client hears one line rather than a long hang.
 (Link? link, string why) = await Reach(TimeSpan.FromSeconds(9));
 // The owner quit ARS. This session gets no tools and no instructions, so the agent works as if
-// ARS were not installed; a failed server would only put a warning in front of the owner.
+// ARS were not installed; a failed server would only put a warning in front of the owner. When the
+// owner opens ARS again the session hears its tools have changed, so it needs no reconnect.
 bool quiet = link is null && why == Off;
+if (quiet) _ = Task.Run(Wake);
 if (link is null && !quiet) return await Say(why switch
 {
     NotOpen => why + " Open ARS, then reconnect this MCP server.",
@@ -90,12 +92,12 @@ finally { link?.Dispose(); }
 async Task Forward(string message)
 {
     Expect expect = Read(message);
+    if (expect.Method == "initialize") hello = message;
     if (quiet)
     {
         Answer(expect);
         return;
     }
-    if (expect.Method == "initialize") hello = message;
     if (link is null || link.Broken)
     {
         link?.Dispose();
@@ -129,13 +131,33 @@ void Unreachable(Expect expect, string reason)
     Write(reply);
 }
 
+// The owner opened ARS again. Joins it without ever starting it, says hello on the session's behalf,
+// then tells the client to list tools again. Instructions only come with initialize, so none follow.
+async Task Wake()
+{
+    string mark = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ticket!))!, QuitMark);
+    while (true)
+    {
+        await Task.Delay(2000);
+        if (File.Exists(mark)) continue;
+        (Link? found, _) = await Open(TimeSpan.FromSeconds(1));
+        if (found is null) continue;
+        if (found.Send(context, new(null, "deskweave/context", Discard: true)) is { } told) await told;
+        if (hello is not null && found.Send(hello, Read(hello) with { Discard = true }) is { } greeted) await greeted;
+        link = found;
+        quiet = false;
+        Write("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}");
+        return;
+    }
+}
+
 // A session that began with ARS quit: an empty server, answered here without ARS.
 void Answer(Expect expect)
 {
     if (expect.Id is null) return;
     string? result = expect.Method switch
     {
-        "initialize" => "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"ars\",\"version\":\"1\"}}",
+        "initialize" => "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"ars\",\"version\":\"1\"}}",
         "tools/list" => "{\"tools\":[]}",
         "ping" => "{}",
         _ => null,

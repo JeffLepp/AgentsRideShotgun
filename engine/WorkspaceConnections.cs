@@ -20,16 +20,6 @@ internal static class WorkspaceConnections
         },
     };
 
-    internal static bool IsOwned(JsonElement entry, string id)
-    {
-        if (!entry.TryGetProperty("transport", out var transport)) return false;
-        return transport.TryGetProperty("command", out var command)
-            && string.Equals(command.GetString(), Bridge, StringComparison.OrdinalIgnoreCase)
-            && transport.TryGetProperty("args", out var args) && args.ValueKind == JsonValueKind.Array
-            && args.GetArrayLength() == 2 && args[0].GetString() == "--workspace"
-            && string.Equals(args[1].GetString(), WorkspaceAccessStore.Connection(id), StringComparison.OrdinalIgnoreCase);
-    }
-
     /// <summary>The single entry an agent app gets. Every workspace is reached through it.</summary>
     internal const string AppName = "ars";
 
@@ -271,7 +261,8 @@ internal static class WorkspaceConnections
             foreach (AgentProfile profile in Profiles(app))
             {
                 if (!Permitted()) break;
-                if (automatic && ReadEntry(profile) is Entry.Current or Entry.Disabled) continue;
+                if (automatic && ReadEntry(profile) is var now
+                    && (now is Entry.Current or Entry.Disabled || now == Entry.None && Recorded(profile))) continue;
                 try
                 {
                     // A numbered launcher can honor its root when the default wrapper clears it.
@@ -323,13 +314,21 @@ internal static class WorkspaceConnections
             if (ReadEntry(profile) != Entry.None)
                 return $"{name} kept its ARS entry. Its launcher may use a different configuration profile; remove it in the provider's MCP settings.";
         }
-        if (!connect) return null;
+        if (!connect)
+        {
+            Unrecord(profile);
+            return null;
+        }
         if (permitted?.Invoke() == false) return null;
         await Run(cli, ["mcp", "add", .. scope, AppName, "--", Bridge, "--workspace", WorkspaceAccessStore.RouterTicket],
             cancel, profile.Root, profile.App, true).ConfigureAwait(false);
         // Never count a write to some other account/profile as this target's connection. This
         // also removes the old provider-wide vouch that could survive removal or a root switch.
-        if (ReadEntry(profile) == Entry.Current) return null;
+        if (ReadEntry(profile) == Entry.Current)
+        {
+            Record(profile);
+            return null;
+        }
         return had
             // The old entry came out for the replacement and the new one did not go in. Saying
             // nothing changed would be a lie, and it would hide a connection that is gone.
@@ -365,9 +364,37 @@ internal static class WorkspaceConnections
     /// <summary>Whether the owner turned this agent off, on first launch or in Settings.</summary>
     internal static bool TurnedOff(AgentApp app) => AppSettingsStore.Current.AgentsOff.Contains(app.ToString());
 
-    /// <summary>An agent with a repairable profile. Provider-side disabled entries stay off.</summary>
+    /// <summary>An agent with a repairable profile. Provider-side disabled entries stay off, and so
+    /// does a profile ARS connected whose entry the owner took out themselves.</summary>
     internal static bool Missing(AgentApp app) => IsInstalled(app) && !IsConnected(app) && !TurnedOff(app)
-        && Profiles(app).Any(profile => ReadEntry(profile) is Entry.None or Entry.Stale or Entry.Unreadable);
+        && Profiles(app).Any(profile => ReadEntry(profile) switch
+        {
+            Entry.Stale or Entry.Unreadable => true,
+            Entry.None => !Recorded(profile),
+            _ => false,
+        });
+
+    // The ledger of profiles ARS wrote itself into: AppSettings.ConnectedProfiles.
+    static string Key(AgentProfile profile) => profile.App + "|" + profile.Configuration + "|" + profile.Root;
+    static bool SameProfile(string key, AgentProfile profile) =>
+        key.StartsWith(profile.App + "|" + profile.Configuration + "|", StringComparison.OrdinalIgnoreCase);
+    static bool Recorded(AgentProfile profile) => AppSettingsStore.Current.ConnectedProfiles.Any(key => SameProfile(key, profile));
+
+    static void Record(AgentProfile profile)
+    {
+        if (!Recorded(profile)) AppSettingsStore.Update(s => s with { ConnectedProfiles = [.. s.ConnectedProfiles, Key(profile)] });
+    }
+
+    static void Unrecord(AgentProfile profile)
+    {
+        if (Recorded(profile))
+            AppSettingsStore.Update(s => s with { ConnectedProfiles = [.. s.ConnectedProfiles.Where(key => !SameProfile(key, profile))] });
+    }
+
+    static IEnumerable<AgentProfile> RecordedProfiles() => AppSettingsStore.Current.ConnectedProfiles
+        .Select(key => key.Split('|'))
+        .Where(part => part.Length == 3 && Enum.TryParse<AgentApp>(part[0], out _))
+        .Select(part => new AgentProfile(Enum.Parse<AgentApp>(part[0]), "Earlier profile", part[2].Length == 0 ? null : part[2], part[1]));
 
     /// <summary>How often a PC with a supported agent still missing is looked at again.</summary>
     internal static TimeSpan KeepUpEvery = TimeSpan.FromMinutes(10);
@@ -399,6 +426,10 @@ internal static class WorkspaceConnections
                     {
                         try
                         {
+                            // An entry an older ARS wrote before the ledger existed counts as written by
+                            // ARS, so the owner taking it out later is respected too.
+                            foreach (AgentProfile profile in Profiles(app))
+                                if (ReadEntry(profile) is Entry.Current or Entry.Stale or Entry.Disabled) Record(profile);
                             if (!AppSettingsStore.Current.ConnectAgents || !Missing(app)) continue;
                             await SetConnected(app, true, stop.Token).ConfigureAwait(false);
                         }
@@ -424,36 +455,6 @@ internal static class WorkspaceConnections
         catch (ObjectDisposedException) { }
     }
 
-    internal static async Task<string> Codex(string id, bool connect, CancellationToken cancel = default, string? profileRoot = null)
-    {
-        // Through the seam, like every other caller: what is on this PC is one question with one
-        // answer, and a probe that stands in for it must stand in for this too.
-        string? cli = Locate(AgentApp.Codex);
-        if (cli is null) return "Codex is not installed in a supported local location. You can still copy the MCP connection for another agent.";
-        if (!File.Exists(Bridge)) return "The packaged workspace bridge is missing. Reinstall ARS.";
-        using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        bound.CancelAfter(TimeSpan.FromSeconds(20));
-        var listed = await Run(cli, ["mcp", "list", "--json"], bound.Token, profileRoot).ConfigureAwait(false);
-        if (listed.Code != 0) return "Codex could not read its configuration. No connection was changed.";
-        using var document = JsonDocument.Parse(listed.Output);
-        if (document.RootElement.ValueKind != JsonValueKind.Array) return "Codex returned an unsupported configuration format. Nothing changed.";
-        JsonElement? existing = document.RootElement.EnumerateArray()
-            .Where(e => e.TryGetProperty("name", out var name) && name.GetString() == Name(id))
-            .Select(e => (JsonElement?)e).FirstOrDefault();
-        if (existing is { } entry && !IsOwned(entry, id))
-            return "That connection name is already used by another configuration. ARS left it unchanged.";
-        if (connect && existing is not null) return "Already connected. Start this workspace, then restart its MCP connection in Codex settings.";
-        if (!connect && existing is null) return "This workspace has no Codex connection to remove.";
-        string[] arguments = connect
-            ? ["mcp", "add", Name(id), "--", Bridge, "--workspace", WorkspaceAccessStore.Connection(id)]
-            : ["mcp", "remove", Name(id)];
-        var result = await Run(cli, arguments, bound.Token, profileRoot).ConfigureAwait(false);
-        if (result.Code != 0) return "Codex did not complete the configuration change. Check its MCP settings.";
-        return connect
-            ? "Connected. Start this workspace and restart its MCP connection in Codex settings. Future app and browser work can use this workspace."
-            : "Codex connection removed. Turn Agent access off to disconnect existing clients immediately.";
-    }
-
     static async Task<(int Code, string Output)> Run(string cli, string[] arguments, CancellationToken cancel, string? profileRoot,
         AgentApp app = AgentApp.Codex, bool targetProfile = false)
     {
@@ -475,33 +476,100 @@ internal static class WorkspaceConnections
         finally { if (!process.HasExited) process.Kill(entireProcessTree: true); }
     }
 
+    /// <summary>The file names every ARS bridge has had, before and after the rename.</summary>
+    static readonly string[] BridgeNames = ["ARS.WorkspaceBridge.exe", "Deskweave.WorkspaceBridge.exe"];
+
     /// <summary>
-    /// Uninstall: takes out the entries that run this install's bridge, and only those. An entry
-    /// under the same name that runs anything else (another copy, a server the owner set up by
-    /// hand) is not ours to remove. Both agents at once, inside 20 s: the uninstaller ends its hook
-    /// at 30, and one agent that hangs must not cost the other its cleanup.
+    /// The servers in one profile that are ARS's to remove: under a name ARS has used (ars, deskweave,
+    /// or a per-workspace ars_workspace_/deskweave_workspace_ one), running a file named like an ARS
+    /// bridge that is either this install's or no longer there. A live copy elsewhere (a dev build),
+    /// or anything else under a similar name, is left alone.
     /// </summary>
-    internal static async Task RemoveOwnedConnections()
+    internal static List<string> OwnedNames(AgentProfile profile) => [.. Servers(profile)
+        .Where(server => (server.Name is AppName or FormerAppName
+                || server.Name.StartsWith("ars_workspace_", StringComparison.Ordinal)
+                || server.Name.StartsWith("deskweave_workspace_", StringComparison.Ordinal))
+            && server.Command is { } command
+            && BridgeNames.Contains(Path.GetFileName(command), StringComparer.OrdinalIgnoreCase)
+            && (SamePath(command, Bridge) || !File.Exists(command)))
+        .Select(server => server.Name)];
+
+    /// <summary>Every MCP server one profile's configuration names, with the command it runs.</summary>
+    static List<(string Name, string? Command)> Servers(AgentProfile profile)
+    {
+        List<(string, string?)> found = [];
+        if (!File.Exists(profile.Configuration)) return found;
+        if (profile.App == AgentApp.Codex)
+        {
+            string? name = null;
+            var table = new StringBuilder();
+            void Close()
+            {
+                if (name is not null) found.Add((name, TomlStrings(table.ToString(), "command").FirstOrDefault()));
+                table.Clear();
+            }
+            foreach (string line in File.ReadLines(profile.Configuration))
+            {
+                string trimmed = line.Trim();
+                if (trimmed.StartsWith('[') && trimmed.IndexOf(']') is > 0 and var end)
+                {
+                    Close();
+                    string header = trimmed[..(end + 1)];
+                    string inner = header.StartsWith("[mcp_servers.", StringComparison.Ordinal) ? header[13..^1].Trim() : "";
+                    // [mcp_servers.ars.env] is a sub-table of ars, not a server of its own.
+                    name = inner.Length > 1 && inner[0] is '"' or '\'' && inner.IndexOf(inner[0], 1) == inner.Length - 1 ? inner[1..^1]
+                        : inner.Length > 0 && !inner.Contains('.') ? inner : null;
+                    continue;
+                }
+                if (name is not null) table.AppendLine(line);
+            }
+            Close();
+            return found;
+        }
+        using var stream = File.OpenRead(profile.Configuration);
+        using var document = JsonDocument.Parse(stream);
+        if (document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.TryGetProperty("mcpServers", out JsonElement servers) && servers.ValueKind == JsonValueKind.Object)
+            foreach (JsonProperty server in servers.EnumerateObject())
+                found.Add((server.Name, server.Value.ValueKind == JsonValueKind.Object && server.Value.TryGetProperty("command", out JsonElement c)
+                    && c.ValueKind == JsonValueKind.String ? c.GetString() : null));
+        return found;
+    }
+
+    /// <summary>
+    /// Uninstall: takes ARS's servers out of every profile it can find - the ones discovery looks at
+    /// and the ones its ledger says it wrote to - through each agent's own command, and answers with
+    /// one line per profile that still has one, so nothing is left behind silently. Unrelated servers
+    /// and the owner's other settings are never touched. All profiles at once, inside 20 s: the
+    /// uninstaller ends its hook at 30, and one agent that hangs must not cost another its cleanup.
+    /// </summary>
+    internal static async Task<IReadOnlyList<string>> RemoveOwnedConnections()
     {
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        await Task.WhenAll(Supported.SelectMany(app => Profiles(app)).Where(profile => ReadEntry(profile, ignoreDisabled: true) == Entry.Current).Select(async profile =>
+        AgentProfile[] targets = [.. Supported.SelectMany(app => Profiles(app)).Concat(RecordedProfiles())
+            .DistinctBy(profile => profile.App + "|" + profile.Configuration.ToUpperInvariant())];
+        string?[] left = await Task.WhenAll(targets.Select(async profile =>
         {
+            string label = DisplayName(profile.App) + " (" + profile.Name + ")";
             try
             {
-                string? cli = Locate(profile.App);
-                if (cli is not null) await ChangeProfile(profile, ProfileCommand(profile, cli), false, budget.Token).ConfigureAwait(false);
+                if (OwnedNames(profile) is not { Count: > 0 } names) { Unrecord(profile); return null; }
+                if (Locate(profile.App) is { } cli)
+                {
+                    string[] scope = profile.App == AgentApp.ClaudeCode ? ["--scope", "user"] : [];
+                    foreach (string name in names)
+                        await Run(ProfileCommand(profile, cli), ["mcp", "remove", .. scope, name], budget.Token,
+                            profile.Root, profile.App, true).ConfigureAwait(false);
+                }
+                if (OwnedNames(profile) is not { Count: > 0 } still) { Unrecord(profile); return null; }
+                return $"{label} still has {string.Join(", ", still)} in {profile.Configuration}. Remove it in the provider's MCP settings.";
             }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            { return $"{label}: {profile.Configuration} could not be cleaned ({ex.GetType().Name}). Check it for ARS entries."; }
         })).ConfigureAwait(false);
-        if (!Directory.Exists(WorkspaceAccessStore.Root)) return;
-        foreach (string folder in Directory.EnumerateDirectories(WorkspaceAccessStore.Root))
-        {
-            string id = Path.GetFileName(folder);
-            if (id.Length == 0 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-')) continue;
-            try { await Codex(id, false, budget.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
-            WorkspaceAccessStore.Withdraw(id);
-        }
+        List<string> failures = [.. left.OfType<string>()];
+        foreach (string failure in failures) Trace.TraceWarning("ARS uninstall: {0}", failure);
+        return failures;
     }
 
     /// <summary>

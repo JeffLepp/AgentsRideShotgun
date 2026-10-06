@@ -1,6 +1,7 @@
 ---
 name: ars
 description: Use ARS's connected MCP tools when testing or inspecting a Windows desktop app or browser without interrupting the owner's desktop.
+disable-model-invocation: true
 ---
 
 # ARS

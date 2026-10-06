@@ -37,9 +37,38 @@ internal static class BridgeQuit
         check(answer.GetProperty("isError").GetBoolean()
             && answer.GetProperty("content")[0].GetProperty("text").GetString()!.Contains("own tools", StringComparison.Ordinal),
             "After a quit, a tool call is told to carry on with the agent's own tools");
+        Wake(check);
         check(WorkspaceAccessStore.QuitMark == Path.Combine(WorkspaceAccessStore.Root, "quit")
             && Path.GetDirectoryName(WorkspaceAccessStore.QuitMark) == Path.GetDirectoryName(WorkspaceAccessStore.RouterTicket),
             "The app leaves its quit mark beside the router ticket, where the bridge looks");
+    }
+
+    /// <summary>A session that began while ARS was quit gets its tools once the owner opens ARS, without a reconnect.</summary>
+    static void Wake(Action<bool, string> check)
+    {
+        WorkspaceRouter.Stop();
+        WorkspaceAccessStore.MarkQuit();
+        try
+        {
+            using var session = new LiveRouter.Bridge(WorkspaceAccessStore.RouterTicket);
+            object hello = new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "probe", version = "1" } };
+            JsonElement greeting = session.Request("initialize", hello);
+            check(session.Request("tools/list", new { }).GetProperty("result").GetProperty("tools").GetArrayLength() == 0
+                && greeting.GetProperty("result").GetProperty("capabilities").GetProperty("tools").GetProperty("listChanged").GetBoolean(),
+                "A session that starts while ARS is quit lists no tools and says its list can change");
+            WorkspaceRouter.Start();
+            WorkspaceAccessStore.ClearQuit();
+            string? line = session.Next(TimeSpan.FromSeconds(15));
+            check(line is not null && line.Contains("notifications/tools/list_changed", StringComparison.Ordinal),
+                "Opening ARS again tells that session its tools changed");
+            check(session.Request("tools/list", new { }).GetProperty("result").GetProperty("tools").GetArrayLength() > 0,
+                "That session then lists ARS's tools without reconnecting");
+        }
+        finally
+        {
+            WorkspaceAccessStore.ClearQuit();
+            WorkspaceRouter.Stop();
+        }
     }
 
     static (int Code, string[] Replies, string Errors) Session(string ticket)

@@ -314,6 +314,13 @@ internal static class SettingsActions
     {
         Application application = Application.Current;
         if (!QuitQuestion.Ask(application.MainWindow)) return;
+        // Agents first, while the ledger of profiles ARS wrote to still exists. Deleting it first left
+        // the uninstaller nothing to find, and every agent session after it tried a bridge that was gone.
+        WorkspaceConnections.StopKeepingUp();
+        IReadOnlyList<string> left = Task.Run(WorkspaceConnections.RemoveOwnedConnections).GetAwaiter().GetResult();
+        if (left.Count > 0)
+            MessageBox.Show(application.MainWindow, "ARS couldn't take itself out of every agent. Remove these in the agent's MCP settings:\n\n"
+                + string.Join("\n\n", left), "ARS", MessageBoxButton.OK, MessageBoxImage.Warning);
         // Nothing may run out of a folder that is about to go, and nothing starts at sign-in any more.
         WorkspaceRuntime.Rest();
         SyncStartup(AppSettingsStore.Current with { StartWithWindows = false, FirstRunDone = true });

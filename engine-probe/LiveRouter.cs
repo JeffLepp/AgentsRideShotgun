@@ -286,7 +286,7 @@ internal static class LiveRouter
     }
 
     /// <summary>The packaged bridge on a ticket, driven over its standard streams like an MCP client.</summary>
-    sealed class Bridge : IDisposable
+    internal sealed class Bridge : IDisposable
     {
         readonly Process _process;
         readonly Task<string> _errors;
@@ -336,6 +336,14 @@ internal static class LiveRouter
                 if (json.RootElement.TryGetProperty("id", out JsonElement got) && got.ValueKind == JsonValueKind.Number && got.GetInt32() == id)
                     return json.RootElement.Clone();
             }
+        }
+
+        /// <summary>The next line the bridge writes, or null when none comes in time.</summary>
+        internal string? Next(TimeSpan patience)
+        {
+            using var timeout = new CancellationTokenSource(patience);
+            try { return _process.StandardOutput.ReadLineAsync(timeout.Token).AsTask().GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { return null; }
         }
 
         internal JsonElement Tool(string name) => Request("tools/call", new { name, arguments = new { } });

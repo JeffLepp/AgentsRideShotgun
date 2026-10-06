@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 
 namespace Deskweave.AgentWorkspaces;
@@ -108,8 +109,8 @@ public static class ModuleEntry
 
     /// <summary>Uninstall: stops everything this install is running and takes its bridge out of the
     /// agents' configs. The owner's workspaces, records and settings are left where they are; nothing
-    /// here deletes data.</summary>
-    public static void Uninstall()
+    /// here deletes data. Answers with one line per profile that still has an ARS entry.</summary>
+    public static IReadOnlyList<string> Uninstall()
     {
         WorkspaceConnections.StopKeepingUp();
         WorkspaceRouter.Stop();
@@ -117,7 +118,14 @@ public static class ModuleEntry
         WorkspaceRuntime.Rest();
         WorkspaceRenderMode.Rest();
         WorkspaceRenderMode.Recover();
-        Task.Run(WorkspaceConnections.RemoveOwnedConnections).GetAwaiter().GetResult();
+        IReadOnlyList<string> left = Task.Run(WorkspaceConnections.RemoveOwnedConnections).GetAwaiter().GetResult();
+        if (Directory.Exists(WorkspaceAccessStore.Root))
+            foreach (string folder in Directory.EnumerateDirectories(WorkspaceAccessStore.Root))
+            {
+                string id = Path.GetFileName(folder);
+                if (id.Length > 0 && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-')) WorkspaceAccessStore.Withdraw(id);
+            }
+        return left;
     }
 
     internal static void RequestDashboardOpen() => DashboardOpenRequested?.Invoke();

@@ -39,7 +39,7 @@ static class Program
                     Cleanup("agent connections", () =>
                     {
                         ProductContext.Configure(ProductContext.DefaultFolderName);
-                        ModuleEntry.Uninstall();
+                        foreach (string left in ModuleEntry.Uninstall()) LogSetupLine("agent connections: " + left);
                     });
                 })
                 .Run();
@@ -86,6 +86,18 @@ static class Program
     {
         try { cleanup(); }
         catch (Exception error) when (error is not OutOfMemoryException) { LogSetupFailure(step, error); }
+    }
+
+    /// <summary>A cleanup the owner has to finish by hand. Paths and server names, never configuration values.</summary>
+    static void LogSetupLine(string line)
+    {
+        try
+        {
+            string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ProductContext.DefaultFolderName);
+            Directory.CreateDirectory(folder);
+            File.AppendAllText(Path.Combine(folder, "setup-errors.log"), $"{DateTimeOffset.UtcNow:O} {line}{Environment.NewLine}");
+        }
+        catch { /* Logging must not keep an installer hook alive. */ }
     }
 
     static void LogSetupFailure(string step, Exception error)

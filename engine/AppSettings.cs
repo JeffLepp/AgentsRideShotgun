@@ -45,6 +45,13 @@ public sealed record AppSettings
     /// </summary>
     public IReadOnlyList<string> AgentsOff { get; init; } = [];
 
+    /// <summary>
+    /// Every agent profile ARS has written itself into, as "App|configuration|root". One that later
+    /// has no entry was disconnected by the owner outside ARS, and stays that way; uninstall also
+    /// cleans these when the profile is no longer where discovery looks.
+    /// </summary>
+    public IReadOnlyList<string> ConnectedProfiles { get; init; } = [];
+
     // Agents
     /// <summary>As "Ctrl+Alt+P". Empty registers nothing.</summary>
     public string PauseHotkey { get; init; } = "Ctrl+Alt+P";
@@ -93,6 +100,7 @@ public sealed record AppSettings
             // Whatever is on disk: only names this build still knows, each once.
             AgentsOff = [.. (AgentsOff ?? d.AgentsOff).Where(a => Enum.TryParse<WorkspaceConnections.AgentApp>(a, out _))
                 .Distinct(StringComparer.Ordinal)],
+            ConnectedProfiles = [.. (ConnectedProfiles ?? d.ConnectedProfiles).Distinct(StringComparer.OrdinalIgnoreCase)],
             Screenshots = Known(Screenshots, d.Screenshots),
             AgentScreen = Known(AgentScreen, d.AgentScreen),
         };

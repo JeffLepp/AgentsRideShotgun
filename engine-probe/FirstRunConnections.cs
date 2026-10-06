@@ -218,7 +218,7 @@ internal static class FirstRunConnections
             // An agent installed after consent is connected on its own, without a second prompt.
             File.Delete(codexFile);
             WorkspaceConnections.Locate = app => app == WorkspaceConnections.AgentApp.Codex ? null : Environment.ProcessPath;
-            AppSettingsStore.Update(s => s with { ConnectAgents = true, FirstRunDone = true, AgentsOff = [] });
+            AppSettingsStore.Update(s => s with { ConnectAgents = true, FirstRunDone = true, AgentsOff = [], ConnectedProfiles = [] });
             WorkspaceConnections.KeepUpEvery = TimeSpan.FromSeconds(1);
             WorkspaceConnections.KeepUp();
             Thread.Sleep(1500);
@@ -236,6 +236,17 @@ internal static class FirstRunConnections
                 && Entries(claudeFile) == 1 && Entries(codexFile) == 1 && Pointed(claudeFile) && Pointed(codexFile),
                 "After Start, the keep-up loop replaces stale entries by itself, once each");
             WorkspaceConnections.StopKeepingUp();
+
+            // The owner took ARS out with the agent's own command. That is an off switch too.
+            File.WriteAllText(claudeFile, "{\"mcpServers\":{}}");
+            Check(!WorkspaceConnections.Missing(WorkspaceConnections.AgentApp.ClaudeCode),
+                "A profile ARS connected whose entry the owner removed is not scheduled for repair");
+            WorkspaceConnections.KeepUp();
+            Thread.Sleep(2500);
+            Check(Entries(claudeFile) == 0, "The keep-up loop does not put back an entry the owner removed outside ARS");
+            WorkspaceConnections.StopKeepingUp();
+            Check(Set(WorkspaceConnections.AgentApp.ClaudeCode, true) is null && Entries(claudeFile) == 1,
+                "Connecting it in Settings still puts it back");
 
             // Both providers were already connected. A new profile and a transient launcher
             // failure must not kill the inexpensive loop or require another Settings visit.
@@ -307,6 +318,8 @@ internal static class FirstRunConnections
                 "Without the owner's Start nothing is ever written to an agent's configuration");
             WorkspaceConnections.StopKeepingUp();
 
+            Uninstall(root, claudeFile, codexFile, Check);
+
             // The scoped instruction that comes with connecting, in both directions.
             Check(WorkspaceMcp.RouterInstructions.Contains(WorkspaceMcp.Scope, StringComparison.Ordinal)
                 && WorkspaceMcp.Scope.Contains("Decide by who uses a window next", StringComparison.Ordinal)
@@ -346,6 +359,64 @@ internal static class FirstRunConnections
         IReadOnlyList<WorkspaceConnections.AgentProfile> SingleProfiles(WorkspaceConnections.AgentApp app) =>
             [new(app, "Fixture", app == WorkspaceConnections.AgentApp.ClaudeCode ? claudeHome : codexHome,
                 app == WorkspaceConnections.AgentApp.ClaudeCode ? claudeFile : codexFile)];
+    }
+
+    /// <summary>
+    /// Uninstall takes out every ARS entry it can find - current, from before the rename, per
+    /// workspace, and in a profile only the ledger remembers - and says which it could not, when the
+    /// agent's command is missing or does not remove them. A live copy elsewhere and lookalikes stay.
+    /// </summary>
+    static void Uninstall(string root, string claudeFile, string codexFile, Action<bool, string> Check)
+    {
+        string gone = Path.Combine(root, "gone", "Bridge", "Deskweave.WorkspaceBridge.exe");
+        string copy = Path.Combine(root, "copy", "Bridge", "ARS.WorkspaceBridge.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        File.WriteAllText(copy, "");
+        string ticket = WorkspaceAccessStore.RouterTicket;
+        object Server(string command) => new { type = "stdio", command, args = new[] { "--workspace", ticket } };
+        File.WriteAllText(claudeFile, JsonSerializer.Serialize(new { mcpServers = new Dictionary<string, object>
+        {
+            ["another"] = Server("another.exe"),
+            ["ars"] = Server(WorkspaceConnections.Bridge),
+            ["deskweave"] = Server(gone),
+            ["ars_workspace_abc"] = Server(WorkspaceConnections.Bridge),
+            ["ars_workspace_mine"] = Server(Path.Combine(root, "mine.exe")),
+        } }));
+        string Toml(string name, string command) => $"[mcp_servers.{name}]\ncommand = '{command}'\nargs = [\"--workspace\", '{ticket}']\n";
+        File.WriteAllText(codexFile, Toml("another", "another.exe") + Toml("ars", WorkspaceConnections.Bridge)
+            + Toml("deskweave_workspace_old", gone) + Toml("deskweave", copy));
+        string earlier = Path.Combine(root, "earlier-claude"), earlierFile = Path.Combine(earlier, ".claude.json");
+        Directory.CreateDirectory(earlier);
+        File.WriteAllText(earlierFile, JsonSerializer.Serialize(new { mcpServers = new Dictionary<string, object>
+        {
+            ["ars"] = Server(Path.Combine(root, "gone", "Bridge", "ARS.WorkspaceBridge.exe")),
+        } }));
+        AppSettingsStore.Update(s => s with { ConnectedProfiles = ["ClaudeCode|" + earlierFile + "|" + earlier] });
+        string[] files = [claudeFile, codexFile, earlierFile];
+        string[] before = [.. files.Select(File.ReadAllText)];
+        static IReadOnlyList<string> Remove() => WorkspaceConnections.RemoveOwnedConnections().GetAwaiter().GetResult();
+
+        WorkspaceConnections.Locate = _ => null;
+        IReadOnlyList<string> left = Remove();
+        Check(left.Count == 3 && left.All(line => line.Contains("still has", StringComparison.Ordinal))
+            && files.Select(File.ReadAllText).SequenceEqual(before),
+            "Uninstall with an agent's command missing changes nothing and names every profile still holding ARS");
+        WorkspaceConnections.Locate = _ => Environment.ProcessPath;
+        Environment.SetEnvironmentVariable("DESKWEAVE_STUB", "remove-silent");
+        Check(Remove().Count == 3, "Uninstall reports entries a removal that did nothing left behind");
+        Environment.SetEnvironmentVariable("DESKWEAVE_STUB", null);
+        left = Remove();
+        string claude = File.ReadAllText(claudeFile), codex = File.ReadAllText(codexFile), early = File.ReadAllText(earlierFile);
+        Check(left.Count == 0 && !claude.Contains("\"ars\"", StringComparison.Ordinal) && !claude.Contains("\"deskweave\"", StringComparison.Ordinal)
+            && !claude.Contains("ars_workspace_abc", StringComparison.Ordinal) && !codex.Contains("[mcp_servers.ars]", StringComparison.Ordinal)
+            && !codex.Contains("deskweave_workspace_old", StringComparison.Ordinal) && !early.Contains("\"ars\"", StringComparison.Ordinal),
+            "Uninstall removes current, renamed, per-workspace and ledger-only ARS entries");
+        Check(claude.Contains("\"another\"", StringComparison.Ordinal) && claude.Contains("ars_workspace_mine", StringComparison.Ordinal)
+            && codex.Contains("[mcp_servers.another]", StringComparison.Ordinal) && codex.Contains("[mcp_servers.deskweave]", StringComparison.Ordinal),
+            "Uninstall leaves unrelated servers, lookalike names and another live ARS copy's entry alone");
+        Check(AppSettingsStore.Current.ConnectedProfiles.Count == 0, "Uninstall clears the profiles it cleaned from the ledger");
+        File.Delete(codexFile);
+        File.Delete(claudeFile);
     }
 
     /// <summary>
@@ -438,7 +509,7 @@ internal static class FirstRunConnections
         if (args.Length < 3) return 2;
         if (args[1] is "get" or "list") return Shown(path, claude);
         string name = args[1] == "remove" ? args[^1] : WorkspaceConnections.AppName;
-        if (name is not (WorkspaceConnections.AppName or WorkspaceConnections.FormerAppName) || !args.Contains(name)) return 2;
+        if (args[1] != "remove" && !args.Contains(name)) return 2;
         if (args[1] == "remove")
         {
             if (Environment.GetEnvironmentVariable("DESKWEAVE_STUB") == "remove-silent") return 0;
