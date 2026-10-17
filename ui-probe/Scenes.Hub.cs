@@ -182,6 +182,33 @@ static class HubScenes
             await Task.Delay(300);
             Program.Check(window.Hub.Working.Any(e => e.Id == shop.Id) && !window.Hub.Asleep.Any(e => e.Id == shop.Id),
                 "Starting a workspace's computer moves it from Recent to Working");
+            window.UpdateLayout();
+            var stackCards = (ItemsControl)window.FindName("StackWorkingList");
+            Button workingCard = CardButtons(stackCards).Single(b => b.Tag as string == shop.Id
+                && b.Style == (Style)window.FindResource("StackItemButton"));
+            workingCard.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0,
+                System.Windows.Input.MouseButton.Left) { RoutedEvent = Control.MouseDoubleClickEvent });
+            await Task.Delay(200);
+            Program.Check(window.DisplayMode == "wide" && window.SelectedWorkspaceId == shop.Id
+                && window.WindowState == WindowState.Maximized,
+                "Double-clicking the actual working card opens its workspace fullscreen");
+            window.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
+                System.Windows.PresentationSource.FromVisual(window), 0, System.Windows.Input.Key.Escape)
+                { RoutedEvent = UIElement.PreviewKeyDownEvent });
+            await Task.Delay(200);
+            Program.Check(window.DisplayMode == "stack" && window.WindowState == WindowState.Normal
+                && Math.Abs(window.ActualWidth - 350) < 2 && Math.Abs(window.ActualHeight - 510) < 2,
+                "Escape from fullscreen returns to the compact strip at its saved size");
+            var recentRows = (ItemsControl)window.FindName("StackAsleepList");
+            Button recentCard = CardButtons(recentRows).Single(b => b.Tag as string == recentOne.Id
+                && b.Style == (Style)window.FindResource("StackItemButton"));
+            recentCard.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0,
+                System.Windows.Input.MouseButton.Left) { RoutedEvent = Control.MouseDoubleClickEvent });
+            await Task.Delay(200);
+            Program.Check(window.DisplayMode == "wide" && window.SelectedWorkspaceId == recentOne.Id
+                && window.WindowState == WindowState.Maximized && WorkspaceRuntime.Of(recentOne.Id) is null,
+                "Double-clicking a recent workspace opens fullscreen without restarting its apps");
+            window.ShowStack();
             window.ShowWide(shop.Id);
             await Task.Delay(300);
             Program.Check(window.DisplayMode == "wide" && window.MinWidth == 960 && window.MinHeight == 600,
@@ -440,6 +467,16 @@ static class HubScenes
             WorkspaceStore.Delete(driven.Id);
         }
         finally { window.Close(); }
+    }
+
+    static IEnumerable<Button> CardButtons(DependencyObject root)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(root, i);
+            if (child is Button button) yield return button;
+            foreach (Button descendant in CardButtons(child)) yield return descendant;
+        }
     }
 
     static string VisibleWords(DependencyObject root)

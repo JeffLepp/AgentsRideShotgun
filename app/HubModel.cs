@@ -13,7 +13,7 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
 {
     public string Id { get; } = id;
     string _name = "";
-    public string Name { get => _name; set { Set(ref _name, value); Changed(nameof(OpenLabel)); Changed(nameof(SleepLabel)); Changed(nameof(PreviewLabel)); } }
+    public string Name { get => _name; set { Set(ref _name, value); Changed(nameof(OpenLabel)); Changed(nameof(SleepLabel)); Changed(nameof(PreviewLabel)); Changed(nameof(PreviewTip)); } }
     bool _working;
     public bool Working { get => _working; set { if (_working != value) PreviewPlane = null; Set(ref _working, value); Changed(nameof(OpenLabel)); } }
     bool _needsYou;
@@ -44,8 +44,9 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
     WorkspaceControl? _previewPlane;
     internal WorkspaceControl? PreviewPlane { get => _previewPlane; set => Set(ref _previewPlane, value); }
     bool _expanded;
-    public bool Expanded { get => _expanded; set { Set(ref _expanded, value); Changed(nameof(PreviewLabel)); } }
+    public bool Expanded { get => _expanded; set { Set(ref _expanded, value); Changed(nameof(PreviewLabel)); Changed(nameof(PreviewTip)); } }
     public string PreviewLabel => (Expanded ? "Collapse preview for " : "Show preview for ") + Name;
+    public string PreviewTip => PreviewLabel + ". Double-click or press Ctrl+Enter to open fullscreen.";
     bool _selected;
     public bool Selected { get => _selected; set => Set(ref _selected, value); }
     /// <summary>The week's activity bars, oldest first, each 0 to 1 of this row's busiest day; empty

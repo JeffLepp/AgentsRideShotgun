@@ -299,7 +299,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         LastSeenPill.Visibility = plane is null && ScreenImage.Source is not null ? Visibility.Visible : Visibility.Collapsed;
         ScreenImage.Opacity = plane is null ? 0.55 : 1.0;
         if (_taskbar is not null)
-            _taskbar.Visibility = plane is not null && AppSettingsStore.Current.AgentScreen == AgentScreenLook.Full
+            _taskbar.Visibility = plane is not null && !(ScreenImage.Source is BitmapSource shown && plane.IsBrowserViewport(shown))
+                && AppSettingsStore.Current.AgentScreen == AgentScreenLook.Full
                 ? Visibility.Visible : Visibility.Collapsed;
         if (plane is null)
         {

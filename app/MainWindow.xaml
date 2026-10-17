@@ -87,8 +87,9 @@
                 <Border CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}" Background="{DynamicResource CardBrush}">
                     <Border.ContextMenu><ContextMenu><MenuItem Header="Stop this workspace" Click="StopMenu_Click" Tag="{Binding Id}"/></ContextMenu></Border.ContextMenu>
                     <Grid>
-                        <Button Style="{StaticResource StackItemButton}" Click="WorkingCard_Click" Tag="{Binding Id}"
-                                ToolTip="{Binding PreviewLabel}" AutomationProperties.Name="{Binding PreviewLabel}">
+                        <Button Style="{StaticResource StackItemButton}" Click="WorkingCard_Click" MouseDoubleClick="WorkspaceCard_DoubleClick"
+                                PreviewKeyDown="WorkspaceCard_KeyDown" Tag="{Binding Id}"
+                                ToolTip="{Binding PreviewTip}" AutomationProperties.Name="{Binding PreviewLabel}">
                             <StackPanel Margin="7,7,7,8">
                                 <Border Tag="0.625" Loaded="AspectBorder_Loaded" CornerRadius="6" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
                                         Background="{DynamicResource PreviewBrush}" ClipToBounds="True">
@@ -119,7 +120,8 @@
 
         <DataTemplate x:Key="AsleepRowTemplate">
             <StackPanel>
-            <Button Style="{StaticResource StackItemButton}" Click="AsleepRow_Click" Tag="{Binding Id}" ToolTip="{Binding PreviewLabel}" AutomationProperties.Name="{Binding PreviewLabel}">
+            <Button Style="{StaticResource StackItemButton}" Click="AsleepRow_Click" MouseDoubleClick="WorkspaceCard_DoubleClick"
+                    PreviewKeyDown="WorkspaceCard_KeyDown" Tag="{Binding Id}" ToolTip="{Binding PreviewTip}" AutomationProperties.Name="{Binding PreviewLabel}">
                 <Border BorderThickness="0,1,0,0" BorderBrush="{DynamicResource HairlineBrush}" Padding="2,9">
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

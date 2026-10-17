@@ -46,6 +46,7 @@ internal static class SleepGate
 
     internal static void Run(Action<bool, string> check, string output)
     {
+        using var browserSettings = new BrowserFixtureSettings();
         TimeSpan sleepBefore = WorkspaceRuntime.SleepAfter;
         TimeSpan dozeBefore = WorkspaceRuntime.DozeInterval;
         TimeSpan useAgeBefore = WorkspaceExternalAccess.MaxUseAge;

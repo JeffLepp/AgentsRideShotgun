@@ -28,6 +28,8 @@ public partial class MainWindow : Window, IDisposable
     ShellPlacement? _widePlacement;
     bool _wasMaximized;
     bool _wasMinimized;
+    bool _workspaceFullscreen;
+    bool _fullscreenWasMaximized;
     bool _restoringPreferences = true;
     bool _capturing;
     bool _disposed;
@@ -141,6 +143,11 @@ public partial class MainWindow : Window, IDisposable
     {
         CloseCardSettings(animate: false);
         RememberPlacement();
+        if (_workspaceFullscreen)
+        {
+            _workspaceFullscreen = false;
+            if (!_fullscreenWasMaximized) WindowState = WindowState.Normal;
+        }
         _mode = "stack";
         SettingsSlot.Visibility = Visibility.Collapsed;
         WideRoot.Visibility = Visibility.Collapsed;
@@ -325,8 +332,27 @@ public partial class MainWindow : Window, IDisposable
 
     // --- filter, clicks --------------------------------------------------------------------------
 
-    void WorkingCard_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) TogglePreview(id); }
-    void AsleepRow_Click(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) TogglePreview(id); }
+    void WorkingCard_Click(object sender, RoutedEventArgs e) { if (_mode == "stack" && sender is Button { Tag: string id }) TogglePreview(id); }
+    void AsleepRow_Click(object sender, RoutedEventArgs e) { if (_mode == "stack" && sender is Button { Tag: string id }) TogglePreview(id); }
+    void WorkspaceCard_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || sender is not Button { Tag: string id }) return;
+        e.Handled = true;
+        OpenWorkspaceFullscreen(id);
+    }
+    void WorkspaceCard_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || Keyboard.Modifiers != ModifierKeys.Control || sender is not Button { Tag: string id }) return;
+        e.Handled = true;
+        OpenWorkspaceFullscreen(id);
+    }
+    internal void OpenWorkspaceFullscreen(string id)
+    {
+        if (!_workspaceFullscreen) _fullscreenWasMaximized = WindowState == WindowState.Maximized;
+        ShowWide(id);
+        _workspaceFullscreen = true;
+        WindowState = WindowState.Maximized;
+    }
     internal void TogglePreview(string id)
     {
         bool expand = _hub.Find(id)?.Expanded == false;
@@ -538,7 +564,8 @@ public partial class MainWindow : Window, IDisposable
     {
         if (_restoringPreferences || !IsLoaded) return;
         RememberPlacement();
-        if (WindowState != WindowState.Minimized) _wasMaximized = WindowState == WindowState.Maximized;
+        if (WindowState != WindowState.Minimized) _wasMaximized = _workspaceFullscreen
+            ? _fullscreenWasMaximized : WindowState == WindowState.Maximized;
         _ = new ShellPreferences
         {
             Stack = _stackPlacement, Wide = _widePlacement, Maximized = _wasMaximized,

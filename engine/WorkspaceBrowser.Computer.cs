@@ -11,8 +11,9 @@ public sealed partial class WorkspaceBrowser
 
     internal async Task<(int Width, int Height)> Viewport(CancellationToken cancel)
     {
-        await Follow(cancel).ConfigureAwait(false);
-        JsonNode? metrics = await Call("Page.getLayoutMetrics", null, cancel, _session).ConfigureAwait(false);
+        if (!await Follow(cancel).ConfigureAwait(false)) return (0, 0);
+        string session = _session;
+        JsonNode? metrics = await Call("Page.getLayoutMetrics", null, cancel, session).ConfigureAwait(false);
         JsonNode? viewport = metrics?["cssVisualViewport"];
         return ((int)(viewport?["clientWidth"]?.GetValue<double>() ?? 0),
             (int)(viewport?["clientHeight"]?.GetValue<double>() ?? 0));
@@ -20,7 +21,8 @@ public sealed partial class WorkspaceBrowser
 
     internal async Task<BitmapSource?> Screenshot(CancellationToken cancel)
     {
-        await Follow(cancel).ConfigureAwait(false);
+        if (!await Follow(cancel).ConfigureAwait(false)) return null;
+        string session = _session;
         // A wheel scroll keeps animating after its input call returns. A clip taken from a position
         // read mid-animation points at content that has already scrolled out of the viewport, and
         // with captureBeyondViewport off that comes back as a blank frame (measured: two 1400px
@@ -29,7 +31,7 @@ public sealed partial class WorkspaceBrowser
         double pageX = double.NaN, pageY = double.NaN;
         for (int read = 0; read < 20; read++)
         {
-            JsonNode? metrics = await Call("Page.getLayoutMetrics", null, cancel, _session).ConfigureAwait(false);
+            JsonNode? metrics = await Call("Page.getLayoutMetrics", null, cancel, session).ConfigureAwait(false);
             viewport = metrics?["cssVisualViewport"];
             double x = viewport?["pageX"]?.GetValue<double>() ?? 0, y = viewport?["pageY"]?.GetValue<double>() ?? 0;
             if (x == pageX && y == pageY) break;
@@ -46,17 +48,27 @@ public sealed partial class WorkspaceBrowser
             // the image origin at the visible viewport after scrolling, not the document origin.
             ["clip"] = new JsonObject { ["x"] = pageX, ["y"] = pageY,
                 ["width"] = width, ["height"] = height, ["scale"] = 1 },
-        }, cancel, _session).ConfigureAwait(false);
+        }, cancel, session).ConfigureAwait(false);
         string? data = result?["data"]?.GetValue<string>();
         if (string.IsNullOrEmpty(data)) return null;
         using var stream = new MemoryStream(Convert.FromBase64String(data));
         var frame = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
         frame.Freeze();
         // CDP input uses CSS pixels. Normalize the image to exactly that coordinate space at any DPI.
-        if (frame.PixelWidth == width && frame.PixelHeight == height) return frame;
-        var normalized = new TransformedBitmap(frame, new ScaleTransform((double)width / frame.PixelWidth, (double)height / frame.PixelHeight));
-        normalized.Freeze();
-        return normalized;
+        BitmapSource normalized = frame;
+        if (frame.PixelWidth != width || frame.PixelHeight != height)
+            normalized = new TransformedBitmap(frame,
+                new ScaleTransform((double)width / frame.PixelWidth, (double)height / frame.PixelHeight));
+        // Frozen BitmapFrameDecode still carries a decoder whose metadata belongs to its creating
+        // thread. Evidence and WPF previews can consume this frame on different threads. Detach
+        // the pixels completely so those consumers never reach a thread-owned PNG decoder.
+        var pixels = new FormatConvertedBitmap(normalized, PixelFormats.Pbgra32, null, 0);
+        int stride = checked(width * 4);
+        byte[] bytes = new byte[checked(stride * height)];
+        pixels.CopyPixels(bytes, stride, 0);
+        BitmapSource detached = BitmapSource.Create(width, height, 96, 96, PixelFormats.Pbgra32, null, bytes, stride);
+        detached.Freeze();
+        return detached;
     }
 
     internal async Task<bool> ComputerInput(ComputerAction action, CancellationToken cancel)
@@ -154,7 +166,7 @@ public sealed partial class WorkspaceBrowser
         string key = last switch
         {
             "LEFT" => "ArrowLeft", "RIGHT" => "ArrowRight", "UP" => "ArrowUp", "DOWN" => "ArrowDown",
-            "SPACE" => " ", "PAGEUP" => "PageUp", "PAGEDOWN" => "PageDown", "BACKSPACE" => "Backspace",
+            "SPACE" => " ", "PAGEUP" => "PageUp", "PAGEDOWN" => "PageDown", "BACKSPACE" => "Backspace", "INSERT" => "Insert",
             "ESCAPE" => "Escape", "ENTER" => "Enter", "DELETE" => "Delete", "TAB" => "Tab", "HOME" => "Home", "END" => "End",
             _ when last.Length == 1 => (modifiers & 8) != 0 ? last : last.ToLowerInvariant(),
             _ => last,

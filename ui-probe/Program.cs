@@ -82,12 +82,13 @@ static class Program
         bool storage = args.Length == 2 && args[0] == "--storage";
         bool lifecycle = args.Length == 2 && args[0] == "--lifecycle";
         bool scaling = args.Length == 2 && args[0] == "--scaling";
-        if (!mvp && !cornerRendering && !cornerDocking && !storage && !lifecycle && !scaling && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
+        bool browserUi = args.Length == 2 && args[0] == "--browser-ui";
+        if (!mvp && !cornerRendering && !cornerDocking && !storage && !lifecycle && !scaling && !browserUi && (args.Length != 1 || args[0].StartsWith("--", StringComparison.Ordinal)))
         {
-            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix] | --corner-rendering <output-folder> | --corner-docking <output-folder> | --storage <output-folder> | --lifecycle <output-folder> | --scaling <output-folder>");
+            Console.Error.WriteLine("Usage: Deskweave.UiProbe <output-folder> | --mvp <output-folder> [scene-prefix] | --browser-ui <output-folder> | --corner-rendering <output-folder> | --corner-docking <output-folder> | --storage <output-folder> | --lifecycle <output-folder> | --scaling <output-folder>");
             return 2;
         }
-        _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking || storage || lifecycle || scaling ? args[1] : args[0]);
+        _output = Path.GetFullPath(mvp || cornerRendering || cornerDocking || storage || lifecycle || scaling || browserUi ? args[1] : args[0]);
         Directory.CreateDirectory(_output);
         // The corner scenes drive empty fixture workspaces; CornerScenes.EmptyScreenChecks turns this
         // off to check that an empty screen really keeps the corner away.
@@ -155,6 +156,14 @@ static class Program
                 else if (storage) await StorageChecks.Run();
                 else if (lifecycle) await LifecycleChecks.Run();
                 else if (scaling) await ScalingScenes.Gate();
+                else if (browserUi)
+                {
+                    // These controls work inside an ARS desktop too; they do not require the
+                    // owner's notification-area icon used by the separate tray integration gate.
+                    AppearanceManager.Apply(AppSettingsStore.Current.Theme);
+                    await SettingsScenes.Gate();
+                    await HubScenes.Gate();
+                }
                 else if (mvp) await Mvp.Run(_output, args.Length == 3 ? args[2] : null);
                 else await Run();
             }

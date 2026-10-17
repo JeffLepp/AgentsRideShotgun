@@ -27,6 +27,9 @@ public sealed record AppSettings
     // General
     public bool StartWithWindows { get; init; } = true;
     public ThemeChoice Theme { get; init; } = ThemeChoice.FollowWindows;
+    /// <summary>Opt in to a browser profile kept separately for each workspace. Off connects to
+    /// the owner's running browser with its permission; ARS never copies its profile or credentials.</summary>
+    public bool SeparateBrowserProfile { get; init; } = false;
     // Check for updates and Send crash reports arrive with a release channel.
     /// <summary>The first-launch window was answered, by Start or by closing it. It is never shown again.</summary>
     public bool FirstRunDone { get; init; }

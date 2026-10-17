@@ -19,6 +19,7 @@ internal static class BrowserHardeningProbe
 
     internal static int Run(string output)
     {
+        using var browserSettings = new BrowserFixtureSettings();
         Directory.CreateDirectory(output);
         using var watchdog = new System.Threading.Timer(_ =>
         {
@@ -49,6 +50,10 @@ internal static class BrowserHardeningProbe
                 {
                     string where = blank is null ? "" : blank.Evaluate("location.href").GetAwaiter().GetResult();
                     Check(where == "about:blank", "about:blank still opens", where);
+                    using JsonDocument preferences = JsonDocument.Parse(File.ReadAllText(
+                        Path.Combine(desktop.Folder!, "chrome-profile", "Default", "Preferences")));
+                    Check(preferences.RootElement.GetProperty("credentials_enable_service").ValueKind == JsonValueKind.False,
+                        "ARS's separate browser profile disables browser password saving");
                 }
                 string page = Path.Combine(desktop.Folder!, "sound.html");
                 // Nearly silent, so a leak before the fix is not loud; it still opens an audio session.

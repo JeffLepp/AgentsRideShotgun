@@ -11,6 +11,7 @@ internal static class PrewarmProbe
 {
     internal static void Run(Action<bool, string> check)
     {
+        using var browserSettings = new BrowserFixtureSettings();
         if (!File.Exists(WorkspaceBrowser.ChromePath))
         {
             check(true, "Browser warm-up not measured: no supported browser is installed on this machine");

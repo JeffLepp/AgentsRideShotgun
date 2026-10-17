@@ -10,6 +10,10 @@ public sealed partial class WorkspaceControl
 
     internal async Task<ComputerResult> Computer(ComputerRequest request, CancellationToken cancel)
     {
+        // The selected workspace screen can be a live-session browser target. Its input must use
+        // that same viewport; a numbered native control remains an explicit native action.
+        if (request.Target == "desktop" && UsesBrowserViewport && !request.Actions.Any(action => action.Control > 0))
+            request = request with { Target = "browser" };
         long ticket = Ticket;
         using var input = InputScope(ticket, cancel);
         bool ownsLease() => ticket != 0 && Ticket == ticket;
@@ -53,7 +57,12 @@ public sealed partial class WorkspaceControl
             ComputerReceipt receipt = await WorkspaceComputer.Execute(request.Actions, ownsLease, async action =>
             {
                 if (!ownsLease() || input.IsCancellationRequested) return false;
-                if (action.Control > 0) return AtControl(action, ticket, ref missed);
+                if (action.Control > 0)
+                {
+                    bool hit = AtControl(action, ticket, ref missed);
+                    if (hit) PresentBrowser(false);
+                    return hit;
+                }
                 // Back into the coordinates the desktop and the browser use, immediately before the
                 // action goes out - never in the receipt, which stays in the model's own space.
                 ComputerAction placed = WorkspaceMarks.ToSource(action, scale);
@@ -61,6 +70,7 @@ public sealed partial class WorkspaceControl
                 bool sent = browser is not null
                     ? ReferenceEquals(browser, _browser) && await browser.ComputerInput(placed, input.Token).ConfigureAwait(false)
                     : _desktop.ComputerInput(placed, ticket);
+                if (sent) PresentBrowser(browser?.UsesOwnerSession == true);
                 _evidence.Note("computer." + action.Type, request.Target, sent ? "input delivered; verify outcome" : "not confirmed; do not replay");
                 return sent;
             }, input.Token).ConfigureAwait(false);
@@ -70,6 +80,7 @@ public sealed partial class WorkspaceControl
             BitmapSource? frame = null;
             if (request.Screenshot && ownsLease() && !input.IsCancellationRequested)
             {
+                PresentBrowser(browser?.UsesOwnerSession == true);
                 // An app is often busy for a beat right after it is clicked. Waiting that beat out
                 // here is free; a picture of its last frame costs the agent another look.
                 if (browser is null)

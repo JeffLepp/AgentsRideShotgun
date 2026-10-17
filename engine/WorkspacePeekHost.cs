@@ -719,12 +719,25 @@ internal static class WorkspacePeekHost
         _drawing = true;
         string capturedFor = id;
         WorkspacePeekCapture.Cached? cached = _background;
+        WorkspaceControl? plane = f.Runtime.Plane;
         Task.Run(() =>
         {
             // Any capture failure - the desktop tearing down mid-shot, a window closing between the
             // list and the print, anything Windows hands back - costs this one tick, never the UI
             // dispatcher: there is always a next tick.
-            try { return WorkspacePeekCapture.Take(desktop, capturedFor, cached, inUse); }
+            try
+            {
+                if (plane is { UsesBrowserViewport: true } or { DisplayingBrowserViewport: true })
+                {
+                    // The everyday browser remains on the owner's desktop. Its ARS tab is shown
+                    // through CDP, so printing the empty agent desktop would erase the live page.
+                    BitmapSource? picture = plane.Frame();
+                    return new WorkspacePeekCapture.Frame(picture is null ? null
+                        : new WorkspacePeekCapture.Cached(capturedFor, picture, DateTimeOffset.Now), null, 0, 0);
+                }
+                if (plane is not null && cached is { } prior && plane.IsBrowserViewport(prior.Image)) cached = null;
+                return WorkspacePeekCapture.Take(desktop, capturedFor, cached, inUse);
+            }
             catch (Exception) { return default; }
         }).ContinueWith(taken => owner.BeginInvoke(() =>
         {

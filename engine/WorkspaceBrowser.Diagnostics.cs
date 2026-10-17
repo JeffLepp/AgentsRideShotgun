@@ -11,6 +11,8 @@ public sealed partial class WorkspaceBrowser
         if (string.IsNullOrEmpty(error)) return "The browser did not confirm the operation";
         if (error is "DevTools connection closed before the command completed."
             or "The DevTools command timed out."
+            or "The ARS browser tab is no longer available."
+            or "The navigation did not become usable within 12 seconds."
             or "The navigation became a download."
             or "The page did not finish loading within the wait budget.") return error.TrimEnd('.');
         const string prefix = "net::ERR_";

@@ -99,9 +99,9 @@ public sealed class WorkspaceMcp : IDisposable
             [("job", "string", "a job ID from run; omit to list them"),
                 ("offset", "number", "where to continue reading its output"),
                 ("cancel", "boolean", "stop this job")], [], false),
-        new("browse", "Opens a link in the workspace's own browser, in the current tab or a new one. Use it, not your shell, "
-            + "for any page you will check. The first call can take "
-            + "about forty seconds while Chrome starts; wait for it rather than calling again.",
+        new("browse", "Opens a link on the workspace screen using the browser session selected in Settings, in the current tab "
+            + "or a new one. Use it for any page you will check. A first connection may need the browser's permission. "
+            + "If navigation is unconfirmed, inspect with page or computer before retrying; the page may already be loaded.",
             [("url", "string", ""), ("new_tab", "boolean", "")], ["url"], true),
         new("tab", "Lists the browser tabs, or works in one by number and brings it to the front. 0 goes back to following "
             + "the tab on screen, which is the default.",
@@ -311,7 +311,9 @@ public sealed class WorkspaceMcp : IDisposable
                         + " still drawing - wait a few seconds and look again."
                     : "that window is not answering, so it cannot be photographed now. Wait a little and look again,"
                         + " or look at the whole screen, where it shows greyed as last seen.");
-                string what = window == 0 ? "the whole workspace screen" : "window " + Int(arguments, "window");
+                bool browserViewport = window == 0 && _control.IsBrowserViewport(frame);
+                string what = browserViewport ? "the browser page viewport"
+                    : window == 0 ? "the whole workspace screen" : "window " + Int(arguments, "window");
                 // A stale picture is worse than no picture when it is passed off as the current one:
                 // the agent acts on a screen that has moved on. Say what it is looking at.
                 if (window == 0 && _control.ScreenState.Note is { Length: > 0 } stale) what += ". " + stale;
@@ -323,9 +325,10 @@ public sealed class WorkspaceMcp : IDisposable
                 // known: give it, rather than leave the agent to guess why its click landed beside.
                 double scale = WorkspaceMarks.Fit(frame.PixelWidth, frame.PixelHeight,
                     WorkspaceMarks.ActionWidth, WorkspaceMarks.ActionHeight).Scale;
-                return Picture(frame, what, scale >= 1 ? "Its pixels are the same as computer's desktop pixels."
-                    : $"To click a point from this picture with computer (target desktop), multiply its x and y by {scale.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}, "
-                        + "or click by control number.");
+                string target = browserViewport ? "browser" : "desktop";
+                return Picture(frame, what, scale >= 1 ? $"Its pixels are the same as computer's {target} pixels."
+                    : $"To click a point from this picture with computer (target {target}), multiply its x and y by {scale.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}, "
+                        + (browserViewport ? "using its own latest picture." : "or click by control number."));
             }
 
             case "controls":

@@ -51,6 +51,31 @@ public partial class SettingsView
             new Choice(AgentScreenLook.Simple, "Simple"),
         ], s => s.AgentScreen, (s, v) => s with { AgentScreen = v });
 
+        var separateBrowser = Toggle("Separate browser profile", s => s.SeparateBrowserProfile,
+            (s, v) => s with { SeparateBrowserProfile = v });
+        var browserSetupError = Styled("Couldn't open browser setup.", "RowError");
+        browserSetupError.Visibility = Visibility.Collapsed;
+        browserSetupError.TextWrapping = TextWrapping.Wrap;
+        var connectBrowser = new Button { Content = "Connect my browser", HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 8, 0, 0) };
+        connectBrowser.SetResourceReference(StyleProperty, "DeskButton");
+        AutomationProperties.SetName(connectBrowser, "Connect my browser");
+        connectBrowser.Click += (_, _) => browserSetupError.Visibility = WorkspaceBrowser.OpenOwnerBrowserSetup()
+            ? Visibility.Collapsed : Visibility.Visible;
+        var browserText = RowText("Separate browser profile");
+        var browserModeHint = Styled("", "RowHint");
+        browserText.Children.Add(browserModeHint);
+        browserText.Children.Add(connectBrowser);
+        browserText.Children.Add(browserSetupError);
+        _followers.Add(s =>
+        {
+            browserModeHint.Text = s.SeparateBrowserProfile
+                ? "Each workspace keeps its own browser sign-ins. Changes apply when the browser next opens."
+                : "Uses your browser's sign-ins after you allow ARS to connect. Changes apply when the browser next opens.";
+            connectBrowser.Visibility = s.SeparateBrowserProfile ? Visibility.Collapsed : Visibility.Visible;
+            browserSetupError.Visibility = Visibility.Collapsed;
+        });
+
         // On: CornerShow.ComesAndGoes (it comes and goes on its own). Off: CornerShow.Off (it never
         // appears on its own; the tray still shows it, per ModuleEntry.ShowCornerRequested).
         // Turning it off asks first (CornerQuestion).
@@ -106,6 +131,7 @@ public partial class SettingsView
                     Row(startupText, startup),
                     Row(RowText("Theme"), theme),
                     Row(RowText("Agent screens", "How the agent's screen looks behind its windows"), agentScreen),
+                    Row(browserText, separateBrowser),
                     Row(cornerText, cornerShow))),
                 Section(null, Group(versionRow, licenseStack, openData)),
             },
@@ -275,7 +301,7 @@ public partial class SettingsView
         // wraps to two lines and any shortfall in the per-line height doubles up, shrinking the banner.
         var bannerText = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18.85, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         bannerText.Inlines.Add(new Run("Local only.") { FontWeight = FontWeights.SemiBold });
-        bannerText.Inlines.Add(new Run(" Sign-ins live in ARS's own browser, on this PC, and your own Chrome is never touched."));
+        bannerText.Inlines.Add(new Run(" Sign-ins stay in your browser. ARS connects with your permission; it does not copy passwords or browser profiles."));
         banner.Content = bannerText;
 
         var accountRows = SettingsFeatures.Accounts

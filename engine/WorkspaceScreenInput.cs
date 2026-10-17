@@ -63,7 +63,14 @@ public sealed class WorkspaceScreenInput : IDisposable
         {
             _holding = false;
             if (_screen.IsMouseCaptured) _screen.ReleaseMouseCapture();
-            if (_runtime()?.Computer is { } computer) Send(() => { computer.EndGesture(); return true; });
+            if (_browserGesture is { } browserPlane)
+            {
+                _browserGesture = null;
+                Interlocked.Exchange(ref _queuedBrowserMove, null);
+                CancellationToken lease = _browserLease;
+                Send(() => browserPlane.EndOwnerBrowserGesture(lease));
+            }
+            else if (_runtime()?.Computer is { } computer) Send(() => { computer.EndGesture(); return true; });
         }
         WorkspaceControl? held = _held;
         _held = null;
@@ -111,7 +118,8 @@ public sealed class WorkspaceScreenInput : IDisposable
         if (now - _lastHover < 40) return;
         _lastHover = now;
         if (!Map(e.GetPosition(_screen), out int x, out int y)) return;
-        Send(() => computer.PointerMove(x, y));
+        if (BrowserPlane is { } plane) SendLatestBrowserMove(plane, x, y);
+        else Send(() => computer.PointerMove(x, y));
     }
 
     void MouseUp(object sender, MouseButtonEventArgs e)
@@ -137,6 +145,22 @@ public sealed class WorkspaceScreenInput : IDisposable
         TakeOver(plane);
         _holding = true;
         _refused = 0;
+        if (BrowserPlane is { } browserPlane)
+        {
+            browserPlane.PresentBrowser(true);
+            _browserGesture = browserPlane;
+            _browserLease = browserPlane.OwnerInputToken;
+            CancellationToken lease = _browserLease;
+            Interlocked.Exchange(ref _queuedBrowserMove, null);
+            _browserRightButton = rightButton;
+            _browserSecondClick = secondClick;
+            ClickPing browserPing = ClickPing.Show(_screen, point);
+            Send(() => browserPlane.OwnerBrowserPointer("mousePressed", x, y,
+                rightButton, secondClick, lease), landed => browserPing.Answer(landed));
+            Acted();
+            return true;
+        }
+        plane.PresentBrowser(false);
         if (!rightButton && GripAt(point, out AgentDesktop.FrameTarget frame) is var grip and not FrameGrip.None)
         {
             // An edge: no ring, the outline that follows the pointer says where it took hold.
@@ -157,6 +181,13 @@ public sealed class WorkspaceScreenInput : IDisposable
     internal void Moved(Point point)
     {
         if (!_holding || _runtime() is not { Computer: { } computer } runtime) return;
+        if (_browserGesture is { } browserPlane)
+        {
+            Map(point, out int browserX, out int browserY, clamp: true);
+            SendLatestBrowserMove(browserPlane, browserX, browserY, _browserLease);
+            Acted();
+            return;
+        }
         if (_tear is not null) { _ghost?.Follow(_screen.PointToScreen(point), Outside(point)); return; }
         // A window dragged by its title bar right off the picture is being taken out, the way a
         // browser tab dragged off its strip becomes its own window.
@@ -199,6 +230,34 @@ public sealed class WorkspaceScreenInput : IDisposable
     long _latestMove;
     int _movePending;
 
+    void SendLatestBrowserMove(WorkspaceControl plane, int x, int y, CancellationToken? gestureLease = null)
+    {
+        CancellationToken lease = gestureLease ?? plane.OwnerInputToken;
+        long point = (long)x << 32 | (uint)y;
+        if (_queuedBrowserMove is { } waiting && ReferenceEquals(waiting.Plane, plane) && waiting.Lease == lease)
+        {
+            Interlocked.Exchange(ref waiting.Point, point);
+            return;
+        }
+        var queued = new BrowserMove(plane, lease, point);
+        _queuedBrowserMove = queued;
+        Send(() =>
+        {
+            Interlocked.CompareExchange(ref _queuedBrowserMove, null, queued);
+            long latest = Interlocked.Read(ref queued.Point);
+            return plane.OwnerBrowserPointer("mouseMoved", (int)(latest >> 32), (int)latest,
+                false, false, lease);
+        });
+    }
+
+    BrowserMove? _queuedBrowserMove;
+    sealed class BrowserMove(WorkspaceControl plane, CancellationToken lease, long point)
+    {
+        internal readonly WorkspaceControl Plane = plane;
+        internal readonly CancellationToken Lease = lease;
+        internal long Point = point;
+    }
+
     /// <summary>The owner let go, wherever the pointer had got to.</summary>
     internal void Up(Point point)
     {
@@ -206,6 +265,17 @@ public sealed class WorkspaceScreenInput : IDisposable
         EndOutline();
         if (_screen.IsMouseCaptured) _screen.ReleaseMouseCapture();
         ShowGripCursor(point);
+        if (_browserGesture is { } browserPlane)
+        {
+            _browserGesture = null;
+            Interlocked.Exchange(ref _queuedBrowserMove, null);
+            Map(point, out int browserX, out int browserY, clamp: true);
+            CancellationToken lease = _browserLease;
+            bool right = _browserRightButton, second = _browserSecondClick;
+            Send(() => browserPlane.OwnerBrowserPointer("mouseReleased", browserX, browserY, right, second, lease));
+            Acted();
+            return;
+        }
         if (_tear is { } plan)
         {
             // The drag already ended in the workspace when the window left the picture.
@@ -233,6 +303,12 @@ public sealed class WorkspaceScreenInput : IDisposable
 
     bool _holding;
     long _lastHover;
+    WorkspaceControl? _browserGesture;
+    CancellationToken _browserLease;
+    bool _browserRightButton, _browserSecondClick;
+
+    WorkspaceControl? BrowserPlane => _screen.Source is BitmapSource source && _runtime()?.Plane is { } plane
+        && plane.IsBrowserViewport(source) ? plane : null;
 
     // --- taking a window out ------------------------------------------------------------------
 
@@ -318,12 +394,15 @@ public sealed class WorkspaceScreenInput : IDisposable
     /// </summary>
     internal async Task<(nint Window, Rect Area)?> PoppableAt(Point point)
     {
-        if (_holding || _runtime() is not { Computer: { } computer } runtime || !Map(point, out int x, out int y)) return null;
+        if (_holding || BrowserPlane is not null || _runtime() is not { Computer: { } computer } runtime
+            || !Map(point, out int x, out int y)) return null;
         // The picture's geometry is read here, on the view's thread, before waiting on the workspace.
         Func<double, double, Point> toPicture = PictureMapping();
         IReadOnlyList<AgentWindow> windows;
         try { windows = await Task.Run(() => computer.Windows()); }
         catch (ObjectDisposedException) { return null; }
+        // Possibly off the view's thread now, so the picture itself is not read again here.
+        if (runtime.Plane?.UsesBrowserViewport == true || !ReferenceEquals(runtime, _runtime())) return null;
         // Front first: the first window the point is inside is the one the owner can see there.
         AgentWindow? under = windows.FirstOrDefault(w => x >= w.X && y >= w.Y && x < w.X + w.Width && y < w.Y + w.Height);
         if (under is null) return null;
@@ -350,6 +429,12 @@ public sealed class WorkspaceScreenInput : IDisposable
     /// only way to find a border that is a pixel wide on the picture.</summary>
     internal void Hover(Point point)
     {
+        if (BrowserPlane is not null)
+        {
+            _frames = [];
+            _screen.Cursor = _restCursor;
+            return;
+        }
         if (_runtime()?.Computer is not { } computer) return;
         RefreshFrames(computer);
         ShowGripCursor(point);
@@ -380,6 +465,7 @@ public sealed class WorkspaceScreenInput : IDisposable
     FrameGrip GripAt(Point point, out AgentDesktop.FrameTarget found)
     {
         found = default;
+        if (BrowserPlane is not null) return FrameGrip.None;
         double scale = PictureScale();
         if (_frames.Count == 0 || scale <= 0 || !Map(point, out int x, out int y, clamp: true)) return FrameGrip.None;
         int outside = (int)Math.Max(8, 6 / scale), inside = (int)Math.Max(2, 1.5 / scale);
@@ -450,7 +536,7 @@ public sealed class WorkspaceScreenInput : IDisposable
     /// <summary>Picture pixels per workspace screen pixel, as the picture is laid out now.</summary>
     double PictureScale()
     {
-        double width = AgentDesktop.ScreenWidth, height = AgentDesktop.ScreenHeight;
+        (double width, double height) = PictureDimensions();
         if (_screen.ActualWidth <= 0 || _screen.ActualHeight <= 0) return 0;
         return _screen.Stretch == Stretch.UniformToFill
             ? Math.Max(_screen.ActualWidth / width, _screen.ActualHeight / height)
@@ -460,7 +546,7 @@ public sealed class WorkspaceScreenInput : IDisposable
     /// <summary>Workspace screen points onto the picture as it is laid out now: the inverse of Map.</summary>
     Func<double, double, Point> PictureMapping()
     {
-        double width = AgentDesktop.ScreenWidth, height = AgentDesktop.ScreenHeight;
+        (double width, double height) = PictureDimensions();
         double shownWidth = _screen.ActualWidth, shownHeight = _screen.ActualHeight;
         double scale = _screen.Stretch == Stretch.UniformToFill
             ? Math.Max(shownWidth / width, shownHeight / height)
@@ -478,12 +564,16 @@ public sealed class WorkspaceScreenInput : IDisposable
     /// letters of a typed word - cannot overtake one another on the way.
     /// </summary>
     void Send(Func<bool> input, Action<bool>? answered = null)
+        => Send(() => Task.FromResult(input()), answered);
+
+    void Send(Func<Task<bool>> input, Action<bool>? answered = null)
     {
-        Task<bool> next = _sending.ContinueWith(_ =>
+        Task<bool> next = _sending.ContinueWith(async _ =>
         {
-            try { return input(); }
-            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { return false; }
-        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            try { return await input().ConfigureAwait(false); }
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException
+                or OperationCanceledException) { return false; }
+        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
         _sending = next;
         if (answered is null) return;
         next.ContinueWith(sent => _screen.Dispatcher.BeginInvoke(() => answered(sent.Result)),
@@ -494,9 +584,20 @@ public sealed class WorkspaceScreenInput : IDisposable
 
     void MouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (Using() is not { } computer || !Map(e.GetPosition(_screen), out int x, out int y)) return;
+        if (_runtime() is not { Computer: { } computer } || !Map(e.GetPosition(_screen), out int x, out int y)) return;
         int delta = e.Delta;
-        Send(() => computer.Scroll(x, y, delta));
+        if (BrowserPlane is { } plane)
+        {
+            TakeOver(plane);
+            plane.PresentBrowser(true);
+            SendBrowserAction(plane, new("scroll", x, y, ScrollY: -delta));
+        }
+        else
+        {
+            if (Using() is null) return;
+            _runtime()?.Plane?.PresentBrowser(false);
+            Send(() => computer.Scroll(x, y, delta));
+        }
         Acted();
         e.Handled = true;
     }
@@ -505,7 +606,12 @@ public sealed class WorkspaceScreenInput : IDisposable
     {
         if (string.IsNullOrEmpty(e.Text) || Using() is not { } computer) return;
         string text = e.Text;
-        Send(() => computer.TypeText(text));
+        if (BrowserPlane is { } plane) SendBrowserAction(plane, new("type", Text: text));
+        else
+        {
+            _runtime()?.Plane?.PresentBrowser(false);
+            Send(() => computer.TypeText(text));
+        }
         Acted();
         e.Handled = true;
     }
@@ -514,8 +620,14 @@ public sealed class WorkspaceScreenInput : IDisposable
     {
         if (Using() is not { } computer) return;
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
-        if (Keyboard.Modifiers == ModifierKeys.Control && key is Key.C or Key.V)
+        if (BrowserPlane is { } plane)
         {
+            if (BrowserChord(key, Keyboard.Modifiers) is not { } chord) return;
+            SendBrowserAction(plane, new("keypress", Keys: chord));
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && key is Key.C or Key.V)
+        {
+            _runtime()?.Plane?.PresentBrowser(false);
             bool copy = key == Key.C;
             Send(() => { if (copy) computer.Copy(); else computer.Paste(); return true; });
         }
@@ -524,6 +636,7 @@ public sealed class WorkspaceScreenInput : IDisposable
             or Key.Escape or Key.Left or Key.Right or Key.Up or Key.Down or Key.Home or Key.End
             or Key.PageUp or Key.PageDown or Key.Insert or (>= Key.F1 and <= Key.F12))
         {
+            _runtime()?.Plane?.PresentBrowser(false);
             int code = KeyInterop.VirtualKeyFromKey(key);
             Send(() => computer.SendKey(code));
         }
@@ -534,6 +647,37 @@ public sealed class WorkspaceScreenInput : IDisposable
 
     AgentDesktop? Using() => _runtime() is { Computer: { } computer, Plane: { Driving: Driver.Owner } }
         ? computer : null;
+
+    void SendBrowserAction(WorkspaceControl plane, ComputerAction action)
+    {
+        plane.PresentBrowser(true);
+        CancellationToken lease = plane.OwnerInputToken;
+        Send(() => plane.OwnerBrowserAction(action, lease));
+    }
+
+    internal static string[]? BrowserChord(Key key, ModifierKeys modifiers)
+    {
+        if ((modifiers & ModifierKeys.Windows) != 0) return null;
+        string? name = key switch
+        {
+            Key.Enter => "ENTER", Key.Tab => "TAB", Key.Back => "BACKSPACE", Key.Delete => "DELETE",
+            Key.Escape => "ESCAPE", Key.Left => "LEFT", Key.Right => "RIGHT", Key.Up => "UP", Key.Down => "DOWN",
+            Key.Home => "HOME", Key.End => "END", Key.PageUp => "PAGEUP", Key.PageDown => "PAGEDOWN", Key.Insert => "INSERT",
+            >= Key.F1 and <= Key.F12 => key.ToString(),
+            >= Key.A and <= Key.Z when (modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0 => key.ToString(),
+            >= Key.D0 and <= Key.D9 when (modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0 => ((char)('0' + (int)key - (int)Key.D0)).ToString(),
+            Key.Space when (modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0 => "SPACE",
+            _ => null,
+        };
+        // Printable text goes through TextInput once, including Shift and IME composition.
+        if (name is null) return null;
+        List<string> keys = [];
+        if ((modifiers & ModifierKeys.Control) != 0) keys.Add("CTRL");
+        if ((modifiers & ModifierKeys.Alt) != 0) keys.Add("ALT");
+        if ((modifiers & ModifierKeys.Shift) != 0) keys.Add("SHIFT");
+        keys.Add(name);
+        return keys.ToArray();
+    }
 
     void MouseEnter(object sender, MouseEventArgs e) => Enter();
     void MouseLeave(object sender, MouseEventArgs e) => Leave();
@@ -582,13 +726,23 @@ public sealed class WorkspaceScreenInput : IDisposable
     /// the drag follows the edge of the workspace screen rather than being dropped.</param>
     bool Map(Point point, out int x, out int y, bool clamp = false)
     {
+        (double width, double height) = PictureDimensions();
+        return MapPicture(point, _screen.ActualWidth, _screen.ActualHeight, (int)width, (int)height,
+            _screen.Stretch, out x, out y, clamp);
+    }
+
+    (double Width, double Height) PictureDimensions() => BrowserPlane is not null && _screen.Source is BitmapSource picture
+        ? (picture.PixelWidth, picture.PixelHeight) : (AgentDesktop.ScreenWidth, AgentDesktop.ScreenHeight);
+
+    internal static bool MapPicture(Point point, double shownWidth, double shownHeight,
+        int width, int height, Stretch stretch, out int x, out int y, bool clamp = false)
+    {
         x = y = 0;
-        double width = AgentDesktop.ScreenWidth, height = AgentDesktop.ScreenHeight;
-        if (_screen.ActualWidth <= 0 || _screen.ActualHeight <= 0) return false;
-        double scale = _screen.Stretch == Stretch.UniformToFill
-            ? Math.Max(_screen.ActualWidth / width, _screen.ActualHeight / height)
-            : Math.Min(_screen.ActualWidth / width, _screen.ActualHeight / height);
-        double left = (_screen.ActualWidth - width * scale) / 2, top = (_screen.ActualHeight - height * scale) / 2;
+        if (shownWidth <= 0 || shownHeight <= 0 || width <= 0 || height <= 0) return false;
+        double scale = stretch == Stretch.UniformToFill
+            ? Math.Max(shownWidth / width, shownHeight / height)
+            : Math.Min(shownWidth / width, shownHeight / height);
+        double left = (shownWidth - width * scale) / 2, top = (shownHeight - height * scale) / 2;
         x = (int)Math.Round((point.X - left) / scale);
         y = (int)Math.Round((point.Y - top) / scale);
         if (!clamp) return x >= 0 && y >= 0 && x < width && y < height;

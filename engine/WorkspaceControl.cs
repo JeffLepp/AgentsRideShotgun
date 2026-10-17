@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Windows.Media.Imaging;
 
 namespace Deskweave.AgentWorkspaces;
@@ -235,6 +236,7 @@ public sealed partial class WorkspaceControl : IDisposable
     /// </summary>
     internal bool? HasSomethingToShow()
     {
+        if (UsesBrowserViewport) return true;
         IReadOnlyList<AgentWindow>? open;
         try { open = _desktop.Windows(TimeSpan.FromMilliseconds(500)); }
         catch (ObjectDisposedException) { return false; }
@@ -268,7 +270,7 @@ public sealed partial class WorkspaceControl : IDisposable
     public BitmapSource? Shot(nint window = 0, bool marks = false)
     {
         BitmapSource? frame = window == 0 ? Screen() : _desktop.CaptureWindow(window);
-        if (frame is not null && marks)
+        if (frame is not null && marks && (window != 0 || !IsBrowserViewport(frame)))
         {
             (IReadOnlyList<WorkspaceElement> found, System.Windows.Point origin) = MarksFor(window);
             frame = WorkspaceMarks.Draw(frame, found, origin, 1);
@@ -313,7 +315,16 @@ public sealed partial class WorkspaceControl : IDisposable
     /// </summary>
     BitmapSource? Screen(bool record = true)
     {
-        DesktopFrame frame = _desktop.Capture(
+        bool browserViewport = UsesBrowserViewport;
+        DesktopFrame frame;
+        // A page in the owner's live browser has no HWND on this alternate desktop. The last
+        // explicit browser/native action selects the screen so browse appears even beside native apps.
+        if (browserViewport && _browser is { } browser)
+        {
+            BitmapSource? page = OwnerBrowserFrame(browser);
+            frame = new DesktopFrame(page, 1, 0, page is null);
+        }
+        else frame = _desktop.Capture(
             Native.GetSystemMetrics(Native.SmCxScreen), Native.GetSystemMetrics(Native.SmCyScreen));
         lock (_frameGate)
         {
@@ -321,6 +332,8 @@ public sealed partial class WorkspaceControl : IDisposable
             {
                 _lastFrame = frame.Image;
                 _lastFrameAt = DateTimeOffset.Now;
+                _lastFrameBrowserViewport = browserViewport;
+                if (browserViewport) _browserFrames.GetValue(frame.Image, _ => new BrowserFrameMarker());
             }
             // An empty desktop is not a stall. There is nothing to photograph and nothing is wrong.
             if (record)
@@ -356,9 +369,40 @@ public sealed partial class WorkspaceControl : IDisposable
     internal BitmapSource? LastFrame { get { lock (_frameGate) return _lastFrame; } }
 
     readonly Lock _frameGate = new();
+    readonly SemaphoreSlim _ownerBrowserCapture = new(1, 1);
+    volatile bool _presentBrowserViewport;
+    bool _lastFrameBrowserViewport;
+    readonly ConditionalWeakTable<BitmapSource, BrowserFrameMarker> _browserFrames = new();
+    sealed class BrowserFrameMarker { }
     BitmapSource? _lastFrame;
     DateTimeOffset _lastFrameAt;
     WorkspaceScreenState _screen = new(false, null, 0, false);
+
+    BitmapSource? OwnerBrowserFrame(WorkspaceBrowser browser)
+    {
+        // Panel, corner and evidence readers may race. One capture gets a short total budget;
+        // other readers retain the last frame rather than stacking protocol waits behind it.
+        if (!_ownerBrowserCapture.Wait(0)) return null;
+        try
+        {
+            using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            return browser.Screenshot(bound.Token).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
+        finally { _ownerBrowserCapture.Release(); }
+    }
+
+    /// <summary>Whether the selected screen is ARS's page in the live browser.</summary>
+    public bool UsesBrowserViewport => _presentBrowserViewport
+        && _browser is { UsesOwnerSession: true, HasContent: true };
+
+    /// <summary>The coordinate space of the last successful frame, retained during a capture stall.</summary>
+    public bool DisplayingBrowserViewport { get { lock (_frameGate) return _lastFrameBrowserViewport; } }
+
+    /// <summary>Whether this viewer's exact immutable frame uses browser viewport coordinates.</summary>
+    internal bool IsBrowserViewport(BitmapSource frame) => _browserFrames.TryGetValue(frame, out _);
+
+    internal void PresentBrowser(bool show) => _presentBrowserViewport = show;
 
     /// <summary>What the last picture of this workspace actually was, for the panel and the agent.</summary>
     public WorkspaceScreenState ScreenState { get { lock (_frameGate) return _screen; } }
@@ -404,10 +448,11 @@ public sealed partial class WorkspaceControl : IDisposable
         if (element is null) { Note("press", elementId.ToString(), "no such element"); return false; }
 
         var result = _tree.TryPress(elementId, () => Ticket == ticket);
-        if (result == WorkspaceTree.TreeAction.Applied) { Note("press", element.ToString(), "through the tree"); return true; }
+        if (result == WorkspaceTree.TreeAction.Applied) { PresentBrowser(false); Note("press", element.ToString(), "through the tree"); return true; }
         if (result != WorkspaceTree.TreeAction.Unsupported || _tree.Validate(elementId) is not null)
         { Note("press", element.ToString(), "refused; read controls again"); return false; }
         if (!_desktop.Click(element.CentreX, element.CentreY, false, ticket)) return Discarded("press", element.ToString());
+        PresentBrowser(false);
         Note("press", element.ToString(), $"by point ({element.CentreX},{element.CentreY})");
         return true;
     }
@@ -426,12 +471,13 @@ public sealed partial class WorkspaceControl : IDisposable
         if (element is null) { Note("write", elementId.ToString(), "no such element"); return false; }
 
         var result = _tree.TryWrite(elementId, text, () => Ticket == ticket);
-        if (result == WorkspaceTree.TreeAction.Applied) { Note("write", element.ToString(), "through the tree"); return true; }
+        if (result == WorkspaceTree.TreeAction.Applied) { PresentBrowser(false); Note("write", element.ToString(), "through the tree"); return true; }
         if (result != WorkspaceTree.TreeAction.Unsupported || _tree.Validate(elementId) is not null
             || !_tree.Focus(elementId, () => Ticket == ticket))
         { Note("write", element.ToString(), "refused; read controls again"); return false; }
         TypedText typed = _desktop.Type(text, _tree.WindowOf(elementId), ticket);
         if (typed == TypedText.Discarded) return Discarded("write", element.ToString());
+        if (typed.Landed) PresentBrowser(false);
         // A failed type used to be filed as if the owner had taken control, which put the wrong
         // reason in the evidence log and told the caller nothing about the control that refused it.
         Note("write", element.ToString(), "focused by the tree, then " + typed);
@@ -465,6 +511,7 @@ public sealed partial class WorkspaceControl : IDisposable
     {
         if (!Allowed("click", $"({x},{y})", out long ticket)) return false;
         if (!_desktop.Click(x, y, rightButton, ticket)) return Discarded("click", $"({x},{y})");
+        PresentBrowser(false);
         Note("click", $"({x},{y})", rightButton ? "right" : "left");
         return true;
     }
@@ -473,6 +520,7 @@ public sealed partial class WorkspaceControl : IDisposable
     {
         if (!Allowed("scroll", $"({x},{y})", out long ticket)) return false;
         if (!_desktop.Scroll(x, y, delta, ticket)) return Discarded("scroll", $"({x},{y})");
+        PresentBrowser(false);
         Note("scroll", $"({x},{y})", delta.ToString());
         return true;
     }
@@ -486,11 +534,13 @@ public sealed partial class WorkspaceControl : IDisposable
     /// </summary>
     public TypedText Type(string text, nint window = 0)
     {
-        if (!Allowed("type", text, out long ticket))
+        string detail = text.Length + " characters";
+        if (!Allowed("type", detail, out long ticket))
             return new TypedText(false, "", "refused, " + (Driving == Driver.Owner ? "the owner is driving" : "no lease"));
         TypedText typed = _desktop.Type(text, window, ticket);
-        if (typed == TypedText.Discarded) { Discarded("type", text); return typed; }
-        Note("type", text, typed.ToString());
+        if (typed == TypedText.Discarded) { Discarded("type", detail); return typed; }
+        if (typed.Landed) PresentBrowser(false);
+        Note("type", detail, typed.ToString());
         return typed;
     }
 
@@ -498,6 +548,7 @@ public sealed partial class WorkspaceControl : IDisposable
     {
         if (!Allowed("key", virtualKey.ToString(), out long ticket)) return false;
         if (!_desktop.SendKey(virtualKey, window, ticket)) return Discarded("key", virtualKey.ToString());
+        PresentBrowser(false);
         Note("key", virtualKey.ToString(), "by message");
         return true;
     }
@@ -517,6 +568,7 @@ public sealed partial class WorkspaceControl : IDisposable
             _evidence.Note("window", detail, "refused; the window is gone, not responding, or the owner took control");
             return false;
         }
+        PresentBrowser(false);
         Note("window", detail, "done");
         return true;
     }
@@ -635,6 +687,7 @@ public sealed partial class WorkspaceControl : IDisposable
             return 0;
         }
         int pid = _desktop.Launch(exe, arguments, _requiredLease.Value ?? 0, group, windowless: windowless);
+        if (pid != 0 && _desktop.Windows().Count > 0) PresentBrowser(false);
         if (!quiet)
             Note("open", Path.GetFileName(exe) + (arguments is null ? "" : " " + arguments),
                 pid == 0 ? "REFUSED" : "pid " + pid);
@@ -802,9 +855,13 @@ public sealed partial class WorkspaceControl : IDisposable
         // A browser the owner closed, or whose DevTools connection dropped, is not one to keep
         // navigating. Before this the dead object stayed in place and every later browse failed
         // against it forever, with nothing in the message to say the browser was simply gone.
-        if (_browser is { } dead && !dead.Alive)
+        // Only turning the separate profile on drops a live session. A separate browser is also the
+        // fallback while the owner's is not connected, so it is kept until it closes.
+        if (_browser is { } dead && (!dead.Alive
+            || dead.UsesOwnerSession && AppSettingsStore.Current.SeparateBrowserProfile))
         {
-            Note("browser", url, "the workspace browser had closed; starting a new one");
+            Note("browser", url, dead.Alive ? "browser profile setting changed; reconnecting"
+                : "the workspace browser had closed; starting a new one");
             dead.Abandon();
             _browser = null;
         }
@@ -817,6 +874,7 @@ public sealed partial class WorkspaceControl : IDisposable
             try { navigated = await existing.Go(url, input.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return RevokedBrowser(); }
             if (cancel.IsCancellationRequested || Ticket != ticket) return RevokedBrowser();
+            PresentBrowser(existing.UsesOwnerSession && existing.HasContent);
             string? failure = navigated ? null : WorkspaceBrowser.NavigationFailureReceipt(existing.LastProtocolError);
             Note("browser", url, navigated ? "navigated over " + existing.Transport : failure!);
             return (navigated, failure);
@@ -826,6 +884,7 @@ public sealed partial class WorkspaceControl : IDisposable
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return RevokedBrowser(); }
         if (cancel.IsCancellationRequested || Ticket != ticket) { started?.Abandon(); return RevokedBrowser(); }
         _browser = started;
+        PresentBrowser(started is { UsesOwnerSession: true, HasContent: true });
         bool confirmed = _browser?.InitialNavigationConfirmed == true;
         string? receipt = confirmed ? null : _browser is null
             ? WorkspaceBrowser.StartupFailureReceipt(_desktop.Name)
@@ -849,6 +908,9 @@ public sealed partial class WorkspaceControl : IDisposable
     /// </summary>
     public async Task Prewarm(CancellationToken cancel = default)
     {
+        // Connecting a live everyday session may need the browser's own permission. Ask only for
+        // an actual browse, never as a consequence of opening or waking an idle workspace.
+        if (!AppSettingsStore.Current.SeparateBrowserProfile) return;
         try { await _browserGate.WaitAsync(cancel).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
         try
@@ -900,6 +962,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool chosen;
         try { chosen = await browser.SelectTab(number, input.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
+        if (chosen) PresentBrowser(browser.UsesOwnerSession);
         Note("tab", number == 0 ? "follow the tab on screen" : "tab " + number,
             chosen ? "now on " + await Address(cancel).ConfigureAwait(false) : "no such tab");
         return chosen;
@@ -914,6 +977,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool opened;
         try { opened = await browser.NewTab(url, input.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
+        if (opened) PresentBrowser(browser.UsesOwnerSession);
         Note("browser", "new tab " + url, opened ? "opened, now at "
             + await Address(cancel).ConfigureAwait(false) : "the browser would not open a tab");
         return opened;
@@ -972,6 +1036,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool went;
         try { went = await _browser.Go(url, input.Token).ConfigureAwait(false) && !input.IsCancellationRequested; }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
+        PresentBrowser(_browser is { UsesOwnerSession: true, HasContent: true });
         Note("page", url, (went ? "loaded, now at " : "DID NOT LOAD, still at ")
             + await Address(cancel).ConfigureAwait(false));
         return went;
@@ -984,6 +1049,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool hit;
         try { hit = await _browser.Click(selector, input.Token).ConfigureAwait(false) && !input.IsCancellationRequested; }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
+        if (hit) PresentBrowser(_browser.UsesOwnerSession);
         Note("page", selector, (hit ? "clicked, now at " : "nothing matched, still at ")
             + await Address(cancel).ConfigureAwait(false));
         return hit;
@@ -996,6 +1062,7 @@ public sealed partial class WorkspaceControl : IDisposable
         bool typed;
         try { typed = await _browser.Type(selector, text, input.Token).ConfigureAwait(false) && !input.IsCancellationRequested; }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { return false; }
+        if (typed) PresentBrowser(_browser.UsesOwnerSession);
         Note("page", selector, (typed ? "typed, on " : "nothing matched, on ")
             + await Address(cancel).ConfigureAwait(false));
         return typed;

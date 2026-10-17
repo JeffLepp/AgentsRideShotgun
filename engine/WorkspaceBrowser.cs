@@ -11,16 +11,17 @@ using System.Text.Json.Nodes;
 namespace Deskweave.AgentWorkspaces;
 
 /// <summary>
-/// Layer 3: the workspace's own Chrome, driven through its DevTools protocol, so an agent reads the
+/// Layer 3: ARS's page in Chromium, driven through its DevTools protocol, so an agent reads the
 /// real page instead of a picture of it - exact text, links, forms, and everything below the fold.
 ///
-/// Two transports, in this order, chosen against collision rather than
+/// Separate profile mode has two transports, in this order, chosen against collision rather than
 /// attack. First an inherited pipe: nothing binds, nothing on the PC can reach it, and no program of
 /// theirs can take it. If the pipe does not survive our CreateProcessAsUser launch, a port the
 /// operating system chooses, on loopback, recorded in the workspace record. Never a fixed port.
 ///
-/// The browser is a separate process with its own profile inside the workspace folder. The owner's
-/// Chrome, their profile and their logins are never driven and never read.
+/// By default, connects to a browser-authorized live owner session and drives only ARS-created tabs.
+/// Separate browser profile opts into a process and profile inside the workspace folder. Neither
+/// mode copies the owner's profile, cookies or password database.
 /// </summary>
 public sealed partial class WorkspaceBrowser : IDisposable
 {
@@ -30,6 +31,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
     /// Chrome lands when it is installed for every user - the ordinary per-user install puts it under
     /// LOCALAPPDATA, and a PC with no Chrome at all would have no browser layer whatsoever.
     ///
+    /// The owner's default browser comes first when it is a Chromium, so a Brave user gets Brave.
     /// Edge is last on purpose and matters most: it ships with Windows, it is Chromium, and it speaks
     /// the same DevTools protocol. It is what makes the browser layer work on a PC where nothing has
     /// been installed. Resolved once - a browser does not move while ARS is running.
@@ -65,21 +67,15 @@ public sealed partial class WorkspaceBrowser : IDisposable
         string? chosen = Environment.GetEnvironmentVariable("DESKWEAVE_WORKSPACE_BROWSER");
         if (!string.IsNullOrEmpty(chosen) && File.Exists(chosen)) return chosen;
 
-        foreach (string key in new[] { "chrome.exe", "msedge.exe" })
-            if (AppPath(key) is { } registered && File.Exists(registered)) return registered;
+        // The owner's pick, Brave say. Edge as default is what Windows ships with, not a choice, so
+        // it does not jump ahead of a Chrome they installed.
+        if (DefaultChromium() is { } preferred && !IsEdge(preferred)) return preferred;
 
-        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string files = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        string files86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-        foreach (string guess in new[]
-        {
-            Path.Combine(files, "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(files86, "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(local, "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(files86, "Microsoft", "Edge", "Application", "msedge.exe"),
-            Path.Combine(files, "Microsoft", "Edge", "Application", "msedge.exe"),
-        })
-            if (File.Exists(guess)) return guess;
+        foreach (Chromium browser in Chromiums)
+            if (AppPath(browser.Exe) is { } registered && File.Exists(registered)) return registered;
+        foreach (Chromium browser in Chromiums)
+            foreach (string guess in InstallGuesses(browser))
+                if (File.Exists(guess)) return guess;
         return null;
     }
 
@@ -125,7 +121,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
 
     WorkspaceBrowser(AgentDesktop desktop, string transport, int pid,
         AnonymousPipeServerStream? toChrome = null, AnonymousPipeServerStream? fromChrome = null,
-        ClientWebSocket? socket = null)
+        ClientWebSocket? socket = null, bool ownerSession = false)
     {
         _desktop = desktop;
         Transport = transport;
@@ -133,13 +129,17 @@ public sealed partial class WorkspaceBrowser : IDisposable
         _toChrome = toChrome;
         _fromChrome = fromChrome;
         _socket = socket;
+        UsesOwnerSession = ownerSession;
         _ = Task.Run(fromChrome is not null ? ReadPipe : ReadSocket);
     }
 
-    /// <summary>"pipe", or "loopback port 51234". Written into the workspace record and the log.</summary>
+    /// <summary>"pipe", "loopback port 51234", or "your browser session". No endpoint token is logged.</summary>
     public string Transport { get; }
 
     public int ProcessId { get; }
+
+    /// <summary>The live owner browser stays on the owner's desktop; only ARS-created tabs are driven.</summary>
+    public bool UsesOwnerSession { get; }
 
     /// <summary>The newest DevTools protocol error, retained for an honest diagnostic receipt.</summary>
     public string? LastProtocolError { get; private set; }
@@ -185,6 +185,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
     {
         get
         {
+            if (UsesOwnerSession) return 0;
             // The class alone also matches Electron apps (VS Code, Slack) in the same workspace.
             foreach (AgentWindow window in _desktop.Windows())
             {
@@ -205,6 +206,11 @@ public sealed partial class WorkspaceBrowser : IDisposable
         bool allowPort = true, CancellationToken cancel = default, long lease = 0)
     {
         _startFailures.TryRemove(desktop.Name, out _);
+        // A browser the owner has not connected yet, or a connection they declined, still browses:
+        // in ARS's own profile, as before live sessions existed, without their sign-ins.
+        if (!AppSettingsStore.Current.SeparateBrowserProfile
+            && await ConnectOwner(desktop, url, cancel).ConfigureAwait(false) is { } owner) return owner;
+        cancel.ThrowIfCancellationRequested();
         if (!File.Exists(ChromePath))
         {
             Record(desktop.Name, "no supported Chromium browser is installed");
@@ -216,6 +222,11 @@ public sealed partial class WorkspaceBrowser : IDisposable
             return null;
         }
         string profile = Path.Combine(desktop.Folder, "chrome-profile");
+        if (!DisableWorkspacePasswordSaving(profile))
+        {
+            Record(desktop.Name, "the separate browser profile could not disable password saving");
+            return null;
+        }
         // The browser now starts with ordinary user permissions, so its own renderer sandbox
         // stays enabled, as it does on the owner's desktop. Keep a separate browser profile.
         // The crash-restore bubble is what a browser shows after being killed, which is exactly how
@@ -257,7 +268,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
     {
         try
         {
-            await browser.CloseLeftovers(cancel).ConfigureAwait(false);
+            if (!browser.UsesOwnerSession) await browser.CloseLeftovers(cancel).ConfigureAwait(false);
             browser.InitialNavigationConfirmed = await browser.Go(url, cancel).ConfigureAwait(false);
             // A warm-up start is for later, not for now. Leaving it in front put Chrome over the
             // window the agent had just opened, so the next look photographed an empty browser and
@@ -439,6 +450,31 @@ public sealed partial class WorkspaceBrowser : IDisposable
     // "--" ends Chrome's switches, so a url such as "--remote-debugging-port=9222" stays a url.
     static string Quote(string url) => "-- \"" + url.Replace("\"", string.Empty) + "\"";
 
+    // Applies only to ARS's opt-in profile. The owner's browser settings are never modified.
+    // Chromium defines credentials_enable_service as the switch controlling credential saving:
+    // components/password_manager/core/common/password_manager_pref_names.h.
+    static bool DisableWorkspacePasswordSaving(string profile)
+    {
+        try
+        {
+            string folder = Path.Combine(profile, "Default");
+            Directory.CreateDirectory(folder);
+            string path = Path.Combine(folder, "Preferences");
+            JsonObject preferences = File.Exists(path)
+                ? JsonNode.Parse(File.ReadAllText(path))?.AsObject() ?? new JsonObject()
+                : new JsonObject();
+            preferences["credentials_enable_service"] = false;
+            string temporary = path + ".ars-tmp";
+            File.WriteAllText(temporary, preferences.ToJsonString());
+            File.Move(temporary, path, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Finds the page and attaches flat, so both transports look identical above this line: one
     /// browser connection, a session id on every page message.
@@ -464,11 +500,21 @@ public sealed partial class WorkspaceBrowser : IDisposable
         return false;
     }
 
-    /// <summary>Sends the browser to a page and waits for it to finish loading.</summary>
+    /// <summary>Waits for a committed, usable document; background requests may continue loading.</summary>
     public async Task<bool> Go(string url, CancellationToken cancel = default)
     {
         LastProtocolError = null;
-        await Follow(cancel).ConfigureAwait(false);
+        using var patience = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        patience.CancelAfter(NavigationBudget);
+        CancellationToken bounded = patience.Token;
+        try
+        {
+        if (!await Follow(bounded).ConfigureAwait(false))
+        {
+            bounded.ThrowIfCancellationRequested();
+            LastProtocolError ??= "The ARS browser tab is no longer available.";
+            return false;
+        }
         // A failed or cancelled navigation can still put partial page content on screen.
         if (!Blank(url))
         {
@@ -480,8 +526,9 @@ public sealed partial class WorkspaceBrowser : IDisposable
             _desktop.Fill(Window);
             _desktop.Arrange(Window, WindowArrangement.Front);
         }
-        JsonNode? sent = await Call("Page.navigate", new JsonObject { ["url"] = url }, cancel, _session)
+        JsonNode? sent = await Call("Page.navigate", new JsonObject { ["url"] = url }, bounded, _session)
             .ConfigureAwait(false);
+        bounded.ThrowIfCancellationRequested();
         if (sent is null) return false;
         if (sent["errorText"]?.GetValue<string>() is { Length: > 0 } rejected)
         {
@@ -493,18 +540,35 @@ public sealed partial class WorkspaceBrowser : IDisposable
             LastProtocolError = "The navigation became a download.";
             return false;
         }
-        for (int wait = 0; wait < 40; wait++)
+        string? loader = sent["loaderId"]?.GetValue<string>();
+        while (true)
         {
-            await Task.Delay(250, cancel).ConfigureAwait(false);
-            if (await Evaluate("document.readyState", cancel).ConfigureAwait(false) == "complete")
+            await Task.Delay(100, bounded).ConfigureAwait(false);
+            // An old document can still be complete before navigation commits. Confirm the
+            // navigation's loader before reading readiness; redirects keep this loader ID.
+            if (loader is { Length: > 0 })
+            {
+                JsonNode? tree = await Call("Page.getFrameTree", null, bounded, _session).ConfigureAwait(false);
+                bounded.ThrowIfCancellationRequested();
+                if (tree?["frameTree"]?["frame"]?["loaderId"]?.GetValue<string>() != loader) continue;
+            }
+            string ready = await On(_session, "document.readyState", bounded).ConfigureAwait(false);
+            bounded.ThrowIfCancellationRequested();
+            if (ready is "interactive" or "complete")
             {
                 LastProtocolError = null;
                 return true;
             }
         }
-        LastProtocolError ??= "The page did not finish loading within the wait budget.";
-        return false;
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            LastProtocolError = "The navigation did not become usable within 12 seconds.";
+            return false;
+        }
     }
+
+    internal static TimeSpan NavigationBudget => TimeSpan.FromSeconds(12);
 
     /// <summary>
     /// The page as an agent should see it: its text, and the things on it that can be acted on.
@@ -534,6 +598,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
             const tag = el.tagName.toLowerCase();
             if (el.id && one('#' + CSS.escape(el.id))) return '#' + CSS.escape(el.id);
             for (const name of ['name', 'href', 'aria-label', 'placeholder', 'type', 'value', 'title']) {
+              if (name === 'value' && el.matches('input[type=password]')) continue;
               const v = el.getAttribute(name);
               if (v && v.length <= 100 && one(tag + '[' + name + '=' + quote(v) + ']')) return tag + '[' + name + '=' + quote(v) + ']';
             }
@@ -561,7 +626,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
             const box = el.getBoundingClientRect();
             if (box.width === 0 || box.height === 0) continue;
             if (seen.length >= 120) { skipped++; continue; }
-            const what = (el.innerText || el.value || el.placeholder || el.name ||
+            const what = (el.innerText || (el.matches('input[type=password]') ? '' : el.value) || el.placeholder || el.name ||
                           el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
             seen.push(pick(el) + '  "' + what + '"' + (el.href ? ' -> ' + el.href.slice(0, 150) : ''));
           }
@@ -646,6 +711,9 @@ public sealed partial class WorkspaceBrowser : IDisposable
         string session = "")
     {
         if (_disposed || cancel.IsCancellationRequested) return null;
+        using var patience = CancellationTokenSource.CreateLinkedTokenSource(cancel, _stopping.Token);
+        patience.CancelAfter(TimeSpan.FromSeconds(30));
+        CancellationToken bounded = patience.Token;
         int id;
         var done = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_gate) { id = _nextId++; _waiting[id] = done; }
@@ -657,7 +725,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
         try
         {
             byte[] payload = Encoding.UTF8.GetBytes(message.ToJsonString());
-            await _send.WaitAsync(cancel).ConfigureAwait(false);
+            await _send.WaitAsync(bounded).ConfigureAwait(false);
             try
             {
                 if (_toChrome is not null)
@@ -665,18 +733,16 @@ public sealed partial class WorkspaceBrowser : IDisposable
                     // Serialize the complete NUL-delimited frame against concurrent page observations.
                     byte[] framed = new byte[payload.Length + 1];
                     payload.CopyTo(framed, 0);
-                    await _toChrome.WriteAsync(framed, cancel).ConfigureAwait(false);
-                    await _toChrome.FlushAsync(cancel).ConfigureAwait(false);
+                    await _toChrome.WriteAsync(framed, bounded).ConfigureAwait(false);
+                    await _toChrome.FlushAsync(bounded).ConfigureAwait(false);
                 }
                 else if (_socket is not null)
-                    await _socket.SendAsync(payload, WebSocketMessageType.Text, true, cancel).ConfigureAwait(false);
+                    await _socket.SendAsync(payload, WebSocketMessageType.Text, true, bounded).ConfigureAwait(false);
                 else return null;
             }
             finally { _send.Release(); }
 
-            using var patience = CancellationTokenSource.CreateLinkedTokenSource(cancel, _stopping.Token);
-            patience.CancelAfter(TimeSpan.FromSeconds(30));
-            return await done.Task.WaitAsync(patience.Token).ConfigureAwait(false);
+            return await done.Task.WaitAsync(bounded).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or WebSocketException or ObjectDisposedException
             or OperationCanceledException or InvalidOperationException)
@@ -739,7 +805,8 @@ public sealed partial class WorkspaceBrowser : IDisposable
         JsonNode? message;
         try { message = JsonNode.Parse(text); }
         catch (JsonException) { return; }
-        // Events have no id. Nothing subscribes to them yet, so they are dropped rather than queued.
+        DiscoverOwnedPopup(message);
+        // Other events are not retained, especially metadata about existing owner tabs.
         if (message?["id"] is not JsonNode number) return;
         TaskCompletionSource<JsonNode?>? waiting;
         lock (_gate)
@@ -774,6 +841,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
+        CloseOwnedTargets();
         _disposed = true;
         _stopping.Cancel();
         Fail();

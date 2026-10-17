@@ -14,6 +14,7 @@ internal static class BrowserProbe
         string output, List<int> observedProcesses)
     {
         WorkspaceControl control = runtime.Plane!;
+        using var browserSettings = new BrowserFixtureSettings();
         AgentDesktop desktop = runtime.Computer!;
         string folder = desktop.Folder!;
         const string privateDetail = "file:///C:/Users/private-person/token-secret.html";

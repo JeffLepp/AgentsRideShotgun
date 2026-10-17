@@ -87,6 +87,10 @@ internal static class Program
             return ChromeRestoreProbe.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--browser-hardening" && Path.IsPathFullyQualified(args[1]))
             return BrowserHardeningProbe.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--browser-session" && Path.IsPathFullyQualified(args[1]))
+            return BrowserSessionProbe.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--browser-viewport-input" && Path.IsPathFullyQualified(args[1]))
+            return BrowserViewportInput.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--focus" && Path.IsPathFullyQualified(args[1]))
             return FocusProbe.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--page-read" && Path.IsPathFullyQualified(args[1]))

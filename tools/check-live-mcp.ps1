@@ -222,7 +222,7 @@ function Invoke-McpSession([string]$label, [string]$command, [string[]]$argument
             $fixture = [Uri]::new((Join-Path $PSScriptRoot 'fixtures\browser-check.html'))
             $browse = Request 'tools/call' @{ name = 'browse'; arguments = @{ url = $fixture.AbsoluteUri } }
             if ($browse.result.isError) { throw "$label browser fixture could not open: $($browse.result | ConvertTo-Json -Compress -Depth 5)" }
-            $clicked = Request 'tools/call' @{ name = 'page_click'; arguments = @{ selector = '#verify' } }
+            $clicked = Request 'tools/call' @{ name = 'page'; arguments = @{ action = 'click'; selector = '#verify' } }
             $page = Request 'tools/call' @{ name = 'page'; arguments = @{} }
             $browserVerified = -not $clicked.result.isError -and ($page.result.content | Where-Object type -eq 'text' | ForEach-Object text) -match 'Workspace click verified\.'
         }

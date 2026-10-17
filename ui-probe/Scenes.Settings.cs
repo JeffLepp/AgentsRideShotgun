@@ -199,6 +199,21 @@ static class SettingsScenes
 
             ShowSettled(view, "general");
             Bound corner = view.BoundControls.Single(b => b.Label == "Show the corner window");
+            Program.Check(!new AppSettings().SeparateBrowserProfile
+                && !System.Text.Json.JsonSerializer.Deserialize<AppSettings>("{\"Schema\":1}")!.SeparateBrowserProfile,
+                "Separate browser profiles default off on new and existing settings files");
+            Bound separateBrowser = view.BoundControls.Single(b => b.Label == "Separate browser profile");
+            separateBrowser.Choose(true);
+            SettleVisual(view);
+            Program.Check(AppSettingsStore.Current.SeparateBrowserProfile && !Visible(view, "Connect my browser"),
+                "Separate browser profiles can be enabled and hide owner-browser setup");
+            AppSettingsStore.Update(s => s with { SeparateBrowserProfile = false });
+            SettleVisual(view);
+            Program.Check(Equals(separateBrowser.Shown(), false) && Visible(view, "Connect my browser"),
+                "The browser profile toggle follows settings changes and shows connection setup while off");
+            using (var savedSettings = System.Text.Json.JsonDocument.Parse(File.ReadAllText(AppSettingsStore.File)))
+                Program.Check(!savedSettings.RootElement.GetProperty("SeparateBrowserProfile").GetBoolean(),
+                    "The default-off browser profile choice persists to disk");
             corner.Choose(false);
             SettleVisual(view);
             Program.Check(AppSettingsStore.Current.CornerShow != CornerShow.Off && Equals(corner.Shown(), true)

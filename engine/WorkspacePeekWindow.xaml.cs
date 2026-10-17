@@ -265,7 +265,12 @@ public partial class WorkspacePeekWindow : Window
     /// <summary>The whole-screen background: idle's only picture, and in-use's backdrop under the
     /// window patch. The host passes null to blank it - leaving a failed capture on screen is the
     /// caller's decision, made by not calling this at all.</summary>
-    internal void ShowFrame(BitmapSource? frame) => LiveScreen.Source = frame;
+    internal void ShowFrame(BitmapSource? frame)
+    {
+        LiveScreen.Source = frame;
+        UpdateChrome();
+        if (ShowingBrowserViewport) HidePopOut();
+    }
 
     /// <summary>
     /// The front window's own capture, laid over the last whole frame at its screen position - the
@@ -445,12 +450,16 @@ public partial class WorkspacePeekWindow : Window
         Pill.Margin = new Thickness(show ? 22 : 8, 8, 0, 0);
         // The taskbar comes with the hover chrome: a permanent strip at this size would eat the view.
         bool strip = show && _taskbar is not null && _runtime?.Invoke() is not null
+            && !ShowingBrowserViewport
             && AppSettingsStore.Current.AgentScreen == AgentScreenLook.Full && Sheet.Visibility != Visibility.Visible;
         if (_taskbar is not null) _taskbar.Visibility = strip ? Visibility.Visible : Visibility.Collapsed;
         double lift = strip ? _taskbar!.Height : 0;
         Chip.Margin = new Thickness(8, 0, 0, 9 + lift);
         Toast.Margin = new Thickness(0, 0, 0, 10 + lift);
     }
+
+    bool ShowingBrowserViewport => LiveScreen.Source is BitmapSource frame
+        && _runtime?.Invoke()?.Plane?.IsBrowserViewport(frame) == true;
 
     void SetDropOverlay(bool shown)
     {

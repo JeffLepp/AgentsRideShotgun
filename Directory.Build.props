@@ -3,7 +3,7 @@
     <Company>Jefferson Kline</Company>
     <Product>ARS</Product>
     <Copyright>Copyright © 2026 Jefferson Kline</Copyright>
-    <Version>0.3.1</Version>
+    <Version>0.3.2</Version>
     <!-- Derived, so Settings (which shows the assembly version) and the file properties never lag Version. -->
     <FileVersion>$([System.Text.RegularExpressions.Regex]::Match($(Version), '^\d+\.\d+\.\d+').Value).0</FileVersion>
     <AssemblyVersion>$(FileVersion)</AssemblyVersion>

@@ -17,6 +17,7 @@ internal static class ChromeRestoreProbe
 {
     internal static int Run(string output)
     {
+        using var browserSettings = new BrowserFixtureSettings();
         Directory.CreateDirectory(output);
         using var watchdog = new System.Threading.Timer(_ =>
         {
@@ -106,6 +107,7 @@ internal static class PageReadProbe
 {
     internal static int Run(string output)
     {
+        using var browserSettings = new BrowserFixtureSettings();
         Directory.CreateDirectory(output);
         string? failure = null;
         var lines = new List<string>();

@@ -134,6 +134,7 @@ internal static class ToolHangs
         {
             WorkspaceControl control = runtime.Plane!;
             Windows(check, control, runtime.Computer!.Name);
+            TypedTextPrivacy(check, control, runtime.Computer.Name);
             Cancellation(check, runtime.Access!);
             Orphans(check, control, fixture);
         }
@@ -163,6 +164,20 @@ internal static class ToolHangs
         why = renamed.GetAwaiter().GetResult();
         check(why.StartsWith("a window appeared", StringComparison.Ordinal) && took.Elapsed < TimeSpan.FromSeconds(5),
             "A window that takes the title after it opened ends the wait when it is renamed");
+    }
+
+    static void TypedTextPrivacy(Action<bool, string> check, WorkspaceControl control, string desktop)
+    {
+        const string secret = "ars-password-probe-do-not-persist";
+        control.Release();
+        check(!control.Type(secret).Landed, "Typing without a lease is refused before delivering password text");
+        using var field = new WindowThread(desktop, "Password evidence fixture", password: true);
+        check(control.AgentTakes() && control.Type(secret, field.Inner).Landed,
+            "A password field on the fixture desktop accepts typing with a valid agent lease");
+        control.Release();
+        string log = File.ReadAllText(control.Evidence.LogPath);
+        check(!log.Contains(secret, StringComparison.Ordinal) && log.Contains(secret.Length + " characters", StringComparison.Ordinal),
+            "Accepted and refused native typing records the character count without persisting password text");
     }
 
     /// <summary>The real wait tool behind a pipe server: its 30-second default, and the client's cancel.</summary>
@@ -252,13 +267,13 @@ internal static class ToolHangs
     /// pumping: the watch reads titles with GetWindowText, which for a window in this process is a
     /// message to this thread.
     /// </summary>
-    sealed class WindowThread : IDisposable
+    internal sealed class WindowThread : IDisposable
     {
         readonly System.Collections.Concurrent.BlockingCollection<Action> _work = new();
         readonly Thread _thread;
         internal nint Top, Inner;
 
-        internal WindowThread(string desktop, string title)
+        internal WindowThread(string desktop, string title, bool password = false)
         {
             using var made = new ManualResetEventSlim();
             _thread = new Thread(() =>
@@ -269,7 +284,8 @@ internal static class ToolHangs
                     // WS_OVERLAPPEDWINDOW | WS_VISIBLE, and a WS_CHILD | WS_VISIBLE button inside it. Button, not
                     // static or edit: those two do not raise a name change when their text is set.
                     Top = Native.CreateWindowExW(0, "BUTTON", title, 0x10CF0000, 40, 40, 400, 200, 0, 0, 0, 0);
-                    if (Top != 0) Inner = Native.CreateWindowExW(0, "BUTTON", "", 0x50000000, 10, 10, 300, 24, Top, 0, 0, 0);
+                    if (Top != 0) Inner = Native.CreateWindowExW(0, password ? "EDIT" : "BUTTON", "",
+                        password ? 0x50000020u : 0x50000000u, 10, 10, 300, 24, Top, 0, 0, 0);
                 }
                 made.Set();
                 while (!_work.IsCompleted)

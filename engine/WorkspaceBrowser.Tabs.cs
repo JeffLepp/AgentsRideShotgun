@@ -18,7 +18,7 @@ public sealed partial class WorkspaceBrowser
     /// </summary>
     string _pinned = string.Empty;
 
-    readonly Dictionary<string, string> _sessions = [];
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _sessions = new(StringComparer.Ordinal);
 
     /// <summary>The tab the page tools are attached to right now, for status and the log.</summary>
     public string SelectedTab { get; private set; } = string.Empty;
@@ -36,6 +36,7 @@ public sealed partial class WorkspaceBrowser
         get
         {
             if (_disposed || _broken) return false;
+            if (UsesOwnerSession) return _socket?.State == System.Net.WebSockets.WebSocketState.Open;
             try
             {
                 using var chrome = System.Diagnostics.Process.GetProcessById(ProcessId);
@@ -55,7 +56,7 @@ public sealed partial class WorkspaceBrowser
     public async Task<IReadOnlyList<BrowserTab>> Tabs(CancellationToken cancel = default)
     {
         IReadOnlyList<string> targets = await Pages(cancel).ConfigureAwait(false);
-        string visible = await Visible(targets, cancel).ConfigureAwait(false);
+        string visible = UsesOwnerSession ? SelectedTab : await Visible(targets, cancel).ConfigureAwait(false);
         var tabs = new List<BrowserTab>();
         for (int i = 0; i < targets.Count; i++)
         {
@@ -88,8 +89,8 @@ public sealed partial class WorkspaceBrowser
         if (session.Length == 0) return false;
         // Bring it to the front as well. A pinned tab the owner cannot see would put the page tools
         // and the screenshot back on different pages, which is the whole bug being fixed here.
-        await Call("Target.activateTarget", new JsonObject { ["targetId"] = chosen }, cancel)
-            .ConfigureAwait(false);
+        if (!UsesOwnerSession)
+            await Call("Target.activateTarget", new JsonObject { ["targetId"] = chosen }, cancel).ConfigureAwait(false);
         _pinned = chosen;
         SelectedTab = chosen;
         _session = session;
@@ -99,17 +100,20 @@ public sealed partial class WorkspaceBrowser
     /// <summary>Opens a new tab on a URL and works in it from then on.</summary>
     public async Task<bool> NewTab(string url, CancellationToken cancel = default)
     {
-        JsonNode? made = await Call("Target.createTarget",
-            new JsonObject { ["url"] = url.Length == 0 ? "about:blank" : url }, cancel).ConfigureAwait(false);
+        var options = new JsonObject { ["url"] = "about:blank" };
+        if (UsesOwnerSession) options["background"] = true;
+        JsonNode? made = await Call("Target.createTarget", options, cancel).ConfigureAwait(false);
         if (made?["targetId"]?.GetValue<string>() is not { Length: > 0 } target) return false;
+        if (UsesOwnerSession) _ownedTargets.TryAdd(target, 0);
         string session = await SessionFor(target, cancel).ConfigureAwait(false);
         if (session.Length == 0) return false;
-        await Call("Target.activateTarget", new JsonObject { ["targetId"] = target }, cancel).ConfigureAwait(false);
+        if (!UsesOwnerSession)
+            await Call("Target.activateTarget", new JsonObject { ["targetId"] = target }, cancel).ConfigureAwait(false);
         SelectedTab = target;
         _session = session;
-        if (_pinned.Length > 0) _pinned = target;
+        if (UsesOwnerSession || _pinned.Length > 0) _pinned = target;
         if (!Blank(url)) HasContent = true;
-        return true;
+        return await Go(url.Length == 0 ? "about:blank" : url, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -120,6 +124,17 @@ public sealed partial class WorkspaceBrowser
     internal async Task<bool> Follow(CancellationToken cancel)
     {
         if (_disposed) return false;
+        // Owner foreground tabs must never redirect ARS input or page reads to unrelated pages.
+        if (UsesOwnerSession && SelectedTab.Length > 0 && _ownedTargets.ContainsKey(SelectedTab))
+        {
+            IReadOnlyList<string> ours = await Pages(cancel).ConfigureAwait(false);
+            if (ours.Contains(SelectedTab))
+            {
+                string held = await SessionFor(SelectedTab, cancel).ConfigureAwait(false);
+                if (held.Length > 0) { _session = held; return true; }
+            }
+            _session = string.Empty;
+        }
         // The cheap case, and by far the common one: the tab we are already on is still the one on
         // screen. One round trip, not one per tab.
         if (_session.Length > 0 && _pinned.Length == 0 && SelectedTab.Length > 0
@@ -127,7 +142,7 @@ public sealed partial class WorkspaceBrowser
             return true;
 
         IReadOnlyList<string> targets = await Pages(cancel).ConfigureAwait(false);
-        if (targets.Count == 0) return _session.Length > 0;
+        if (targets.Count == 0) return !UsesOwnerSession && _session.Length > 0;
 
         if (_pinned.Length > 0)
         {
@@ -159,6 +174,7 @@ public sealed partial class WorkspaceBrowser
     /// </summary>
     internal async Task CloseLeftovers(CancellationToken cancel)
     {
+        if (UsesOwnerSession) return;
         await Follow(cancel).ConfigureAwait(false);
         if (SelectedTab.Length == 0) return;
         foreach (string target in await Pages(cancel).ConfigureAwait(false))
@@ -167,6 +183,7 @@ public sealed partial class WorkspaceBrowser
     }
 
     readonly List<string> _order = [];
+    readonly Lock _tabOrderGate = new();
 
     /// <summary>
     /// Page targets only; extensions and devtools pages are not tabs. Numbered in the order they
@@ -176,7 +193,7 @@ public sealed partial class WorkspaceBrowser
     async Task<IReadOnlyList<string>> Pages(CancellationToken cancel)
     {
         JsonNode? targets = await Call("Target.getTargets", null, cancel).ConfigureAwait(false);
-        if (targets?["targetInfos"] is null) return _order.Count > 0 ? [.. _order] : [];
+        if (targets?["targetInfos"] is null) { lock (_tabOrderGate) return [.. _order]; }
         var open = new List<string>();
         foreach (JsonNode? target in targets["targetInfos"]!.AsArray())
         {
@@ -184,14 +201,18 @@ public sealed partial class WorkspaceBrowser
             string url = target["url"]?.GetValue<string>() ?? string.Empty;
             if (url.StartsWith("devtools://", StringComparison.OrdinalIgnoreCase)
                 || url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase)) continue;
-            if (target["targetId"]?.GetValue<string>() is { Length: > 0 } id) open.Add(id);
+            if (target["targetId"]?.GetValue<string>() is { Length: > 0 } id
+                && (!UsesOwnerSession || _ownedTargets.ContainsKey(id))) open.Add(id);
         }
-        _order.RemoveAll(id => !open.Contains(id));
-        foreach (string id in open) if (!_order.Contains(id)) _order.Add(id);
         // Sessions for tabs that no longer exist are not worth keeping or reusing.
         foreach (string gone in _sessions.Keys.Where(id => !open.Contains(id)).ToList())
-            _sessions.Remove(gone);
-        return [.. _order];
+            _sessions.TryRemove(gone, out _);
+        lock (_tabOrderGate)
+        {
+            _order.RemoveAll(id => !open.Contains(id));
+            foreach (string id in open) if (!_order.Contains(id)) _order.Add(id);
+            return [.. _order];
+        }
     }
 
     /// <summary>Which page target is the one on screen, or empty when none says it is.</summary>
@@ -214,6 +235,7 @@ public sealed partial class WorkspaceBrowser
     /// <summary>An attached session for one tab, made once and reused while that tab lives.</summary>
     async Task<string> SessionFor(string target, CancellationToken cancel)
     {
+        if (UsesOwnerSession && !_ownedTargets.ContainsKey(target)) return string.Empty;
         if (_sessions.TryGetValue(target, out string? known)) return known;
         JsonNode? attached = await Call("Target.attachToTarget", new JsonObject
         {
@@ -221,6 +243,14 @@ public sealed partial class WorkspaceBrowser
             ["flatten"] = true,
         }, cancel).ConfigureAwait(false);
         string session = attached?["sessionId"]?.GetValue<string>() ?? string.Empty;
+        if (UsesOwnerSession && session.Length > 0)
+        {
+            // A mirrored ARS page must keep rendering and receiving input while the owner's
+            // other tab has real foreground focus. This applies only to our created target and
+            // never brings its native window forward or changes another tab's focus/visibility.
+            if (await Call("Emulation.setFocusEmulationEnabled", new JsonObject { ["enabled"] = true },
+                    cancel, session).ConfigureAwait(false) is null) return string.Empty;
+        }
         if (session.Length > 0) _sessions[target] = session;
         return session;
     }

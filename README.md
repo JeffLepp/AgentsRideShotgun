@@ -49,11 +49,17 @@
 ### First run
 
 1. Open ARS and press **Start** to connect your detected agents.
-2. Use Claude Code or Codex as usual. On first use, you may need to ask for ARS by name: **“Use ARS to test this.”**
+2. Use Claude Code or Codex as usual. ARS tools route GUI work into a workspace automatically. The optional ARS skill can also be discovered automatically for GUI testing. If a chat started before ARS connected, refresh its tools or start a new agent session.
 
 ### Windows compatibility
 
 The Windows package targets x64 Windows 10 build 19041 or later and x64 Windows 11. It bundles .NET 10. Browser work needs an installed Edge or Chrome, and desktop work needs a signed-in interactive Windows session.
+
+### Your browser and sign-ins
+
+**Settings → General → Separate browser profile** is off by default. ARS connects to your running Chrome or Edge and uses the same sign-ins in its own background tabs. It does not copy your passwords, cookies or browser profile. Click **Connect my browser**, enable remote debugging in the browser's Inspect page, and allow the browser's connection request. Live session access requires a browser version that supports this permission flow, such as Chrome 144 or later. The browser asks permission for each connection.
+
+Turn the setting on to keep a separate browser profile for each workspace. Changes apply when a browser next opens. Double-click a working card or recent workspace to open it fullscreen; **Esc** returns to the compact strip. **Ctrl+Enter** opens a focused card fullscreen too.
 
 </td>
 </tr>

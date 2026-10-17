@@ -182,7 +182,7 @@ internal static class WorkspaceComputer
     };
     internal static int KeyCode(string name) => name switch
     {
-        "ENTER" => 13, "TAB" => 9, "ESCAPE" => 27, "BACKSPACE" => 8, "DELETE" => 46,
+        "ENTER" => 13, "TAB" => 9, "ESCAPE" => 27, "BACKSPACE" => 8, "DELETE" => 46, "INSERT" => 45,
         "SPACE" => 32, "LEFT" => 37, "UP" => 38, "RIGHT" => 39, "DOWN" => 40,
         "HOME" => 36, "END" => 35, "PAGEUP" => 33, "PAGEDOWN" => 34,
         _ when name.Length == 1 && char.IsAsciiLetterOrDigit(name[0]) => name[0],
