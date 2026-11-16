@@ -14,7 +14,7 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
-        try { return RunMain(args); }
+        try { SuiteDesktopReceipt.Record(); return RunMain(args); }
         catch (Exception ex)
         {
             Console.Error.WriteLine(ex);

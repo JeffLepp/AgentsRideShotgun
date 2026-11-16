@@ -60,7 +60,7 @@ static class Program
     {
         if (args.Length == 1 && args[0] == "--owner-admission-child")
         { Thread.Sleep(TimeSpan.FromMinutes(1)); return 0; }
-        try { return RunMain(args); }
+        try { SuiteDesktopReceipt.Record(); return RunMain(args); }
         catch (Exception error)
         {
             Console.Error.WriteLine(error);

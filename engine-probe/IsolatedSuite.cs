@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using System.Runtime.InteropServices;
-using System.Text;
 using Deskweave.AgentWorkspaces;
 
 // The suite's simulated controller UI also stays on an ARS desktop. Never switches
@@ -16,37 +14,30 @@ internal static class IsolatedSuite
         using var hostStore = WorkspaceStore.UseRootForTests(Path.Combine(output, "isolation-host"));
         string name = "ARS-ProbeHost-" + Guid.NewGuid().ToString("N")[..10];
         Environment.SetEnvironmentVariable("ARS_PROBE_HOST_DESKTOP", name);
+        string receipt = Path.Combine(output, "suite-startup.json");
+        Environment.SetEnvironmentVariable("ARS_PROBE_DESKTOP_RECEIPT", receipt);
         using var desktop = AgentDesktop.Create(name);
         string arguments = (mode == "full" ? "" : mode + " ") + "\"" + output + "\"";
         int pid = desktop.Launch(executable, arguments);
         if (pid == 0) throw new IOException("Could not launch the suite on its private ARS desktop.");
         using var process = Process.GetProcessById(pid);
         _ = process.Handle; // Retain exact identity so ExitCode is readable after Windows releases the PID.
-        string? startupDesktop = StartupDesktop(process);
         bool exited = process.WaitForExit(420000);
         if (!exited)
         {
             process.Kill(entireProcessTree: true);
             process.WaitForExit(10000);
         }
+        string? startupDesktop = null;
+        if (File.Exists(receipt))
+        {
+            using var observed = JsonDocument.Parse(File.ReadAllText(receipt));
+            if (observed.RootElement.GetProperty("pid").GetInt32() == pid)
+                startupDesktop = observed.RootElement.GetProperty("desktop").GetString();
+        }
         File.WriteAllText(Path.Combine(output, "isolation.json"), JsonSerializer.Serialize(new
         { desktop = name, startupDesktop, pid, executable, mode, exited, exitCode = exited ? process.ExitCode : -1 }));
         return startupDesktop == name && exited ? process.ExitCode : 2;
     }
 
-    static string? StartupDesktop(Process process)
-    {
-        foreach (ProcessThread thread in process.Threads)
-        {
-            nint handle = GetThreadDesktop((uint)thread.Id);
-            var name = new StringBuilder(256);
-            if (handle != 0 && GetUserObjectInformation(handle, 2, name, name.Capacity * 2, out _))
-                return name.ToString();
-        }
-        return null;
-    }
-
-    [DllImport("user32.dll")] static extern nint GetThreadDesktop(uint thread);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    static extern bool GetUserObjectInformation(nint handle, int index, StringBuilder value, int size, out int needed);
 }

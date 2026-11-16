@@ -10,5 +10,8 @@
     <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
     <SelfContained>true</SelfContained>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="../app/ARS.csproj"/></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../app/ARS.csproj"/>
+    <Compile Include="../engine-probe/SuiteDesktopReceipt.cs" Link="SuiteDesktopReceipt.cs" />
+  </ItemGroup>
 </Project>
