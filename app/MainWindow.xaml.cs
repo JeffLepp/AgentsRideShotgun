@@ -234,6 +234,26 @@ public partial class MainWindow : Window, IDisposable
         if (_mode is "stack" or "cardsettings") ShowCardSettings(); else ShowSettings();
     }
 
+    internal void OpenStorage()
+    {
+        // Explicit owner command, showing the hub without taking keyboard focus.
+        ShowActivated = false;
+        if (!IsLoaded)
+        {
+            // Loaded restores the saved workspace layout. Navigate after that
+            // restoration so a tray-only controller's first open stays on Storage.
+            RoutedEventHandler ready = null!;
+            ready = (_, _) => { Loaded -= ready; OpenStorage(); };
+            Loaded += ready;
+            if (!IsVisible) Show();
+            return;
+        }
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        ShowSettings();
+        ((SettingsView)SettingsSlot.Content).Show("storage");
+        if (!IsVisible) Show();
+    }
+
     // --- settings inside the card: slides in over the stack, the window keeps its size ----------
 
     internal SettingsView? CardSettings => _cardSettings;

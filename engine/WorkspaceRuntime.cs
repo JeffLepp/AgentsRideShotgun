@@ -13,6 +13,7 @@ public sealed class WorkspaceRuntime : IDisposable
 {
     static readonly Dictionary<string, WorkspaceRuntime> Live = new(StringComparer.OrdinalIgnoreCase);
     static readonly Lock Lifetime = new();
+    static bool _storageBusy;
 
     /// <summary>
     /// How long a workspace nobody uses keeps its desktop and browser. 30 minutes
@@ -140,7 +141,10 @@ public sealed class WorkspaceRuntime : IDisposable
         WorkspaceRuntime runtime;
         lock (Lifetime)
         {
+            if (Maintenance) throw new InvalidOperationException("ARS is restarting. Try again shortly.");
             if (Of(workspace.Id) is { } already) return already;
+            if (_storageBusy) throw new InvalidOperationException("ARS is cleaning up storage. Try again shortly.");
+            using var storageAdmission = WorkspaceAccessStore.StorageAdmission();
             runtime = new WorkspaceRuntime(workspace);
             Live[workspace.Id] = runtime;
             _sleeper ??= new Timer(_ => QueueDoze(), null, Timeout.Infinite, Timeout.Infinite);
@@ -149,6 +153,32 @@ public sealed class WorkspaceRuntime : IDisposable
         }
         AttentionChanged?.Invoke();
         return runtime;
+    }
+
+    // Shared with Start: no workspace can enter between the idle check and shutdown.
+    internal static bool Maintenance { get; private set; }
+    internal static bool BeginMaintenance()
+    {
+        lock (Lifetime)
+        {
+            if (Maintenance || _storageBusy || Live.Count != 0) return false;
+            Maintenance = true;
+            return true;
+        }
+    }
+    internal static void CancelMaintenance() { lock (Lifetime) Maintenance = false; }
+
+    // Keep admission closed during deletion, without holding the live-registry lock
+    // across disk I/O: tools in other running workspaces must remain responsive.
+    internal static bool WithIdleStorage(string id, Func<bool> cleanup)
+    {
+        lock (Lifetime)
+        {
+            if (Maintenance || _storageBusy || (id.Length == 0 ? Live.Count != 0 : Live.ContainsKey(id))) return false;
+            _storageBusy = true;
+        }
+        try { using var admission = WorkspaceAccessStore.StorageAdmission(); return cleanup(); }
+        finally { lock (Lifetime) _storageBusy = false; }
     }
 
     /// <summary>
@@ -275,13 +305,30 @@ public sealed class WorkspaceRuntime : IDisposable
     static Timer? _sweeper;
 
     /// <summary>
-    /// Screenshots older than a week go from every workspace, running or asleep:
+    /// Screenshots older than a week expire only from stopped workspaces:
     /// now and hourly for as long as the app runs, on a pool thread. Walks the folders rather than
     /// reading workspace records, which can write a record back while one is being created.
     /// </summary>
     internal static void SweepEvidence() => _sweeper ??= new Timer(_ =>
     {
-        try { foreach (string folder in Directory.EnumerateDirectories(WorkspaceStore.Root)) WorkspaceEvidence.Expire(folder); }
+        try
+        {
+            if (!WorkspaceStorage.Default.Policy.Automatic) return;
+            foreach (string folder in Directory.EnumerateDirectories(WorkspaceStore.Root))
+            {
+                string name = Path.GetFileName(folder);
+                if (!name.StartsWith("ARS-", StringComparison.Ordinal) || !WorkspaceStorage.Safe(folder, WorkspaceStore.Root)) continue;
+                string id = name[4..];
+                WithIdleStorage(id, () =>
+                {
+                    if (WorkspaceStorage.IsRunning(id)) return false;
+                    string evidence = Path.Combine(folder, "evidence");
+                    if (WorkspaceStorage.Safe(evidence, folder) && WorkspaceStorage.Safe(Path.Combine(evidence, "frames"), folder)
+                        && WorkspaceStorage.Safe(Path.Combine(folder, "last-frame.png"), folder)) WorkspaceEvidence.Expire(folder);
+                    return true;
+                });
+            }
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }, null, TimeSpan.Zero, TimeSpan.FromHours(1));
 

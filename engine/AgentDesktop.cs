@@ -25,10 +25,10 @@ public sealed record AgentWindow(nint Handle, string Title, string ClassName, in
 /// <param name="Windows">Windows on the screen when the attempt was made.</param>
 /// <param name="Unresponsive">How many of them were skipped because their thread was not answering.</param>
 /// <param name="TimedOut">The desktop pump did not answer inside the caller's bound at all.</param>
-public sealed record DesktopFrame(BitmapSource? Image, int Windows, int Unresponsive, bool TimedOut)
+public sealed record DesktopFrame(BitmapSource? Image, int Windows, int Unresponsive, bool TimedOut, int Unavailable = 0)
 {
     /// <summary>Whether this frame shows everything that is on the screen.</summary>
-    public bool Complete => Image is not null && Unresponsive == 0 && !TimedOut;
+    public bool Complete => Image is not null && Unresponsive == 0 && !TimedOut && Unavailable == 0;
 }
 
 /// <summary>
@@ -473,10 +473,13 @@ public sealed partial class AgentDesktop : IDisposable
 
     DesktopFrame CaptureOnPump(int width, int height)
     {
+        // Surface a malformed opt-in even on first launch, when no PID can safely be selected.
+        _minecraftPreview.Matches(Folder ?? WorkspaceSandbox.FolderFor(Name), 0);
         IReadOnlyList<AgentWindow> windows = WindowsOnScreen();
         // A new workspace can be observed before its first app has painted. Its empty background
         // is still a valid screenshot; returning null here made first tool calls intermittently fail.
         int skipped = windows.Count(window => !window.Responding);
+        var unavailable = new HashSet<nint>();
 
         // A process gets 10,000 GDI handles. Anything thrown between taking a handle and giving it
         // back - running out of memory converting a 4K frame is the realistic one - used to leak a
@@ -538,7 +541,11 @@ public sealed partial class AgentDesktop : IDisposable
                     previous = Native.SelectObject(windowDc, bitmap);
                     // PW_RENDERFULLCONTENT: a secondary desktop is not DWM-composited, and without this
                     // flag hardware-accelerated windows print as black.
-                    if (!Native.PrintWindow(window.Handle, windowDc, Native.PwRenderFullContent)) return false;
+                    bool gamePreview = PaintMinecraft(window.Handle, windowDc, window.Width, window.Height, out bool available);
+                    if (!available) unavailable.Add(window.Handle);
+                    else unavailable.Remove(window.Handle); // A fallback repaint may recover the provider.
+                    if (!gamePreview
+                        && !Native.PrintWindow(window.Handle, windowDc, Native.PwRenderFullContent)) return false;
                     Native.BitBlt(canvasDc, shows.X, shows.Y, shows.Width, shows.Height,
                         windowDc, shows.X - window.X, shows.Y - window.Y, Native.SrcCopy);
                     keep = true;
@@ -609,7 +616,8 @@ public sealed partial class AgentDesktop : IDisposable
                 // A window died mid-capture. The next frame is 500ms away.
             }
 
-            return new DesktopFrame(image, windows.Count, skipped, false);
+            return new DesktopFrame(image, windows.Count, skipped, false,
+                Math.Max(unavailable.Count, _minecraftPreview.ConfigurationInvalid ? 1 : 0));
         }
         finally
         {
@@ -751,7 +759,8 @@ public sealed partial class AgentDesktop : IDisposable
             if (bitmap == 0) return null;
             previous = Native.SelectObject(windowDc, bitmap);
             BitmapSource? image = null;
-            if (Native.PrintWindow(window, windowDc, Native.PwRenderFullContent))
+            if (PaintMinecraft(window, windowDc, width, height, out _)
+                || Native.PrintWindow(window, windowDc, Native.PwRenderFullContent))
             {
                 // Out of the device context before it is read, exactly as the whole-screen capture
                 // does. The finally below then has nothing left to restore.
@@ -1410,9 +1419,8 @@ public sealed partial class AgentDesktop : IDisposable
     T? Run<T>(Func<T> job) => Run(job, ActionBound);
 
     /// <summary>
-    /// Puts one piece of work on the desktop-affine pump. With a bound, a caller that runs out of
-    /// patience gets null and carries on: the work stays queued and its answer is dropped, which is
-    /// the right trade for a picture and the wrong one for an action, so only capture passes a bound.
+    /// Puts one piece of work on the desktop-affine pump. Work whose bound expires while queued
+    /// is dropped before it starts. Work already running completes normally on the pump.
     /// </summary>
     T? Run<T>(Func<T> job, TimeSpan? bound)
     {
@@ -1420,10 +1428,13 @@ public sealed partial class AgentDesktop : IDisposable
         if (Thread.CurrentThread == _thread) return job();
 
         var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        long queued = Environment.TickCount64;
         try
         {
             _work.Add(() =>
             {
+                if (bound is { } limit && Environment.TickCount64 - queued >= limit.TotalMilliseconds)
+                { done.SetResult(default!); return; }
                 try { done.SetResult(job()); }
                 catch (Exception ex) { done.SetException(ex); }
             });

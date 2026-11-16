@@ -16,6 +16,7 @@ public partial class SettingsView : UserControl
     static readonly Dictionary<string, string> Titles = new(StringComparer.Ordinal)
     {
         ["general"] = "General", ["agents"] = "Agents", ["accounts"] = "Accounts", ["history"] = "History & privacy",
+        ["storage"] = "Storage",
     };
 
     // Four categories replaced ten: a caller that still passes one of the retired ids lands on

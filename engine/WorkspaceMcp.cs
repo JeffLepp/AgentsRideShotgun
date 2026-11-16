@@ -119,6 +119,7 @@ public sealed class WorkspaceMcp : IDisposable
 
     static readonly Definition[] ExternalTools =
     [
+        new("storage", "Read ARS storage usage by workspace and category, running state and retention policy. Does not create a workspace or delete files. The owner reviews cleanup in ARS Settings.", [], [], false),
         new("status", "Workspace state, who has control, and the user's answers to where=owner requests. Does not take control.", [], [], false),
         new("acquire", "Holds this workspace now. Other tools take control by themselves, so this is rarely needed. "
             + "Waits while the user or another agent has it.", [], [], false),
@@ -229,6 +230,7 @@ public sealed class WorkspaceMcp : IDisposable
         cancel.ThrowIfCancellationRequested();
         Definition? tool = ExternalTools.FirstOrDefault(t => t.Name == name);
         if (tool is null) return Fail("no such tool: " + name);
+        if (name == "storage") return Say(JsonSerializer.Serialize(await Task.Run(() => WorkspaceStorage.Default.Report(), cancel).ConfigureAwait(false), WorkspaceStorage.Json));
         if (name == "status") return Say(JsonSerializer.Serialize(_external.Status(_client), BatchJson));
         if (name == "acquire") return await _external.AcquireWaiting(_client, cancel).ConfigureAwait(false) is { } why
             ? Fail(why) : Say("Control acquired. Apps and browsers open inside this workspace.");

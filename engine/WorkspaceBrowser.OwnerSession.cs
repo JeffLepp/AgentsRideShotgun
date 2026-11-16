@@ -125,7 +125,13 @@ public sealed partial class WorkspaceBrowser
 
     void DiscoverOwnedPopup(JsonNode? message)
     {
-        if (!UsesOwnerSession || message?["method"]?.GetValue<string>() != "Target.targetCreated") return;
+        if (!UsesOwnerSession) return;
+        if (message?["method"]?.GetValue<string>() == "Target.targetDestroyed")
+        {
+            if (message["params"]?["targetId"]?.GetValue<string>() is { } destroyed) _ownedTargets.TryRemove(destroyed, out _);
+            return;
+        }
+        if (message?["method"]?.GetValue<string>() != "Target.targetCreated") return;
         JsonNode? target = message["params"]?["targetInfo"];
         if (target?["type"]?.GetValue<string>() == "page"
             && target["openerId"]?.GetValue<string>() is { } opener && _ownedTargets.ContainsKey(opener)

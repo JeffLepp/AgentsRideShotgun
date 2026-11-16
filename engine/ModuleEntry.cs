@@ -79,7 +79,9 @@ public static class ModuleEntry
     /// App start: the screenshot sweep, the corner window, the one router every connected agent
     /// uses, and the keep-up loop for agents installed later. None of them starts a workspace.
     /// </summary>
-    public static void Initialize()
+    public static void Initialize() => Initialize(manageConnections: true);
+
+    internal static void Initialize(bool manageConnections)
     {
         // Before anything can start a program: a previous run that was killed mid-launch may have
         // left the owner's applications drawing in software.
@@ -90,7 +92,7 @@ public static class ModuleEntry
         // One named pipe for every connected agent. It starts nothing until an agent uses a tool.
         WorkspaceRouter.Start();
         // Consent was given once; an agent installed since then connects on its own.
-        WorkspaceConnections.KeepUp();
+        if (manageConnections) WorkspaceConnections.KeepUp();
     }
 
     /// <summary>App exit. Stops every workspace still running.</summary>
@@ -112,6 +114,9 @@ public static class ModuleEntry
     /// here deletes data. Answers with one line per profile that still has an ARS entry.</summary>
     public static IReadOnlyList<string> Uninstall()
     {
+        // Settings may already have removed all ARS data before invoking the uninstaller.
+        // Do not recreate that data root just to leave a quit marker.
+        if (Directory.Exists(WorkspaceAccessStore.Root)) WorkspaceAccessStore.MarkQuit();
         WorkspaceConnections.StopKeepingUp();
         WorkspaceRouter.Stop();
         WorkspacePeekHost.Stop();

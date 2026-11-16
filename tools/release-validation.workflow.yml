@@ -1,0 +1,72 @@
+name: Release installation validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Draft release tag containing signed ARS-Setup.exe; blank builds an unsigned test package'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install-upgrade-uninstall:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Prepare candidate on the disposable runner
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = Join-Path $env:RUNNER_TEMP 'ars-installers'
+          New-Item -ItemType Directory -Path $installers | Out-Null
+          $installer = Join-Path $installers 'ARS-Setup.exe'
+          if ($env:RELEASE_TAG) {
+            if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Use a stable ARS release tag.' }
+            gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern ARS-Setup.exe --dir $installers
+            if ($LASTEXITCODE) { throw 'Could not download the draft release installer.' }
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '^CN=Jefferson Kline(?:,|$)') {
+              throw 'The release installer must have a valid publisher signature.'
+            }
+          } else {
+            $tools = Join-Path $env:RUNNER_TEMP 'ars-tools'
+            dotnet tool install vpk --version 1.2.0 --tool-path $tools
+            if ($LASTEXITCODE) { throw 'Could not install the matching packaging tool.' }
+            $payload = Join-Path $env:RUNNER_TEMP 'ars-payload'
+            dotnet publish app/ARS.csproj -c Release -r win-x64 --self-contained true -o $payload -p:UseSharedCompilation=false -m:1 -nr:false --nologo -warnaserror
+            if ($LASTEXITCODE) { throw 'Candidate publish failed.' }
+            & ./tools/build-installer.ps1 -SkipPublish -PayloadDirectory $payload -VpkPath (Join-Path $tools 'vpk.exe')
+            if (-not $?) { throw 'Candidate packaging failed.' }
+            $version = [string]([xml](Get-Content -Raw Directory.Build.props)).Project.PropertyGroup[0].Version
+            Copy-Item -LiteralPath "artifacts/installer/$version/ARS-Setup.exe" -Destination $installer
+            Write-Output 'Unsigned source validation only; this run cannot authorize a public release.'
+          }
+          $previous = Join-Path $installers 'ARS-Previous-Setup.exe'
+          Invoke-WebRequest 'https://github.com/JeffLepp/AgentsRideShotgun/releases/download/v0.3.2/ARS-Setup.exe' -OutFile $previous
+          if ((Get-FileHash -LiteralPath $previous).Hash -cne '32317B0B84ECD5D328EEF14A1F58C0CB694F865EBA684B807A668416AC040F0E') {
+            throw 'The previous published installer changed.'
+          }
+          "ARS_TEST_INSTALLER=$installer" >> $env:GITHUB_ENV
+      - name: Install, upgrade from 0.3.2, exercise and uninstall
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/sandbox/clean-install-inside.ps1 -VirtualMachine -InstallerPath "$env:ARS_TEST_INSTALLER" -OutputDirectory "$env:GITHUB_WORKSPACE/artifacts/ci-install"
+          if ($LASTEXITCODE) { throw 'Disposable-machine acceptance failed; inspect the retained report.' }
+      - name: Retain installation receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-installation-receipts
+          path: artifacts/ci-install/
+          if-no-files-found: warn
+          retention-days: 30

@@ -108,6 +108,14 @@ internal static class TrayChecks
             nativeCalls.Add($"{operation}:{ok} hwnd={data.Window} size={data.Size}");
             return ok;
         }
+        // Explorer's notification area belongs to the owner desktop. Isolated suite runs
+        // exercise the fake shell above and record the native integration gate as skipped.
+        if (Environment.GetEnvironmentVariable("ARS_PROBE_HOST_DESKTOP") is not null)
+        {
+            System.IO.File.AppendAllText(System.IO.Path.Combine(Program.Output, "skipped.log"),
+                "Native owner-desktop tray integration was not run in the isolated ARS suite.\n");
+            return;
+        }
         using (var native = new TrayIcon(icon, new ContextMenuStrip(), identity, NativeNotify))
         {
             if (!await WaitForIcon(identity)) throw new InvalidOperationException("Native tray: " + string.Join(", ", nativeCalls));

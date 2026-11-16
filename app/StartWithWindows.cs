@@ -15,15 +15,17 @@ internal static class StartWithWindows
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     internal const string Name = "ARS";
     internal const string Background = "--background";
+    internal static Func<RegistryKey?>? OpenRunKeyForTests;
 
     /// <summary>False when Windows refused the change, so Settings can say so instead of showing a
     /// switch that is on while nothing starts.</summary>
     internal static bool Sync(AppSettings settings)
     {
+        if (App.HostedByHiveMind) return false;
         if (!settings.FirstRunDone || Environment.ProcessPath is not { } exe) return true;
         try
         {
-            using RegistryKey? run = Registry.CurrentUser.CreateSubKey(RunKey);
+            using RegistryKey? run = OpenRunKeyForTests is { } open ? open() : Registry.CurrentUser.CreateSubKey(RunKey);
             if (run is null) return false;
             string command = "\"" + exe + "\" " + Background;
             // The value from before the rename would start a second copy at sign-in.

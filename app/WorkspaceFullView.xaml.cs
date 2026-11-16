@@ -144,6 +144,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         MemoryText.Visibility = runtime is not null && HeaderError.Visibility != Visibility.Visible
             ? Visibility.Visible : Visibility.Collapsed;
         if (runtime is not null) MemoryText.Text = "Memory " + WorkspaceRuntime.MemoryLoad + "% in use";
+        BrowserStatusText.Text = runtime?.Plane?.BrowserStatus ?? "";
+        BrowserStatusText.Visibility = BrowserStatusText.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateDriverSubscription(runtime);
         UpdateControlToast(runtime);
         SizeScreen();

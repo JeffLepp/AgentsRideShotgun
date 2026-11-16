@@ -17,6 +17,21 @@ static class LifecycleChecks
 {
     internal static async Task Run()
     {
+        await OwnerIntegrationChecks.Run();
+        Program.Check(string.Equals(ControllerProcess.ImagePath(Environment.ProcessId), Environment.ProcessPath,
+                StringComparison.OrdinalIgnoreCase) && ControllerProcess.ImagePath(int.MaxValue) is null,
+            "Limited-rights process inspection identifies this executable and tolerates a departed process");
+        string feed = Path.Combine(Program.Output, "local-feed");
+        Directory.CreateDirectory(feed);
+        Program.Check(Updates.LocalSource(feed) == Path.GetFullPath(feed), "Lifecycle updates accept an explicit existing local feed folder");
+        foreach (string invalid in new[] { "relative-feed", "https://example.invalid/feed", @"\\server\share\feed",
+            "file:///C:/feed", @"\??\UNC\server\share\feed", "//server/share/feed", @"/\server\share\feed" })
+        {
+            bool refused = false;
+            try { _ = Updates.LocalSource(invalid); }
+            catch (ArgumentException) { refused = true; }
+            Program.Check(refused, "Lifecycle update source refuses " + invalid);
+        }
         // Quitting closes the hub before setup; setup's Closed handler must not show it again.
         var hub = new Window();
         hub.Close();
@@ -73,6 +88,36 @@ static class LifecycleChecks
         using (var running = new Mutex(false, name)) besideRunning = Deskweave.Program.ApplyUpdateOnStart([], name);
         Program.Check(ownerStart && !bridgeStart && !besideRunning,
             "Updates apply on the owner's start only, not on a background start or beside a running ARS");
+
+        // No windows or real restart: exercise the production request/defer/retry transaction.
+        int scheduled = 0, shutdown = 0;
+        Updates.ScheduleForTests = operation => { if (operation == "restart") scheduled++; };
+        Updates.Start((_, _) => { }, () => shutdown++);
+        try
+        {
+            StoredWorkspace busy = WorkspaceStore.Create("Restart safety fixture");
+            WorkspaceAccessStore.Write(busy.Id, new WorkspaceAccessPolicy(false, false) { PrewarmBrowser = false });
+            using (var runtime = WorkspaceRuntime.Start(busy))
+            {
+                string deferred = await Updates.Request("restart");
+                Program.Check(deferred.StartsWith("Deferred:", StringComparison.Ordinal) && scheduled == 0
+                    && !WorkspaceRuntime.Maintenance && ReferenceEquals(WorkspaceRuntime.Of(busy.Id), runtime),
+                    "A restart defers even for an idle running workspace and never closes its apps");
+                Program.Check(await Updates.Request("status") == deferred, "Controller status explains the deferred restart");
+                WorkspaceRouter.Start();
+                Program.Check(await Task.Run(() => ControllerLifecycle.Command("status", null)) == 0,
+                    "The CLI lifecycle transport authenticates to the fixture router and reads deferred status");
+            }
+            Updates.TryRestart();
+            Program.Check(scheduled == 1 && WorkspaceRuntime.Maintenance && Updates.Status.StartsWith("Accepted:", StringComparison.Ordinal),
+                "Stopping the last workspace lets the queued restart pass the atomic gate exactly once");
+            Updates.TryRestart();
+            await Task.Delay(650);
+            Program.Check(scheduled == 1 && shutdown == 1 && !File.Exists(WorkspaceAccessStore.QuitMark),
+                "Restart acknowledges before graceful shutdown and leaves no owner-quit mark");
+            WorkspaceStore.Delete(busy.Id);
+        }
+        finally { Updates.Stop(); Updates.ScheduleForTests = null; WorkspaceRuntime.CancelMaintenance(); WorkspaceRouter.Stop(); }
 
         // Settings shows the assembly version; it and the file version follow Version.
         Assembly app = typeof(App).Assembly;

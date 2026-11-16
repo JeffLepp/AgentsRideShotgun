@@ -1,5 +1,7 @@
 <h1 align="center">AgentsRideShotgun (ARS)</h1>
 
+ARS gives Claude Code and Codex their own background Windows desktop, so they can test apps and browse while you keep working.
+
 <table>
 <tr>
 <th width="50%">Without ARS</th>
@@ -15,6 +17,16 @@
 
 ---
 
+The current source candidate, ARS 0.3.10, adds [Storage](engine/STORAGE.md): workspace and install usage,
+reviewed cleanup, safe retention, and authenticated CLI / MCP reports.
+It also supports queued, safe controller restarts and Velopack updates from
+the tray or CLI. Running workspaces defer them. See [lifecycle and update
+policy](engine/LIFECYCLE.md) for commands, bridge cleanup, and release recovery.
+
+Save work and quit ARS before upgrading with WinGet or running Setup. The
+in-app update queue waits for workspaces to stop; external installers have
+their own process shutdown behavior.
+
 <p align="center"><img src=".github/readme/app-tour.png" alt="ARS hub with callouts: search, dark and light theme, metrics, open and interact with the workspace, see what the agent is doing, monitor activity in workspaces, and review past sessions" width="55%"></p>
 
 <table>
@@ -27,10 +39,16 @@
 
    [Download **ARS-Setup.exe**](https://github.com/JeffLepp/AgentsRideShotgun/releases/latest/download/ARS-Setup.exe) and run it.
 
-2. **WinGet** (pending Microsoft review)
+2. **WinGet**
 
    ```powershell
-   winget install AgentsRideShotgun
+   winget install --id JeffLepp.AgentsRideShotgun --exact --source winget
+   ```
+
+   To update an existing installation:
+
+   ```powershell
+   winget upgrade --id JeffLepp.AgentsRideShotgun --exact --source winget
    ```
 
 3. **Build from source**
@@ -43,6 +61,12 @@
    dotnet build app/ARS.csproj -c Release
    ```
 
+   The built app is `app\bin\Release\net10.0-windows\win-x64\ARS.exe`. Launch it from the repository root:
+
+   ```powershell
+   .\app\bin\Release\net10.0-windows\win-x64\ARS.exe
+   ```
+
 </td>
 <td width="42%" valign="top">
 
@@ -53,17 +77,23 @@
 
 ### Windows compatibility
 
-The Windows package targets x64 Windows 10 build 19041 or later and x64 Windows 11. It bundles .NET 10. Browser work needs an installed Edge or Chrome, and desktop work needs a signed-in interactive Windows session.
+The Windows package targets x64 Windows 10 build 19041 or later and x64 Windows 11. It bundles .NET 10. Supported browsers are Chrome, Edge, Brave, and Vivaldi. Browser work needs one installed, and desktop work needs a signed-in interactive Windows session.
 
 ### Your browser and sign-ins
 
-**Settings → General → Separate browser profile** is off by default. ARS connects to your running Chrome or Edge and uses the same sign-ins in its own background tabs. It does not copy your passwords, cookies or browser profile. Click **Connect my browser**, enable remote debugging in the browser's Inspect page, and allow the browser's connection request. Live session access requires a browser version that supports this permission flow, such as Chrome 144 or later. The browser asks permission for each connection.
+**Settings → General → Separate browser profile** is off by default. ARS connects to your running Chrome, Edge, Brave, or Vivaldi and uses the same sign-ins in its own background tabs. It does not copy your passwords, cookies or browser profile. Click **Connect my browser**, enable remote debugging in the browser's Inspect page, and allow the browser's connection request. Live session access requires a browser version that supports this permission flow, such as Chrome 144 or later. The browser asks permission for each connection.
 
-Turn the setting on to keep a separate browser profile for each workspace. Changes apply when a browser next opens. Double-click a working card or recent workspace to open it fullscreen; **Esc** returns to the compact strip. **Ctrl+Enter** opens a focused card fullscreen too.
+Turn the setting on to keep a separate browser profile for each workspace. Changes apply when a browser next opens. Agents can use your signed-in sites as you; page content and screenshots may reach your AI provider. ARS is not a sandbox. See [Security](SECURITY.md).
+
+**Browser sign-ins:** Shared sign-ins need your browser open and remote debugging allowed through **Connect my browser**. Otherwise, ARS uses a separate profile and you must sign in there.
+
+Double-click a working card or recent workspace to open it fullscreen; **Esc** returns to the compact strip. **Ctrl+Enter** opens a focused card fullscreen too.
 
 </td>
 </tr>
 </table>
+
+Maintainers: see [Publishing releases and WinGet updates](tools/RELEASING.md).
 
 <p align="center">Anyone can use, modify, and share ARS under the <a href="LICENSE">MIT License</a>.</p>
 

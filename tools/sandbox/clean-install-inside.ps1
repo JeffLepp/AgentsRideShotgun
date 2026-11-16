@@ -87,6 +87,7 @@ try {
     # --- install ---------------------------------------------------------------------------
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $setup = Start-Process -FilePath $initialInstaller -ArgumentList ('--silent --log "' + (Join-Path $results 'setup.log') + '"') -PassThru -WindowStyle Hidden
+    $null = $setup.Handle
     Check ($setup.WaitForExit(300000)) 'Setup finishes within five minutes'
     $report.setupExitCode = $setup.ExitCode
     Check ($setup.ExitCode -eq 0) 'Setup returns success'
@@ -130,9 +131,16 @@ try {
         $beforeUpgrade = Ask 'initialize' @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'install-upgrade-check'; version = '1' } } 30
         Check ($beforeUpgrade.result.serverInfo.name -eq 'ars') 'An agent bridge is connected before the upgrade'
         $report.upgradeBridge = [ordered]@{ processId = $session.Id; executable = $bridge; connectedBefore = $true }
+        $busy = Ask 'tools/call' @{ name = 'run'; arguments = @{ command = 'ping -n 121 127.0.0.1'; seconds = 1; timeout_seconds = 150 } } 30
+        Check (-not $busy.result.isError) 'The previous release has a workspace command running during the external upgrade'
+        $oldControllers = @(Get-Process ARS -ErrorAction SilentlyContinue)
+        $report.externalUpgrade = [ordered]@{ liveWorkspaceCommand = $true; controllersBefore = @($oldControllers | ForEach-Object Id) }
         $upgrade = Start-Process -FilePath $installer -ArgumentList ('--silent --log "' + (Join-Path $results 'upgrade.log') + '"') -PassThru -WindowStyle Hidden
+        $null = $upgrade.Handle
         Check ($upgrade.WaitForExit(300000) -and $upgrade.ExitCode -eq 0) 'The new Setup upgrades the previous installed release'
         Start-Sleep -Seconds 2
+        $report.externalUpgrade.oldControllersExited = @($oldControllers | ForEach-Object { $_.HasExited })
+        $report.externalUpgrade.policy = 'External Setup may close running workspaces; save work and quit ARS before WinGet/Setup upgrades.'
         $report.upgradeBridge.exitedDuringUpgrade = $session.HasExited
         if ($session.HasExited) {
             $report.upgradeBridge.exitCode = $session.ExitCode
@@ -159,6 +167,17 @@ try {
 
     # --- an agent's bridge starts ARS in the background -------------------------------------
     $clock.Restart()
+    # Exercise the same immutable bridge path product-managed agent connections use.
+    $bridgeStart = New-Object Diagnostics.ProcessStartInfo $app, '--bridge-path'
+    $bridgeStart.UseShellExecute = $false; $bridgeStart.CreateNoWindow = $true
+    $bridgeStart.RedirectStandardOutput = $true; $bridgeStart.RedirectStandardError = $true
+    $bridgeQuery = [Diagnostics.Process]::Start($bridgeStart)
+    try {
+        Check ($bridgeQuery.WaitForExit(60000) -and $bridgeQuery.ExitCode -eq 0) 'The installed app returns its managed bridge path'
+        $bridge = $bridgeQuery.StandardOutput.ReadToEnd().Trim()
+    } finally { $bridgeQuery.Dispose() }
+    Check ((Test-Path -LiteralPath $bridge) -and $bridge.StartsWith((Join-Path $local 'ARS\bridge-hosts\'), [StringComparison]::OrdinalIgnoreCase)) 'Agent connections use an immutable bridge outside the replaceable installation'
+    $report.managedBridge = $bridge
     $session = StartBridge
     $hello = Ask 'initialize' @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'claude-code'; version = '1' } } 30
     $report.coldStartSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
@@ -224,10 +243,16 @@ public static class InstallerProviderFixture {
     }
 }
 '@ -ReferencedAssemblies 'System.Web.Extensions.dll' -OutputAssembly (Join-Path $fixtureBin 'claude.exe') -OutputType ConsoleApplication
+    $session.Dispose(); $session = StartBridge
+    $live = Ask 'initialize' @{ protocolVersion = '2025-06-18'; capabilities = @{}; clientInfo = @{ name = 'uninstall-live-bridge'; version = '1' } } 30
+    Check ($live.result.serverInfo.name -eq 'ars') 'An immutable bridge is connected when uninstall begins'
     $un = Start-Process -FilePath $update -ArgumentList 'uninstall', '--silent' -PassThru -WindowStyle Hidden
+    $null = $un.Handle
     Check ($un.WaitForExit(120000)) 'Uninstall finishes within two minutes'
     $report.uninstallExitCode = $un.ExitCode
     Check ($un.ExitCode -eq 0) 'Uninstall returns success'
+    Check ($session.WaitForExit(10000) -and $session.ExitCode -eq 0) 'Uninstall ends a connected immutable bridge without leaving an orphan'
+    $session.Dispose(); $session = $null
     Start-Sleep -Seconds 3
     Check (-not (Test-Path $app)) 'Uninstall removes the app'
     Check (-not (Test-Path $uninstallKey)) 'Uninstall removes the Apps & features entry'
@@ -246,6 +271,7 @@ public static class InstallerProviderFixture {
     # --- reinstall, then Settings > Uninstall ARS --------------------------------------------
     # The same steps the Settings row takes: quit, delete both data folders, run Update.exe.
     $setup = Start-Process -FilePath $installer -ArgumentList '--silent' -PassThru -WindowStyle Hidden
+    $null = $setup.Handle
     Check ($setup.WaitForExit(300000) -and $setup.ExitCode -eq 0) 'Reinstalling over kept data succeeds'
     $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30
     if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
@@ -256,6 +282,7 @@ public static class InstallerProviderFixture {
         if (Test-Path $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
     }
     $un = Start-Process -FilePath $update -ArgumentList 'uninstall', '--silent' -PassThru -WindowStyle Hidden
+    $null = $un.Handle
     Check ($un.WaitForExit(120000) -and $un.ExitCode -eq 0) 'Full uninstall returns success'
     Start-Sleep -Seconds 5
     $leftovers = @(

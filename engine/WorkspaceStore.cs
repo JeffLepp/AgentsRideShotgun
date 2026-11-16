@@ -416,7 +416,7 @@ public static class WorkspaceStore
         string root = new string(name.ToLowerInvariant().Where(char.IsAsciiLetterOrDigit).Take(16).ToArray());
         if (root.Length == 0) root = "workspace";
         string id = root;
-        for (int suffix = 2; Directory.Exists(FolderOf(id)); suffix++) id = root + suffix;
+        for (int suffix = 2; Directory.Exists(FolderOf(id)) || Directory.Exists(WorkspaceAccessStore.Folder(id)); suffix++) id = root + suffix;
         return id;
     }
 

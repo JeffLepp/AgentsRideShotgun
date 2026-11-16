@@ -16,8 +16,35 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        // These commands must precede Velopack auto-apply and WPF/singleton activation.
+        ProductContext.Configure(ProductContext.DefaultFolderName);
+        if (args.Contains("--hivemind") && !IsHiveMindHost(args)) return 2;
+        App.HostedByHiveMind = IsHiveMindHost(args);
+        if (App.HostedByHiveMind) App.StartInBackground = true;
+        if (args.Length == 1 && args[0] is "--storage" or "--storage-open")
+            return StorageController.Command(null, true, args[0] == "--storage-open").GetAwaiter().GetResult();
+        if (args.Length is 2 or 3 && args[0] == "--storage-clean")
+        {
+            if (args.Length == 3 && args[2] != "--dry-run") return 2;
+            return StorageController.Command(args[1], args.Length == 3).GetAwaiter().GetResult();
+        }
+        if (args.Length > 0 && args[0] is "--storage" or "--storage-clean" or "--storage-open") return 2;
+        if (args.Length == 1 && args[0] == "--bridge-path")
+        { Console.WriteLine(WorkspaceConnections.Bridge); return 0; }
+        if (args.Length is 1 or 3 && args[0] is "--restart" or "--update" or "--update-status")
+        {
+            if (args.Length == 3 && (args[0] != "--update" || args[1] != "--source" || !Path.IsPathFullyQualified(args[2]))) return 2;
+            return ControllerLifecycle.Command(args[0] == "--restart" ? "restart" : args[0] == "--update" ? "update" : "status",
+                args.Length == 3 ? args[2] : null).GetAwaiter().GetResult();
+        }
+        if (args.Length == 3 && args[0] == "--restart-after")
+        {
+            if (!ControllerLifecycle.WaitForPrevious(args[1], args[2])) return 1;
+            args = [StartWithWindows.Background];
+            App.StartInBackground = true;
+        }
         // Inlined in Main: vpk checks statically that Run() is reached from here.
-        try
+        if (!App.HostedByHiveMind) try
         {
             VelopackApp.Build()
                 .SetAutoApplyOnStartup(ApplyUpdateOnStart(args, App.InstanceName))
@@ -70,11 +97,15 @@ static class Program
     /// </summary>
     internal static bool ApplyUpdateOnStart(string[] args, string instance)
     {
+        if (IsHiveMindHost(args)) return false;
         if (args.Contains(StartWithWindows.Background)) return false;
+        if (Updates.OtherControllerReason().Length > 0) return false;
         if (!Mutex.TryOpenExisting(instance, out Mutex? running)) return true;
         running.Dispose();
         return false;
     }
+
+    internal static bool IsHiveMindHost(string[] args) => args.Length == 1 && args[0] == "--hivemind";
 
     /// <summary>Velopack's shortcut ID, velopack. plus the --packId in tools/build-installer.ps1.</summary>
     internal const string AppUserModelId = "velopack.ARSApp";

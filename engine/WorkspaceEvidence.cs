@@ -62,6 +62,7 @@ public sealed class WorkspaceEvidence : IDisposable
     /// </summary>
     internal static void Expire(string workspaceFolder)
     {
+        if (!WorkspaceStorage.Default.Policy.Automatic) return;
         DateTime expired = DateTime.UtcNow - KeptFor;
         var frames = new DirectoryInfo(Path.Combine(workspaceFolder, "evidence", "frames"));
         IEnumerable<FileInfo> old = frames.Exists ? frames.GetFiles("*.png") : [];

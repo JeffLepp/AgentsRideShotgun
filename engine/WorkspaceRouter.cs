@@ -197,6 +197,10 @@ public static class WorkspaceHome
 /// </summary>
 internal sealed class WorkspaceRouter : IDisposable
 {
+    internal static Func<string, string?, Task<string>>? LifecycleCommand;
+    internal static Func<string, bool, Task<StorageCleanup>>? StorageCommand;
+    internal static Func<Task<string>>? StorageView;
+    internal static Func<string?, Task>? OwnerShow;
     static WorkspaceRouter? _current;
     readonly WorkspacePipeServer _server;
     readonly Lock _gate = new();
@@ -231,8 +235,7 @@ internal sealed class WorkspaceRouter : IDisposable
             if (_disposed) return;
             try
             {
-                if (WorkspaceAccessStore.NeedsTicket(WorkspaceAccessStore.RouterTicket, _server))
-                    WorkspaceAccessStore.PublishRouter(_server);
+                WorkspaceAccessStore.KeepRouter(_server);
                 _watcher ??= Watch();
                 _retry?.Dispose();
                 _retry = null;
@@ -413,6 +416,38 @@ internal sealed class WorkspaceRouter : IDisposable
 
             switch (method)
             {
+                case "deskweave/owner":
+                    string ownerOperation = parameters.ValueKind == JsonValueKind.Object ? Text(parameters, "operation") : "";
+                    string ownerWorkspace = parameters.ValueKind == JsonValueKind.Object ? Text(parameters, "workspace") : "";
+                    int? ownerClientPid = parameters.ValueKind == JsonValueKind.Object
+                        && parameters.TryGetProperty("clientPid", out JsonElement ownerPid)
+                        && ownerPid.ValueKind == JsonValueKind.Number
+                        && ownerPid.TryGetInt32(out int clientPid) ? clientPid : null;
+                    try
+                    {
+                        return Ok(id, await WorkspaceOwnerProtocol.Handle(ownerOperation,
+                            ownerWorkspace.Length == 0 ? null : ownerWorkspace, cancel, ownerClientPid).ConfigureAwait(false));
+                    }
+                    catch (ArgumentException error) { return Error(id, -32602, error.Message); }
+                    catch (InvalidOperationException error) { return Error(id, -32601, error.Message); }
+                case "deskweave/storage-view":
+                    return Ok(id, StorageView is { } showStorage ? await showStorage().ConfigureAwait(false) : "Storage view unavailable.");
+                case "deskweave/storage":
+                    string category = parameters.ValueKind == JsonValueKind.Object ? Text(parameters, "category") : "";
+                    bool dryRun = parameters.ValueKind != JsonValueKind.Object || !parameters.TryGetProperty("dryRun", out JsonElement dry) || dry.ValueKind != JsonValueKind.False;
+                    try
+                    {
+                        if (category.Length == 0) return Ok(id, JsonSerializer.SerializeToElement(await Task.Run(() => WorkspaceStorage.Default.Report(), cancel).ConfigureAwait(false), WorkspaceStorage.Json));
+                        if (StorageCommand is { } storage) return Ok(id, JsonSerializer.SerializeToElement(await storage(category, dryRun).ConfigureAwait(false), WorkspaceStorage.Json));
+                        return Error(id, -32601, "Storage cleanup is unavailable in this host.");
+                    }
+                    catch (ArgumentException e) { return Error(id, -32602, e.Message); }
+                case "deskweave/lifecycle":
+                    string operation = parameters.ValueKind == JsonValueKind.Object ? Text(parameters, "operation") : "status";
+                    string source = parameters.ValueKind == JsonValueKind.Object ? Text(parameters, "source") : "";
+                    return Ok(id, LifecycleCommand is { } lifecycle
+                        ? await lifecycle(operation, source.Length == 0 ? null : source).ConfigureAwait(false)
+                        : "Controller lifecycle commands are unavailable in this host.");
                 case "deskweave/context":
                     if (parameters.ValueKind == JsonValueKind.Object) _cwd = Text(parameters, "cwd");
                     return null;
@@ -437,6 +472,7 @@ internal sealed class WorkspaceRouter : IDisposable
 
             if (WorkspaceMcp.ValidateCall(parameters, out string tool, out _) is { } invalid)
                 return Error(id, -32602, invalid);
+            if (tool == "storage") return Ok(id, Say(JsonSerializer.Serialize(await Task.Run(() => WorkspaceStorage.Default.Report(), cancel).ConfigureAwait(false), WorkspaceStorage.Json)));
             WorkspacePipePeer? peer = Current();
             if (peer is null && tool == "status")
                 return Ok(id, Say("No workspace yet. ARS picks one the first time you use a workspace tool."));

@@ -21,23 +21,27 @@ public partial class SettingsView
         "agents" => Agents(),
         "accounts" => Accounts(),
         "history" => HistoryPrivacy(),
+        "storage" => Storage(),
         _ => General(),
     };
 
     FrameworkElement General()
     {
-        var startup = Toggle("Start with Windows", s => s.StartWithWindows, (s, v) => s with { StartWithWindows = v });
+        var startup = Toggle("Start with Windows", s => s.StartWithWindows,
+            (s, v) => App.HostedByHiveMind ? s : s with { StartWithWindows = v });
+        startup.IsEnabled = !App.HostedByHiveMind;
+        if (App.HostedByHiveMind) startup.ToolTip = "Startup is managed in HiveMind's settings.";
         var startupError = Styled("Couldn't update Windows startup.", "RowError");
         startupError.Visibility = Visibility.Collapsed;
         RoutedEventHandler sync = (_, _) =>
         {
-            if (_following) return;
+            if (_following || App.HostedByHiveMind) return;
             startupError.Visibility = SettingsActions.SyncStartup(AppSettingsStore.Current) ? Visibility.Collapsed : Visibility.Visible;
         };
         startup.Checked += sync;
         startup.Unchecked += sync;
         var startupText = new StackPanel();
-        startupText.Children.Add(RowText("Start with Windows"));
+        startupText.Children.Add(RowText("Start with Windows", App.HostedByHiveMind ? "Managed by HiveMind" : null));
         startupText.Children.Add(startupError);
 
         var theme = Dropdown("Theme", [
@@ -66,12 +70,13 @@ public partial class SettingsView
         var browserModeHint = Styled("", "RowHint");
         browserText.Children.Add(browserModeHint);
         browserText.Children.Add(connectBrowser);
+        browserText.Children.Add(Styled("Agents can use your signed-in sites as you; page content and screenshots may reach your AI provider. ARS is not a sandbox.", "RowHint"));
         browserText.Children.Add(browserSetupError);
         _followers.Add(s =>
         {
             browserModeHint.Text = s.SeparateBrowserProfile
-                ? "Each workspace keeps its own browser sign-ins. Changes apply when the browser next opens."
-                : "Uses your browser's sign-ins after you allow ARS to connect. Changes apply when the browser next opens.";
+                ? "Separate browser: your sign-ins aren't available here. Changes apply when the browser next opens."
+                : "Uses your browser's sign-ins after you allow ARS to connect. Otherwise, uses a separate browser where you must sign in. Changes apply when the browser next opens.";
             connectBrowser.Visibility = s.SeparateBrowserProfile ? Visibility.Collapsed : Visibility.Visible;
             browserSetupError.Visibility = Visibility.Collapsed;
         });
@@ -378,71 +383,16 @@ public partial class SettingsView
 
     FrameworkElement HistoryPrivacy()
     {
-        var save = Dropdown("Save screenshots", [
-            new Choice(ScreenshotMode.KeySteps, "Key steps"), new Choice(ScreenshotMode.Continuous, "Continuous"), new Choice(ScreenshotMode.Off, "Off"),
-        ], s => s.Screenshots, (s, v) => s with { Screenshots = v });
+        var save = Toggle("Save screenshots", s => s.Screenshots != ScreenshotMode.Off,
+            (s, v) => s with { Screenshots = v ? ScreenshotMode.KeySteps : ScreenshotMode.Off });
         var saveRow = Row(RowText("Save screenshots", "They show up in What it did"), save);
-        // Save screenshots saves a value nothing writes by yet; the whole group (its label included)
-        // hides until SettingsFeatures.History is on. Storage and Delete all
-        // ARS data below always show, so this page and History & privacy in the nav are never
-        // left empty either way.
         var screenshots = Section("Screenshots", Group(saveRow));
-        screenshots.Visibility = SettingsFeatures.History ? Visibility.Visible : Visibility.Collapsed;
         screenshots.Margin = new Thickness(0, 0, 0, 21);
 
-        IReadOnlyList<StorageKind> kinds = SettingsStorage.Kinds();
-        var totalText = Styled("— used", "StorageTotal");
-        var meterGrid = new Grid();
-        var meterStack = new StackPanel();
-        meterStack.Children.Add(totalText);
-        meterStack.Children.Add(StorageMeter(meterGrid));
-        var meterRow = new Border { Padding = new Thickness(14, 13, 14, 13), MinHeight = 50, Child = meterStack };
-
-        var sizeTexts = new TextBlock[kinds.Count];
-        var kindRows = new UIElement[kinds.Count];
-        for (int i = 0; i < kinds.Count; i++)
-        {
-            StorageKind kind = kinds[i];
-            var sizeText = Styled("—", "StorageSize");
-            sizeTexts[i] = sizeText;
-            var clear = Confirm("Clear",
-                () => sizeText.Text == "—" ? "Clear " + kind.ClearNoun + "?" : "Clear " + sizeText.Text + " of " + kind.ClearNoun + "?",
-                () => { kind.Clear(); RefreshStorage(); },
-                danger: false, style: "LinkButton", enabled: kind.CanClear, disabledTooltip: kind.DisabledTooltip);
-            clear.Margin = new Thickness(9, 0, 0, 0);
-            var controls = new StackPanel { Orientation = Orientation.Horizontal };
-            controls.Children.Add(sizeText);
-            controls.Children.Add(clear);
-            var row = Row(RowText(kind.Label, kind.Hint), controls);
-            // Agent browser has no reliable size source yet; its row hides until
-            // SettingsFeatures.BrowserData turns on. The other three kinds always show.
-            row.Visibility = kind.Visible() ? Visibility.Visible : Visibility.Collapsed;
-            kindRows[i] = row;
-        }
-        var storage = Section("Storage", Group([meterRow, .. kindRows]));
-        storage.Margin = new Thickness(0, 0, 0, 20);
-
-        void RefreshStorage()
-        {
-            Task.Run(() =>
-            {
-                var measured = new long?[kinds.Count];
-                for (int i = 0; i < kinds.Count; i++) measured[i] = kinds[i].Visible() ? kinds[i].Measure() : null;
-                Dispatcher.BeginInvoke(() =>
-                {
-                    long total = 0;
-                    for (int i = 0; i < kinds.Count; i++)
-                    {
-                        sizeTexts[i].Text = measured[i] is { } bytes ? SettingsActions.FormatStorageBytes(bytes) : "—";
-                        if (measured[i] is { } known) total += known;
-                    }
-                    totalText.Text = SettingsActions.FormatStorageBytes(total) + " used";
-                    FillStorageMeter(meterGrid, kinds, measured);
-                });
-            });
-        }
-        RefreshStorage();
-
+        var storageLink = new Button { Content = "Manage storage", HorizontalAlignment = HorizontalAlignment.Left };
+        storageLink.SetResourceReference(StyleProperty, "DeskButton");
+        storageLink.Click += (_, _) => Show("storage");
+        var storage = Section("Storage", Row(RowText("See what ARS uses", "Workspace files, browser caches, updates and cleanup."), storageLink));
         var projectEntries = SettingsFeatures.ProjectFiles ? SettingsStorage.Projects() : [];
         UIElement[] projectRows = projectEntries.Select(project =>
         {

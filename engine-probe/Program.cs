@@ -24,6 +24,12 @@ internal static class Program
 
     static int RunMain(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--browser-capture-diagnostic") return BrowserCaptureDiagnostic.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--storage-snapshot") return StorageSnapshot.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 4 && args[0] == "--isolate-suite")
+            return IsolatedSuite.Run(Path.GetFullPath(args[1]), args[2], Path.GetFullPath(args[3]));
+        if (args.Length == 3 && args[0] == "--bridge-parent") return BridgeLifetime.Parent(args[1], args[2]);
+        if (args.Length == 2 && args[0] == "--bridge-lifetime") return BridgeLifetime.Run(Path.GetFullPath(args[1]));
         if (args.Length == 3 && args[0] == "--router-owned-client")
             return RouterStartup.OwnedClient(args[1], args[2]);
         if (args.Length == 10 && args[0] == "--inheritance-child")
@@ -57,6 +63,12 @@ internal static class Program
         if (args.Length == 3 && args[0] == "--render-mode-child") return RenderModeProbe.Child(args[1], args[2]);
         if (args.Length == 3 && args[0] == "--popout-fixture") return PopOutProbe.Fixture(args[1], args[2]);
         // One probe at a time on this PC (see ui-probe); child modes above never wait for it.
+        if (args.Length == 2 && args[0] == "--minecraft-live-preview" && Path.IsPathFullyQualified(args[1]))
+            return MinecraftLivePreview.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--minecraft-installed-smoke" && Path.IsPathFullyQualified(args[1]))
+            return MinecraftInstalledSmoke.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--minecraft-preview-checks" && Path.IsPathFullyQualified(args[1]))
+            return MinecraftPreviewChecks.Run(Path.GetFullPath(args[1]));
         using var turn = new Mutex(false, @"Local\Deskweave.Probe.Turn");
         try { turn.WaitOne(); } catch (AbandonedMutexException) { }
         if (args.Length == 2 && args[0] == "--capture-spike" && Path.IsPathFullyQualified(args[1]))

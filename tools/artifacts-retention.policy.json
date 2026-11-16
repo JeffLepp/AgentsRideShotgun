@@ -1,0 +1,43 @@
+﻿{
+    "schemaVersion":  1,
+    "keepLatest":  2,
+    "minimumAgeDays":  7,
+    "pins":  [
+                 {
+                     "path":  "wo02",
+                     "reason":  "WO-02 candidate 0.3.4 and its verification/rollback provenance; retain until installed migration is independently accepted."
+                 },
+                 {
+                     "path":  "installer/0.3.4",
+                     "reason":  "Latest staged WO-02 candidate release/feed, explicitly required by WO-05."
+                 },
+                 {
+                     "path":  "installer/0.3.2",
+                     "reason":  "WO-05B required pin: historical installed 0.3.2 package, preserved as original rollback provenance."
+                 },
+                 {
+                     "path":  "minecraft-provider-publish-final2",
+                     "reason":  "WO-05B required pin: source matching historical private final2 engine; preserve alongside exact external rollback archives."
+                 },
+                 {
+                     "path":  "wo05a",
+                     "reason":  "WO-06 approved cleanup must preserve all WO-05A evidence, including 0.3.6/0.3.7 candidates, probes, and rollback/configuration provenance."
+                 },
+                 {
+                     "path":  "installer/0.3.6",
+                     "reason":  "Explicit WO-06 hold: requested 0.3.6 installer; immediate rollback version for currently installed 0.3.7."
+                 },
+                 {
+                     "path":  "installer/0.3.7",
+                     "reason":  "WO-06 installed version readback is 0.3.7; preserve its reviewed installer/feed."
+                 }
+             ],
+    "externalBundles":  [
+                            "C:/Users/jeffe/Desktop/code/bot/artifacts/ars-wo02-0.3.4-20261107",
+                            "C:/Users/jeffe/Desktop/code/bot/artifacts/ars-wo05a-0.3.6-20261107",
+                            "C:/Users/jeffe/Desktop/code/bot/artifacts/ars-wo05a-0.3.7-20261107"
+                        ],
+    "referenceRoots":  [
+                           "C:/Users/jeffe/Desktop/code/bot/orchestration"
+                       ]
+}

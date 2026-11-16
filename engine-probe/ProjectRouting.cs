@@ -56,7 +56,15 @@ internal static class ProjectRouting
         check(names.Length == 3 && names[^1]!.StartsWith('t'),
             "A new screenshot sorts after the numbered ones older versions wrote, so trimming keeps the newest");
         // Outside the source checkout: its .git must not turn non-project fixtures into projects.
-        string root = Directory.CreateTempSubdirectory("Deskweave-routing-").FullName;
+        // TEMP is redirected into the private desktop's host folder. That host may
+        // live beneath artifacts/ in this checkout, so CreateTempSubdirectory would
+        // inherit the checkout's .git and invalidate the unversioned-folder oracle.
+        string externalTemp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp");
+        string root = Path.Combine(externalTemp, "Deskweave-routing-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        using var routingFixture = new RoutingFixture(root, externalTemp);
+        File.WriteAllText(Path.Combine(output, "routing-fixture.json"), System.Text.Json.JsonSerializer.Serialize(new
+        { inheritedTemp = Path.GetTempPath(), routingRoot = root, externalTemp }));
         string alpha = Path.Combine(root, "Alpha"), beta = Path.Combine(root, "Beta");
         string child = Path.Combine(alpha, "packages", "web");
         Directory.CreateDirectory(Path.Combine(alpha, ".git"));
@@ -105,6 +113,18 @@ internal static class ProjectRouting
         check(WorkspaceHome.EnsureScratch().Id == scratch.Id && WorkspaceStore.All().Count == before + 1
             && WorkspaceRuntime.Of(scratch.Id) is null,
             "Repeated Scratch initialization creates exactly one saved record and no running desktop");
+    }
+
+    sealed class RoutingFixture(string root, string parent) : IDisposable
+    {
+        public void Dispose()
+        {
+            string full = Path.GetFullPath(root), expectedParent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(parent));
+            if (!string.Equals(Path.GetDirectoryName(full), expectedParent, StringComparison.OrdinalIgnoreCase)
+                || !System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(full), "^Deskweave-routing-[0-9a-f]{32}$"))
+                throw new IOException("Routing fixture cleanup escaped its temporary parent.");
+            Directory.Delete(full, recursive: true);
+        }
     }
 
     static void CaptureGateChecks(Action<bool, string> check)

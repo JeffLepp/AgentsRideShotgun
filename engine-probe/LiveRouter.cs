@@ -87,10 +87,23 @@ internal static class LiveRouter
             // Two copies of ARS on one account, one per Windows session: neither takes the other's ticket.
             using (var other = new WorkspacePipeServer((_, _) => Task.FromResult<string?>(null)))
             {
-                File.WriteAllText(ticket, StaleTicket(other.Name));
+                // A real second controller publishes atomically. A truncate/write fixture
+                // lets the first controller observe an invalid intermediate ticket and repair it.
+                WorkspaceAccessStore.PublishRouter(other);
                 Thread.Sleep(1500);
                 Check(WorkspaceAccessStore.TicketPipe(ticket) == other.Name,
                     "A ticket naming another live ARS is left alone rather than fought over");
+                using (var repair = new WorkspacePipeServer((_, _) => Task.FromResult<string?>(null)))
+                {
+                    for (int attempt = 0; attempt < 16; attempt++)
+                    {
+                        WorkspaceAccessStore.WithdrawRouter(other);
+                        Task.WaitAll(Task.Run(() => WorkspaceAccessStore.KeepRouter(repair)),
+                            Task.Run(() => WorkspaceAccessStore.PublishRouter(other)));
+                        Check(WorkspaceAccessStore.TicketPipe(ticket) == other.Name,
+                            "Concurrent ticket repair preserves the other live controller, iteration " + attempt);
+                    }
+                }
                 WorkspaceRouter.Stop();
                 Check(WorkspaceAccessStore.TicketPipe(ticket) == other.Name,
                     "Quitting never withdraws a ticket that another live ARS published");

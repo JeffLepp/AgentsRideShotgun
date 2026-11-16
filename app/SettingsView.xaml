@@ -160,6 +160,9 @@
                     <RadioButton Tag="history" AutomationProperties.Name="History &amp; privacy" Margin="0">
                         <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Shield}"/><TextBlock Style="{StaticResource NavText}" Text="History &amp; privacy"/></StackPanel>
                     </RadioButton>
+                    <RadioButton Tag="storage" AutomationProperties.Name="Storage" Margin="0">
+                        <StackPanel Orientation="Horizontal"><Path Style="{StaticResource NavIcon}" Data="{StaticResource Icon.Sliders}"/><TextBlock Style="{StaticResource NavText}" Text="Storage"/></StackPanel>
+                    </RadioButton>
                 </StackPanel>
             </StackPanel>
         </Border>

@@ -14,11 +14,19 @@ ARS is a native Windows app (C#, WPF, .NET 10). Each workspace is a Windows desk
 
 **Separate browser profile** is off by default. With your browser's permission, ARS connects directly to your running Chromium browser and creates background tabs in its existing session. ARS reads only the browser's connection endpoint metadata, never its password or cookie databases, and does not copy your profile. Page text omits password-field values. ARS restricts its browser tools to tabs created by its connection and their popups; it does not adopt your existing tabs. Ending a workspace closes its own tabs and disconnects without stopping your browser. Browsing with your live sign-ins gives the agent access to those sites as you, so the browser requires you to allow the connection.
 
-Turning **Separate browser profile** on runs Edge or Chrome in a profile kept in the workspace folder. That browser stores its own sign-ins; deleting a workspace removes that separate profile. ARS's screenshots and activity records can contain visible page content, and your AI provider may receive them.
+Turning **Separate browser profile** on runs a supported Chromium browser (Edge, Chrome, Brave or Vivaldi) in a profile kept in the workspace folder. That browser stores its own sign-ins; deleting a workspace removes that separate profile. ARS's screenshots and activity records can contain visible page content, and your AI provider may receive them.
 
 Workspace programs run with your account's rights and never more. ARS does not run as administrator: a copy started with Run as administrator restarts as your normal user, because programs your agent starts would otherwise get administrator rights too. With UAC turned off, every program has full rights, ARS included.
 
 Programs launched outside ARS tools may still open on your desktop, and your AI provider may receive screenshots or tool results.
+
+The owner CLI and owner pipe methods trust processes running as your Windows
+user outside ARS workspace jobs. They are not a separate identity or privilege
+boundary against a same-user shell, including an agent with host shell access.
+Storage cleanup can delete saved profiles; review a dry run before executing it.
+Custom `--update --source` feeds must be explicit local folders and are trusted
+developer input. Velopack checks package integrity, not the publisher of a custom
+feed. Use the official release feed for normal updates.
 
 ## Reporting a problem
 

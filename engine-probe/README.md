@@ -41,7 +41,30 @@ These establish the observed behavior on the tested PC. They do not certify brow
 downloads, arbitrary websites/apps, hostile-code isolation, model missions, other Windows
 versions, or clean-machine compatibility.
 
+For repeatable browser gates, set `DESKWEAVE_WORKSPACE_BROWSER` to the exact installed
+fixture browser and record its version. WO-05 uses Chromium 156.0.8078.4 from
+`$env:LOCALAPPDATA/ms-playwright/chromium-1248/chrome-win64/chrome.exe`. With no override,
+this PC selects Edge, whose Windows account sync notice can cover the fixture page;
+DOM success alone does not establish that native capture shows the page. The pixel
+assertions must still pass. `--browser-capture-diagnostic OUTPUT` records native
+captures before/after a CDP screenshot and tab activation, plus window metadata.
+It does not alter the production capture implementation or the pixel oracle.
+
 Before claiming a published executable has these fixes, compare its engine and bridge
 hashes with the passing report. Different hashes require a targeted rerun against that
 payload or evidence explaining and validating the difference. The app's overview, compact
 mode, focus behavior, and actual packaged launch need their separate UI gate.
+
+For lifecycle/update work, see [the lifecycle policy](../engine/LIFECYCLE.md).
+Use `--isolate-suite EXE MODE OUTPUT` to keep the suite's controller windows on
+another ARS desktop as well as its fixture apps. A private SDK installation needs
+`DOTNET_ROOT` set to that SDK root before launching probe apphosts. No existing
+live controller is used. Browser fixtures can select an installed clean Chromium
+with the process-scoped `DESKWEAVE_WORKSPACE_BROWSER` override; Edge's first-run
+sign-in dialogs can otherwise obscure the native pixel oracle. This does not
+alter the owner's browser or its profile.
+
+For storage fixtures and light/dark/card renders, use `tools/check-storage.ps1`.
+`--storage-snapshot ABSOLUTE_OUTPUT` records read-only live file accounting and
+scan duration; it neither cleans files nor uses a controller.
+The isolated suite's host folder is kept beneath its output directory.

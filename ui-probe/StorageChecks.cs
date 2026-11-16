@@ -53,7 +53,7 @@ static class StorageChecks
         finally { Directory.Delete(parent, true); }
     }
 
-    internal static Task Run()
+    internal static async Task Run()
     {
         FormerNameChecks();
         StoredWorkspace scratch = WorkspaceHome.EnsureScratch();
@@ -85,6 +85,6 @@ static class StorageChecks
             WorkspaceFullView.ConfirmDeleteForTests = null;
             WorkspaceStore.Delete(held.Id);
         }
-        return Task.CompletedTask;
+        await StorageMvpChecks.Run();
     }
 }

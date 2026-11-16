@@ -25,6 +25,18 @@ internal static class WorkspaceAccessStore
 {
     internal static string Root => WorkspaceStore.Root + ".access";
     internal static string ResultsRoot => WorkspaceStore.Root + ".results";
+    // Shared across Windows sessions: a workspace cannot start while storage is
+    // deleting its idle files. Keep this file; unlinking splits the lock identity.
+    internal static IDisposable StorageAdmission()
+    {
+        Directory.CreateDirectory(Root);
+        long until = Environment.TickCount64 + 2000;
+        for (;;)
+        {
+            try { return new FileStream(Path.Combine(Root, "storage-admission.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (IOException) when (Environment.TickCount64 < until) { Thread.Sleep(20); }
+        }
+    }
     internal static string Folder(string id)
     {
         if (id.Length is < 1 or > 80 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-'))
@@ -44,7 +56,9 @@ internal static class WorkspaceAccessStore
     }
     internal static void Write(string id, WorkspaceAccessPolicy policy) =>
         WriteJson(Path.Combine(Folder(id), "access.json"), policy);
-    internal static void Publish(string id, WorkspacePipeServer server) => WriteJson(Connection(id), Ticket(server));
+    internal static void Publish(string id, WorkspacePipeServer server) =>
+        WithTicketLock(Connection(id), () => WriteJson(Connection(id), Ticket(server)));
+    internal static void KeepTicket(string id, WorkspacePipeServer server) => EnsureTicket(Connection(id), server);
     internal static void Withdraw(string id)
     {
         try { File.Delete(Connection(id)); }
@@ -54,7 +68,9 @@ internal static class WorkspaceAccessStore
     internal static void Withdraw(string id, WorkspacePipeServer? server) => WithdrawTicket(Connection(id), server);
     /// <summary>The one ticket every connected agent's bridge reads. Its path is what goes in their configuration.</summary>
     internal static string RouterTicket => Path.Combine(Root, "router.json");
-    internal static void PublishRouter(WorkspacePipeServer server) => WriteJson(RouterTicket, Ticket(server));
+    internal static void PublishRouter(WorkspacePipeServer server) =>
+        WithTicketLock(RouterTicket, () => WriteJson(RouterTicket, Ticket(server)));
+    internal static void KeepRouter(WorkspacePipeServer server) => EnsureTicket(RouterTicket, server);
     internal static void WithdrawRouter(WorkspacePipeServer server) => WithdrawTicket(RouterTicket, server);
 
     /// <summary>
@@ -98,6 +114,29 @@ internal static class WorkspaceAccessStore
     internal static bool NeedsTicket(string path, WorkspacePipeServer server) =>
         TicketPipe(path) is not { } pipe || pipe != server.Name && !WorkspacePipeServer.Exists(pipe);
 
+    // Atomic rename alone does not protect a check-then-publish: another controller
+    // may publish a live ticket between them. A retained file lock coordinates all
+    // controllers, including different Windows sessions, and is released on death.
+    static void EnsureTicket(string path, WorkspacePipeServer server) => WithTicketLock(path, () =>
+    {
+        if (NeedsTicket(path, server)) WriteJson(path, Ticket(server));
+    });
+
+    static void WithTicketLock(string path, Action action)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        FileStream? held = null;
+        long until = Environment.TickCount64 + 2000;
+        while (held is null)
+        {
+            try { held = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (IOException) when (Environment.TickCount64 < until) { Thread.Sleep(20); }
+        }
+        using (held) action();
+        // Keep the lock file: unlinking it lets another process lock a different file
+        // at the same path while an earlier waiter still holds the original identity.
+    }
+
     /// <summary>
     /// Connection tickets left by an ARS that stopped without withdrawing them: a crash, a
     /// killed process, a restart. A bridge reading one would wait on a pipe nobody serves. Runs at
@@ -112,8 +151,14 @@ internal static class WorkspaceAccessStore
             var tickets = Directory.EnumerateDirectories(Root).Select(folder => Path.Combine(folder, "connection.json")).Append(RouterTicket);
             foreach (string ticket in tickets)
             {
-                if (!File.Exists(ticket) || TicketPipe(ticket) is { } pipe && WorkspacePipeServer.Exists(pipe)) continue;
-                try { File.Delete(ticket); removed++; }
+                try
+                {
+                    WithTicketLock(ticket, () =>
+                    {
+                        if (!File.Exists(ticket) || TicketPipe(ticket) is { } pipe && WorkspacePipeServer.Exists(pipe)) return;
+                        File.Delete(ticket); removed++;
+                    });
+                }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             }
         }
@@ -123,8 +168,14 @@ internal static class WorkspaceAccessStore
 
     static void WithdrawTicket(string path, WorkspacePipeServer? server)
     {
-        if (TicketPipe(path) is { } pipe && pipe != server?.Name && WorkspacePipeServer.Exists(pipe)) return;
-        try { File.Delete(path); }
+        try
+        {
+            WithTicketLock(path, () =>
+            {
+                if (TicketPipe(path) is { } pipe && pipe != server?.Name && WorkspacePipeServer.Exists(pipe)) return;
+                File.Delete(path);
+            });
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
     // UTF-8 with no byte order mark: the same bytes File.WriteAllText put here before.

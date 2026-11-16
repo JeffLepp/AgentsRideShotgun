@@ -58,6 +58,8 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--owner-admission-child")
+        { Thread.Sleep(TimeSpan.FromMinutes(1)); return 0; }
         try { return RunMain(args); }
         catch (Exception error)
         {
@@ -120,9 +122,9 @@ static class Program
         using var focus = new FocusGuard();
         using var watchdog = new System.Threading.Timer(_ =>
         {
-            Report(new TimeoutException("UI probe exceeded its three-minute limit."));
+            Report(new TimeoutException("UI probe exceeded its wall-clock limit."));
             Environment.Exit(2);
-        }, null, TimeSpan.FromMinutes(3), Timeout.InfiniteTimeSpan);
+        }, null, TimeSpan.FromMinutes(Environment.GetEnvironmentVariable("ARS_PROBE_HOST_DESKTOP") is null ? 3 : 6), Timeout.InfiniteTimeSpan);
         var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
         {

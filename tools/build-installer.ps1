@@ -1,9 +1,19 @@
-param([string]$Version = '', [switch]$SkipPublish, [switch]$Sign)
+param([string]$Version = '', [switch]$SkipPublish, [switch]$Sign, [string]$PayloadDirectory, [string]$VpkPath)
 # Builds ARS-Setup: a per-user install (no admin) with a Start menu shortcut and an Apps &
 # features uninstall that takes ARS out of the agents' configs. Publishes fresh first, so
 # ARS must be closed. -SkipPublish packages a separately published, version-matched payload.
 # -Sign signs every binary and Setup with the Azure identity; public releases are always signed.
 $ErrorActionPreference = 'Stop'
+# A local SDK can build ARS without registering a machine-wide .NET runtime.
+# Resolve the same SDK for the vpk apphost in this process only.
+if (-not $env:DOTNET_ROOT) {
+    $sdk = Get-Command dotnet -ErrorAction SilentlyContinue
+    $sdkRoot = if ($sdk) { Split-Path -Parent $sdk.Source } else {
+        @((Join-Path $env:USERPROFILE '.dotnet'), (Join-Path $env:LOCALAPPDATA 'HiveMindBuildTools/dotnet')) |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_ 'dotnet.exe') -PathType Leaf } | Select-Object -First 1
+    }
+    if ($sdkRoot) { $env:DOTNET_ROOT = $sdkRoot; $env:DOTNET_ROOT_X64 = $sdkRoot }
+}
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sourceVersion = [string]([xml](Get-Content -Raw (Join-Path $root 'Directory.Build.props'))).Project.PropertyGroup[0].Version
 if (-not $Version) { $Version = $sourceVersion }
@@ -11,8 +21,14 @@ if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$')
 if ($Version -cne $sourceVersion) { throw "Package version $Version differs from source version $sourceVersion. Update Directory.Build.props first." }
 $sdkVersion = ([xml](Get-Content -Raw (Join-Path $root 'app\ARS.csproj'))).Project.ItemGroup.PackageReference |
     Where-Object { $_.Include -eq 'Velopack' } | Select-Object -ExpandProperty Version
-if (-not (Get-Command vpk -ErrorAction SilentlyContinue)) { throw "The Velopack CLI is missing. Run: dotnet tool install -g vpk --version $sdkVersion" }
-$cliHelp = & vpk -h | Out-String
+if ($VpkPath) {
+    $vpk = (Resolve-Path -LiteralPath $VpkPath).Path
+} else {
+    $foundVpk = Get-Command vpk -ErrorAction SilentlyContinue
+    if (-not $foundVpk) { throw "The Velopack CLI is missing. Supply -VpkPath or install vpk $sdkVersion in a local tool directory." }
+    $vpk = $foundVpk.Source
+}
+$cliHelp = & $vpk -h | Out-String
 if ($LASTEXITCODE -ne 0 -or $cliHelp -notmatch ('Velopack CLI ' + [regex]::Escape($sdkVersion) + ',')) {
     throw "The Velopack CLI must match the app SDK ($sdkVersion). Run: dotnet tool update -g vpk --version $sdkVersion"
 }
@@ -23,7 +39,8 @@ if (-not $SkipPublish) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'publish.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed; no installer was built.' }
 }
-$payload = Join-Path $root 'out'
+$payload = if ($PayloadDirectory) { [IO.Path]::GetFullPath($PayloadDirectory) } else { Join-Path $root 'out' }
+if ($PayloadDirectory -and -not $SkipPublish) { throw 'A separately published PayloadDirectory requires -SkipPublish.' }
 foreach ($file in @('ARS.exe', 'ARS.dll', 'coreclr.dll', 'PresentationFramework.dll', 'Bridge\ARS.WorkspaceBridge.exe', 'Bridge\coreclr.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payload $file) -PathType Leaf)) { throw "Incomplete published app: $file" }
 }
@@ -57,7 +74,7 @@ if ($Sign) {
     $signing = @('--azureTrustedSignFile', $signMetadata)
 }
 try {
-    & vpk pack --packId ARSApp --packVersion $Version --packDir $payload --runtime $packageRuntime `
+    & $vpk pack --packId ARSApp --packVersion $Version --packDir $payload --runtime $packageRuntime `
         --packTitle ARS --packAuthors 'Jefferson Kline' --mainExe ARS.exe `
         --icon (Join-Path $root 'app\Assets\ARS.ico') --shortcuts StartMenuRoot `
         --outputDir $staging --noPortable --skip-updates @signing

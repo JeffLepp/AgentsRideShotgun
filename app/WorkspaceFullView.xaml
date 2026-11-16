@@ -100,6 +100,10 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <Grid Grid.Row="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
@@ -157,6 +161,9 @@
                     Margin="2,0,0,0" ToolTip="More" AutomationProperties.Name="More workspace actions">
                 <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.More}" StrokeThickness="2.4"/>
             </Button>
+            <TextBlock x:Name="BrowserStatusText" Grid.Row="1" Grid.ColumnSpan="8" FontSize="12"
+                       Foreground="{DynamicResource MutedInkBrush}" Margin="0,8,0,0"
+                       TextWrapping="Wrap" Visibility="Collapsed"/>
         </Grid>
         <Border x:Name="ScreenBorder" Grid.Row="2" CornerRadius="{DynamicResource SkinPanelRadius}" BorderThickness="1"
                 BorderBrush="{DynamicResource HairlineBrush}" Background="{DynamicResource CardBrush}"

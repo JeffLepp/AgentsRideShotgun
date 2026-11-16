@@ -74,7 +74,7 @@ public partial class SettingsView
         tiles.Children.Add(_pauseTile);
         tiles.Children.Add(_nightTile);
 
-        (string Id, string Icon)[] categories = [("general", "Icon.Sliders"), ("agents", "Icon.Agents"), ("accounts", "Icon.Globe"), ("history", "Icon.Shield")];
+        (string Id, string Icon)[] categories = [("general", "Icon.Sliders"), ("agents", "Icon.Agents"), ("accounts", "Icon.Globe"), ("history", "Icon.Shield"), ("storage", "Icon.Sliders")];
         var rows = new List<UIElement>();
         foreach (var (id, icon) in categories)
         {
@@ -149,7 +149,8 @@ public partial class SettingsView
         if (_homeRows.Count == 0) return;
 
         string theme = settings.Theme switch { ThemeChoice.Light => "Light", ThemeChoice.Dark => "Dark", _ => "Follows Windows" };
-        _homeRows["general"].Summary.Text = (settings.StartWithWindows ? "Starts with Windows" : "Starts when you open it") + " · " + theme;
+        _homeRows["general"].Summary.Text = (App.HostedByHiveMind ? "Starts with HiveMind"
+            : settings.StartWithWindows ? "Starts with Windows" : "Starts when you open it") + " · " + theme;
 
         (WorkspaceConnections.AgentApp App, string Name)[] agents = [(WorkspaceConnections.AgentApp.ClaudeCode, "Claude Code"), (WorkspaceConnections.AgentApp.Codex, "Codex")];
         string[] connected = agents.Where(a => SettingsActions.ReadAgent(a.App) == AgentState.Connected).Select(a => a.Name).ToArray();
@@ -157,7 +158,8 @@ public partial class SettingsView
 
         _homeRows["accounts"].Row.Visibility = SettingsFeatures.Accounts ? Visibility.Visible : Visibility.Collapsed;
         _homeRows["accounts"].Summary.Text = "Sign-ins for the agent's browser";
-        _homeRows["history"].Summary.Text = "Storage, and deleting ARS's data";
+        _homeRows["history"].Summary.Text = "Screenshots, privacy and deleting ARS's data";
+        _homeRows["storage"].Summary.Text = "Disk usage, cleanup and retention";
     }
 
     void SlidePageIn()

@@ -9,7 +9,8 @@ namespace Deskweave.AgentWorkspaces;
 /// <summary>Explicit-click integration using the provider's configuration command, not a TOML rewrite.</summary>
 internal static class WorkspaceConnections
 {
-    internal static string Bridge => Path.Combine(Path.GetDirectoryName(typeof(WorkspaceMcp).Assembly.Location)!,
+    internal static string Bridge => WorkspaceBridgeHost.PathForConnection;
+    internal static string PackagedBridge => Path.Combine(Path.GetDirectoryName(typeof(WorkspaceMcp).Assembly.Location)!,
         "Bridge", "ARS.WorkspaceBridge.exe");
     internal static string Name(string id) => "ars_workspace_" + id;
     internal static object Configuration(string id) => new
@@ -491,7 +492,7 @@ internal static class WorkspaceConnections
                 || server.Name.StartsWith("deskweave_workspace_", StringComparison.Ordinal))
             && server.Command is { } command
             && BridgeNames.Contains(Path.GetFileName(command), StringComparer.OrdinalIgnoreCase)
-            && (SamePath(command, Bridge) || !File.Exists(command)))
+            && (SamePath(command, PackagedBridge) || WorkspaceBridgeHost.Owns(command) || !File.Exists(command)))
         .Select(server => server.Name)];
 
     /// <summary>Every MCP server one profile's configuration names, with the command it runs.</summary>

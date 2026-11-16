@@ -25,10 +25,10 @@ public sealed record WorkspaceCopy(int Id, string File, bool SameFile);
 /// <param name="Taken">When the picture being shown was actually captured.</param>
 /// <param name="Unresponsive">Windows left out of it because their thread is not answering.</param>
 /// <param name="PumpBusy">The workspace's own desktop thread did not answer in time.</param>
-public sealed record WorkspaceScreenState(bool Stale, DateTimeOffset? Taken, int Unresponsive, bool PumpBusy)
+public sealed record WorkspaceScreenState(bool Stale, DateTimeOffset? Taken, int Unresponsive, bool PumpBusy, int Unavailable = 0)
 {
     /// <summary>One line for a person or an agent, empty when the picture is simply current.</summary>
-    public string Note => !Stale && Unresponsive == 0 ? string.Empty
+    public string Note => !Stale && Unresponsive == 0 && Unavailable == 0 ? string.Empty
         : (Stale
             ? "STALE: this is the last picture of the workspace"
                 + (Taken is { } when ? ", taken at " + when.ToLocalTime().ToString("HH:mm:ss") : "")
@@ -36,12 +36,14 @@ public sealed record WorkspaceScreenState(bool Stale, DateTimeOffset? Taken, int
         + (Unresponsive > 0
             ? $". {Unresponsive} window{(Unresponsive == 1 ? " is" : "s are")} not responding, shown greyed as last seen"
             : PumpBusy ? ". The workspace desktop did not answer in time" : "")
+        + (Unavailable > 0 ? $". {Unavailable} game capture provider(s) unavailable or stale; game pixels are missing" : "")
         + ".";
 
     /// <summary>The short form the owner sees on the panel badge.</summary>
     public string Badge => Stale
         ? "Not responding" + (Taken is { } when ? " · last frame " + when.ToLocalTime().ToString("HH:mm:ss") : "")
-        : Unresponsive > 0 ? $"{Unresponsive} not responding" : string.Empty;
+        : Unresponsive > 0 ? $"{Unresponsive} not responding"
+        : Unavailable > 0 ? "Game capture unavailable" : string.Empty;
 }
 
 /// <summary>
@@ -97,6 +99,10 @@ public sealed partial class WorkspaceControl : IDisposable
 
     /// <summary>Where the browser transport ended up, for the panel and the log. Empty until it starts.</summary>
     public string BrowserTransport => _browser?.Transport ?? string.Empty;
+
+    public string BrowserStatus => _browser is not { Alive: true } browser ? string.Empty
+        : browser.UsesOwnerSession ? "Your browser: using your sign-ins"
+        : "Separate browser: your sign-ins aren't available here";
 
     // --- the lease ---------------------------------------------------------------------------
 
@@ -338,8 +344,8 @@ public sealed partial class WorkspaceControl : IDisposable
             // An empty desktop is not a stall. There is nothing to photograph and nothing is wrong.
             if (record)
                 _screen = frame.Image is not null || (frame.Windows == 0 && !frame.TimedOut)
-                    ? new WorkspaceScreenState(false, frame.Image is null ? null : _lastFrameAt, frame.Unresponsive, false)
-                    : new WorkspaceScreenState(true, _lastFrame is null ? null : _lastFrameAt, frame.Unresponsive, frame.TimedOut);
+                    ? new WorkspaceScreenState(false, frame.Image is null ? null : _lastFrameAt, frame.Unresponsive, false, frame.Unavailable)
+                    : new WorkspaceScreenState(true, _lastFrame is null ? null : _lastFrameAt, frame.Unresponsive, frame.TimedOut, frame.Unavailable);
             return frame.Image ?? _lastFrame;
         }
     }

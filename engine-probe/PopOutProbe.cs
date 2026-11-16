@@ -40,7 +40,7 @@ static class PopOutProbe
             desktop, pid = Environment.ProcessId, label, folder = Environment.CurrentDirectory,
             commandLine = Environment.CommandLine,
         };
-        if (desktop == "Default")
+        if (desktop == (Environment.GetEnvironmentVariable("ARS_PROBE_HOST_DESKTOP") ?? "Default"))
         {
             File.WriteAllText(file + ".owner.json", JsonSerializer.Serialize(receipt));
             return 0;
@@ -159,7 +159,7 @@ static class PopOutProbe
             "Letting go off the picture starts the app again on the owner's desktop");
         using (var owner = JsonDocument.Parse(File.ReadAllText(first + ".owner.json")))
         {
-            check(owner.RootElement.GetProperty("desktop").GetString() == "Default"
+            check(owner.RootElement.GetProperty("desktop").GetString() == (Environment.GetEnvironmentVariable("ARS_PROBE_HOST_DESKTOP") ?? "Default")
                 && owner.RootElement.GetProperty("label").GetString() == Spaced
                 && string.Equals(owner.RootElement.GetProperty("folder").GetString(), workspaceFolder, StringComparison.OrdinalIgnoreCase),
                 "The owner's copy runs on their own desktop with the same arguments, spaces intact, in the same folder");

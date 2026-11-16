@@ -72,7 +72,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
             }
             else if (_server is null)
             {
-                var server = new WorkspacePipeServer(Attach, rejectClientProcess: _control.OwnsProcess);
+                var server = new WorkspacePipeServer(Attach, rejectClientProcess: WorkspaceRouter.InsideAWorkspace);
                 try { WorkspaceAccessStore.Publish(_id, server); _server = server; }
                 catch { server.Dispose(); throw; }
             }
@@ -85,8 +85,8 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     {
         lock (_gate)
         {
-            if (_disposed || _server is null || !WorkspaceAccessStore.NeedsTicket(WorkspaceAccessStore.Connection(_id), _server)) return;
-            try { WorkspaceAccessStore.Publish(_id, _server); }
+            if (_disposed || _server is null) return;
+            try { WorkspaceAccessStore.KeepTicket(_id, _server); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
     }

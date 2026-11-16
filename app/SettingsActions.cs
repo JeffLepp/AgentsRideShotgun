@@ -23,9 +23,8 @@ internal static class SettingsFeatures
     /// <see cref="SettingsActions.AddAccount"/> and <see cref="SettingsActions.SignOut"/>.</summary>
     internal static bool Accounts;
 
-    /// <summary>History &amp; privacy > Screenshots > Save screenshots. On once ARS
-    /// writes screenshots by this setting. Storage, Clear and Delete all data already read the real
-    /// evidence store, so they stay shown either way.</summary>
+    /// <summary>Reserved for additional history controls. Save screenshots, Storage and
+    /// Delete all data already use the real store and stay shown.</summary>
     internal static bool History;
 
     /// <summary>History &amp; privacy > Storage > Agent browser: ARS has no reliable way to
@@ -327,7 +326,17 @@ internal static class SettingsActions
         // Exit is raised after the app's own shutdown has saved what it saves, so this is the last word.
         application.Exit += (_, _) =>
         {
-            foreach (string folder in folders) Remove(folder);
+            var failed = new List<string>();
+            var incompleteFolders = new List<string>();
+            foreach (string folder in folders)
+            {
+                int before = failed.Count;
+                Remove(folder, failed);
+                if (failed.Count > before) incompleteFolders.Add(folder);
+            }
+            if (failed.Count > 0)
+                MessageBox.Show($"Deletion incomplete. ARS couldn't delete {failed.Count} files or folders in:\n\n"
+                    + string.Join("\n\n", incompleteFolders), "ARS", MessageBoxButton.OK, MessageBoxImage.Warning);
             if (uninstaller is null) return;
             var start = new ProcessStartInfo(uninstaller) { UseShellExecute = false };
             start.ArgumentList.Add("uninstall");
@@ -338,23 +347,32 @@ internal static class SettingsActions
         else application.Shutdown();
     }
 
-    static void Remove(string folder)
+    static void Remove(string folder, List<string> failed)
     {
         if (!Directory.Exists(folder)) return;
         // ARS may be installed inside its own local folder; its program files stay.
         string? program = Environment.ProcessPath is { } exe ? Path.GetDirectoryName(exe) + Path.DirectorySeparatorChar : null;
-        foreach (string entry in Directory.EnumerateFileSystemEntries(folder).ToArray())
+        int before = failed.Count;
+        bool keptProgram = false;
+        try
         {
-            if (program is not null && program.StartsWith(entry + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
-            RemoveEntry(entry);
+            foreach (string entry in Directory.EnumerateFileSystemEntries(folder).ToArray())
+            {
+                if (program is not null && program.StartsWith(entry + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                {
+                    keptProgram = true;
+                    continue;
+                }
+                if (!RemoveEntry(entry)) failed.Add(entry);
+            }
+            if (!keptProgram && failed.Count == before && !RemoveEntry(folder)) failed.Add(folder);
         }
-        try { Directory.Delete(folder); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed.Add(folder); }
     }
 
     /// <summary>Removes one file or folder, retrying briefly: a process that has only just stopped
     /// can still hold a file open for a moment.</summary>
-    static void RemoveEntry(string entry)
+    static bool RemoveEntry(string entry)
     {
         for (int attempt = 0; attempt < 5; attempt++)
         {
@@ -362,9 +380,10 @@ internal static class SettingsActions
             {
                 if (Directory.Exists(entry)) Directory.Delete(entry, true);
                 else if (File.Exists(entry)) File.Delete(entry);
-                return;
+                return true;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Thread.Sleep(200); }
         }
+        return false;
     }
 }

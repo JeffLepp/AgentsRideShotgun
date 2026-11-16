@@ -128,7 +128,7 @@ static class SettingsScenes
         ThemeChoice themeBefore = AppSettingsStore.Current.Theme;
         AppSettings agentsBefore = AppSettingsStore.Current;
         bool shortcutBefore = ModuleEntry.PauseShortcutTaken;
-        bool opened = false, cleared = false, deleted = false, copied = false, startupSynced = false;
+        bool opened = false, deleted = false, copied = false, startupSynced = false;
         bool scratchIsRunning = false;
         SettingsActions.SyncStartup = _ => { startupSynced = true; return true; };
         List<(WorkspaceConnections.AgentApp App, bool On)> asked = [];
@@ -143,7 +143,7 @@ static class SettingsScenes
         SettingsActions.LogsBytes = () => 34 * 1024 * 1024;
         SettingsActions.Projects = () => [];
         SettingsActions.ScratchRunning = () => scratchIsRunning;
-        SettingsActions.ClearHistory = () => cleared = true;
+        SettingsActions.ClearHistory = () => { };
         SettingsActions.ClearBrowserData = () => { };
         SettingsActions.ClearScratch = () => { };
         SettingsActions.ClearLogs = () => { };
@@ -173,12 +173,12 @@ static class SettingsScenes
             Program.Check(File.Exists(marker) && !startupSynced && window.IsVisible,
                 "Canceling the quit question leaves data, startup registration and Settings untouched");
 
-            Program.Check(view.AvailableCategories.SequenceEqual(["general", "agents", "history"]),
+            Program.Check(view.AvailableCategories.SequenceEqual(["general", "agents", "history", "storage"]),
                 "Only active Settings categories appear before Accounts is wired");
             SettingsFeatures.Accounts = true;
             ShowSettled(view, "general");
-            Program.Check(view.AvailableCategories.SequenceEqual(["general", "agents", "accounts", "history"]),
-                "Settings categories appear in the four-page order");
+            Program.Check(view.AvailableCategories.SequenceEqual(["general", "agents", "accounts", "history", "storage"]),
+                "Settings categories include dedicated Storage after History");
             foreach (var (oldId, expected) in new[]
                 { ("control", "agents"), ("corner", "general"), ("privacy", "history"), ("about", "general"), ("browser", "accounts") })
             {
@@ -383,27 +383,14 @@ static class SettingsScenes
                 && SettingsView.StoragePercentages([null, 0, -1]).SequenceEqual([0, 0, 0])
                 && SettingsView.StoragePercentages([long.MaxValue, long.MaxValue]).SequenceEqual([50, 50]),
                 "Storage meter preserves its total and stable ties for empty and large sizes");
-            await Task.Delay(250);
+            FindButton(view, "Manage storage").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(350);
             Pump();
-            Program.Check(Descendants<TextBlock>(view).Any(x => TextOf(x) == "850 MB used"),
-                "Storage adds only the four displayed kind sizes");
-            Border scratchRow = FindRow(view, "Scratch files");
-            Button scratchClear = Descendants<Button>(scratchRow).First(x => Equals(x.Content, "Clear"));
-            Program.Check(!scratchClear.IsEnabled && Equals(scratchClear.ToolTip, "Scratch is in use"),
-                "Scratch Clear is disabled while Scratch runs");
-            Border historyRow = FindRow(view, "Screenshots and history");
-            Button historyClear = Descendants<Button>(historyRow).First(x => Equals(x.Content, "Clear"));
-            historyClear.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            SettleVisual(historyRow);
-            Program.Check(Descendants<TextBlock>(historyRow).Any(x => TextOf(x) == "Clear 412 MB of screenshots and history?"),
-                "Clear names the data and asks first");
-            Program.Check(!cleared, "Clear has not run before confirmation");
-            Descendants<Button>(historyRow).First(x => Equals(x.Content, "Clear"))
-                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            SettleVisual(historyRow);
-            Program.Check(cleared, "Confirmed Clear reaches its seam");
-            Program.Check(!Descendants<TextBlock>(historyRow).Any(x => TextOf(x).StartsWith("Clear 412 MB", StringComparison.Ordinal)),
-                "Confirmed Clear returns to its normal control");
+            Program.Check(view.Category == "storage" && Descendants<Button>(view).Any(x => Equals(x.Content, "Preview")),
+                "History links to the dedicated Storage page with cleanup previews");
+            Program.Check(Descendants<CheckBox>(view).Any(x => AutomationProperties.GetName(x) == "Automatic safe cleanup"),
+                "Storage exposes the automatic safe retention policy");
+            ShowSettled(view, "history");
             FindButton(view, "Delete").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             SettleVisual(view);
             Program.Check(!deleted, "Delete all data asks first");

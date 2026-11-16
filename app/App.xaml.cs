@@ -12,6 +12,8 @@ namespace Deskweave;
 
 public partial class App : Application
 {
+    internal static bool StartInBackground;
+    internal static bool HostedByHiveMind;
     Mutex? _instance;
     EventWaitHandle? _activate;
     RegisteredWaitHandle? _activationWait;
@@ -33,7 +35,7 @@ public partial class App : Application
             string user = UserKey();
             _instance = new Mutex(false, InstancePrefix + user);
             _activate = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\Deskweave.Show." + user);
-            _ownsInstance = ClaimInstance(_instance, _activate, e.Args.Contains(StartWithWindows.Background), TimeSpan.FromSeconds(5));
+            _ownsInstance = ClaimInstance(_instance, _activate, StartInBackground || e.Args.Contains(StartWithWindows.Background), TimeSpan.FromSeconds(5));
             if (!_ownsInstance)
             {
                 Shutdown();
@@ -55,20 +57,34 @@ public partial class App : Application
             // Only now, holding the lock: no other copy is using the old folders while they move.
             FormerName.MoveData();
             WorkspaceAccessStore.ClearQuit();
-            ModuleEntry.Initialize();
+            ModuleEntry.Initialize(manageConnections: !HostedByHiveMind);
             var window = new MainWindow();
             MainWindow = window;
+            WorkspaceRouter.OwnerShow = workspace =>
+                Dispatcher.InvokeAsync(async () =>
+                {
+                    if (_quitting) throw new InvalidOperationException("ARS is closing.");
+                    await ShowOwnerWindow(window, workspace);
+                }).Task.Unwrap();
             window.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
                 new Uri("pack://application:,,,/Assets/ARS.ico"));
             window.Closing += WindowClosing;
             CreateTray();
+            StorageController.Start();
             _activationWait = ThreadPool.RegisterWaitForSingleObject(_activate,
                 (_, _) => Dispatcher.BeginInvoke(ShowWorkspace), null, Timeout.Infinite, false);
-            StartWithWindows.Sync(AppSettingsStore.Current);
-            AppSettingsStore.Changed += settings => StartWithWindows.Sync(settings);
-            Updates.Start((title, text) => Dispatcher.BeginInvoke(() => Tell(title, text)));
+            if (!HostedByHiveMind)
+            {
+                StartWithWindows.Sync(AppSettingsStore.Current);
+                AppSettingsStore.Changed += settings => StartWithWindows.Sync(settings);
+                Updates.Start((title, text) => Dispatcher.BeginInvoke(() => Tell(title, text)), () =>
+                {
+                    _quitting = true;
+                    Shutdown(); // A restart is not an owner's Quit: do not mark ARS off.
+                });
+            }
             // Started by Windows at sign-in: stay in the tray; the corner window still comes and goes.
-            if (e.Args.Contains(StartWithWindows.Background)) return;
+            if (StartInBackground || e.Args.Contains(StartWithWindows.Background)) return;
             // First launch comes before the hub and instead of it. It is shown once, whichever way
             // it is answered, so an unanswered one is the only reason to hold the hub back.
             if (FirstRunWindow.Needed) ShowFirstRun(window); else window.Show();
@@ -141,6 +157,14 @@ public partial class App : Application
             () => Dispatcher.BeginInvoke(ModuleEntry.RequestPauseAll),
             () => Dispatcher.BeginInvoke(ShowSettings),
             () => Dispatcher.BeginInvoke(RequestQuit));
+        if (!HostedByHiveMind)
+            menu.Items.Insert(menu.Items.Count - 2, new System.Windows.Forms.ToolStripMenuItem("Install update when workspaces stop", null,
+                async (_, _) => await Dispatcher.InvokeAsync(() => Updates.Request("update")).Task.Unwrap()));
+        menu.Items.Insert(4, new System.Windows.Forms.ToolStripMenuItem("Storage", null,
+            (_, _) => Dispatcher.BeginInvoke(() => { if (MainWindow is MainWindow window) window.OpenStorage(); })));
+        if (!HostedByHiveMind)
+            menu.Items.Insert(menu.Items.Count - 2, new System.Windows.Forms.ToolStripMenuItem("Restart when workspaces stop", null,
+                async (_, _) => await Dispatcher.InvokeAsync(() => Updates.Request("restart")).Task.Unwrap()));
         _refreshTrayPause = () => Dispatcher.BeginInvoke(() => TrayMenu.RefreshPause(menu));
         ModuleEntry.AllPausedChanged += _refreshTrayPause;
         using var source = GetResourceStream(new Uri("pack://application:,,,/Assets/ARS.ico")).Stream;
@@ -189,6 +213,26 @@ public partial class App : Application
         if (!_quitting && MainWindow is MainWindow window) window.RestoreWorkspaceWindow();
     }
 
+    internal static async Task ShowOwnerWindow(MainWindow window, string? workspace)
+    {
+        if (!window.IsLoaded)
+        {
+            // Loaded restores saved selection. Apply this explicit selection after it,
+            // including the first time a background-hosted hub is ever shown.
+            var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            RoutedEventHandler onLoaded = (_, _) => loaded.TrySetResult();
+            window.Loaded += onLoaded;
+            try
+            {
+                window.RestoreWorkspaceWindow();
+                await loaded.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            finally { window.Loaded -= onLoaded; }
+        }
+        else window.RestoreWorkspaceWindow();
+        if (workspace is not null) window.ShowWide(workspace);
+    }
+
     internal static void HideOnClose(Window window, CancelEventArgs e)
     {
         e.Cancel = true;
@@ -218,6 +262,9 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _quitting = true;
+        if (_ownsInstance) WorkspaceRouter.OwnerShow = null;
+        Updates.Stop();
+        StorageController.Stop();
         _activationWait?.Unregister(null);
         _activate?.Dispose();
         if (_refreshTrayPause is not null) ModuleEntry.AllPausedChanged -= _refreshTrayPause;
@@ -289,8 +336,9 @@ internal static class TrayMenu
 internal static class QuitQuestion
 {
     internal const string Title = "Quit ARS?";
-    internal static string Body => "Agents working now will stop. Your files stay. Agents can't reopen it: ARS stays closed until you open it"
-        + (AppSettingsStore.Current.StartWithWindows ? " or sign in again." : ".");
+    internal static string Body => "Workspace apps and agents will close. Unsaved work will be lost; save it before quitting. Your saved files stay. Agents can't reopen it: ARS stays closed until you open it"
+        + (App.HostedByHiveMind ? " again through HiveMind or ARS."
+            : AppSettingsStore.Current.StartWithWindows ? " or sign in again." : ".");
     internal const string QuitLabel = "Quit";
     internal const string CancelLabel = "Cancel";
     internal static Func<bool>? ConfirmForTests;
