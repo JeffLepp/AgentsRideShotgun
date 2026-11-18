@@ -120,10 +120,12 @@ internal static class InlineScenes
             Program.Check(view.FindName("MoreButton") is null && view.FindName("StartButton") is null
                 && view.FindName("ShowLogsButton") is Button { IsVisible: true },
                 "The open card has no Show more or Start screen, only Show logs and Show files");
-            shell.OpenWorkspaceFullscreen(first.Id);
+            Click(Descendants<Button>(shell.StackRoot).Single(b => b.IsVisible && Equals(b.Tag, first.Id)
+                && AutomationProperties.GetName(b).EndsWith("in full view", StringComparison.Ordinal)));
             await Task.Delay(150);
-            Program.Check(shell.DisplayMode == "wide" && shell.SelectedWorkspaceId == first.Id && !view.Interactive,
-                "Fullscreen opens the same workspace's full page and releases the hidden inline adapter");
+            Program.Check(shell.DisplayMode == "wide" && shell.SelectedWorkspaceId == first.Id && !view.Interactive
+                && shell.WindowState == WindowState.Normal,
+                "The open card's full-view button opens the same workspace's page at normal size and releases the inline adapter");
             Click(shell.BackButton);
             await Task.Delay(100);
             Program.Check(shell.DisplayMode == "stack" && Math.Abs(shell.ActualWidth - 340) < 2,
@@ -153,7 +155,8 @@ internal static class InlineScenes
                     var more = (Button)view.FindName("ShowLogsButton");
                     var screen = (Image)view.FindName("Screen");
                     Rect button = more.TransformToAncestor(shell).TransformBounds(new Rect(more.RenderSize));
-                    Program.Check(screen.ActualWidth >= 270 && button.Left >= 0 && button.Right <= shell.ActualWidth
+                    // The open screen sits in the card's padding, as wide as the thumbnail it replaces (268 at 320).
+                    Program.Check(screen.ActualWidth >= 260 && button.Left >= 0 && button.Right <= shell.ActualWidth
                         && ProbeWindow.IsOffScreen(shell),
                         $"The {width} DIP {look} inline preview and Show logs button fit the strip off the owner's monitors");
                     more.BringIntoView();
@@ -207,7 +210,7 @@ internal static class InlineScenes
 
     static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     static void ClickRow(MainWindow shell, string id) => Click(Descendants<Button>(shell.StackRoot)
-        .Single(button => Equals(button.Tag, id) && AutomationProperties.GetName(button).Contains("preview for ")));
+        .Single(button => button.IsVisible && Equals(button.Tag, id) && AutomationProperties.GetName(button).Contains("preview for ")));
     static WorkspaceInlineView? Inline(MainWindow shell, string id) => Descendants<WorkspaceInlineView>(shell.StackRoot)
         .FirstOrDefault(view => view.IsVisible && view.DataContext is HubEntry entry && entry.Id == id);
     static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject

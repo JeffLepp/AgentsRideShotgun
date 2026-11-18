@@ -51,6 +51,11 @@ public partial class WorkspaceInlineView : UserControl
         Screen.MouseLeave += (_, _) => HandsOn();
     }
 
+    public static readonly DependencyProperty CaptionProperty =
+        DependencyProperty.Register(nameof(Caption), typeof(object), typeof(WorkspaceInlineView));
+    /// <summary>Shown between the screen and its controls.</summary>
+    public object? Caption { get => GetValue(CaptionProperty); set => SetValue(CaptionProperty, value); }
+
     internal WorkspaceScreenInput? ScreenInput => _input;
     internal bool Interactive => _input is not null;
     void Attach()
@@ -112,17 +117,7 @@ public partial class WorkspaceInlineView : UserControl
         StartWatching();
     }
 
-    (long, DateTime) Signature(string id)
-    {
-        try
-        {
-            if (_open == "logs") { var log = new System.IO.FileInfo(ActivityLog.LogPath(id)); return (log.Exists ? log.Length : -1, default); }
-            // The files' own times too: editing a file need not touch the folder's.
-            var found = new System.IO.DirectoryInfo(WorkspaceStore.FolderOf(id)).GetFiles();
-            return (found.Length, found.Select(f => f.LastWriteTimeUtc).DefaultIfEmpty().Max());
-        }
-        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { return (-1, default); }
-    }
+    (long, DateTime) Signature(string id) => ActivityLog.Signature(id, _open == "logs");
 
     void StartWatching()
     {
@@ -145,15 +140,15 @@ public partial class WorkspaceInlineView : UserControl
         Refresh();
     }
 
-    /// <summary>Opening a running card hides its thumbnail, so the second click of a double-click
-    /// lands here. Within the double-click time it finishes that double-click (fullscreen) and never
-    /// reaches the workspace as a click.</summary>
+    /// <summary>Opening a running card puts this screen where its thumbnail was, so the second click
+    /// of a double-click lands here. Within the double-click time it finishes that double-click (the
+    /// workspace page) and never reaches the workspace as a click.</summary>
     void Frame_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         // Only that second click: an ordinary click just after opening still reaches Start or the screen.
         if (e.ClickCount < 2 || Environment.TickCount64 - _shownAt > System.Windows.Forms.SystemInformation.DoubleClickTime) return;
         e.Handled = true;
-        if (_entry is { } entry && Window.GetWindow(this) is MainWindow shell) shell.OpenWorkspaceFullscreen(entry.Id);
+        if (_entry is { } entry && Window.GetWindow(this) is MainWindow shell) shell.ShowWide(entry.Id);
     }
 
     void File_Click(object sender, RoutedEventArgs e)

@@ -58,6 +58,8 @@
                 </Button>
             </Grid>
         </Border>
+        <!-- A working card puts its name here, under the screen as when it is closed. -->
+        <ContentPresenter Content="{Binding Caption, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
         <Grid Margin="2,7,2,4">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <TextBlock x:Name="StateText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>

@@ -80,36 +80,40 @@
             </Style.Triggers>
         </Style>
 
-        <!-- A working workspace: its screen across the whole card, big
-             enough to watch, with the name and what the agent is doing under it. -->
+        <!-- A working card's name and what the agent is doing, under its screen whether the card is closed or open. -->
+        <DataTemplate x:Key="CardCaption">
+            <StackPanel>
+                <TextBlock Margin="3,0,34,0" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{DynamicResource InkBrush}" TextTrimming="CharacterEllipsis"/>
+                <Grid Margin="3,4,34,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Ellipse Style="{StaticResource StatusDot}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding AgentText}" FontSize="12" Style="{StaticResource AgentTextStyle}"
+                               TextTrimming="CharacterEllipsis" ToolTip="{Binding AgentText}"/>
+                </Grid>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- A working workspace: its screen across the whole card, big enough to watch, with the
+             caption under it. Opening the card swaps the thumbnail for the live screen in the same
+             spot, so there is only ever one screen. -->
         <DataTemplate x:Key="WorkingCardTemplate">
-            <StackPanel Margin="0,3,0,5">
-                <Border CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}" Background="{DynamicResource CardBrush}">
-                    <Border.ContextMenu><ContextMenu><MenuItem Header="Stop this workspace" Click="StopMenu_Click" Tag="{Binding Id}"/></ContextMenu></Border.ContextMenu>
+            <Border Margin="0,3,0,5" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}" Background="{DynamicResource CardBrush}">
+                <Border.ContextMenu><ContextMenu><MenuItem Header="Stop this workspace" Click="StopMenu_Click" Tag="{Binding Id}"/></ContextMenu></Border.ContextMenu>
+                <Grid>
                     <Grid>
+                        <Grid.Style><Style TargetType="Grid"><Style.Triggers>
+                            <DataTrigger Binding="{Binding Expanded}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                        </Style.Triggers></Style></Grid.Style>
                         <Button Style="{StaticResource StackItemButton}" Click="WorkingCard_Click" MouseDoubleClick="WorkspaceCard_DoubleClick"
                                 PreviewKeyDown="WorkspaceCard_KeyDown" Tag="{Binding Id}"
                                 ToolTip="{Binding PreviewTip}" AutomationProperties.Name="{Binding PreviewLabel}">
                             <StackPanel Margin="7,7,7,8">
-                                <!-- Hidden while expanded: the open card's one screen is the interactive one below. -->
                                 <Border Tag="0.625" Loaded="AspectBorder_Loaded" CornerRadius="6" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
                                         Background="{DynamicResource PreviewBrush}" ClipToBounds="True" Margin="0,0,0,8">
-                                    <Border.Style><Style TargetType="Border"><Style.Triggers>
-                                        <DataTrigger Binding="{Binding Expanded}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
-                                    </Style.Triggers></Style></Border.Style>
                                     <Image Source="{Binding Preview}" Stretch="UniformToFill"/>
                                 </Border>
-                                <Grid Margin="3,0,34,0">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <TextBlock Grid.ColumnSpan="2" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource InkBrush}" TextTrimming="CharacterEllipsis"/>
-                                </Grid>
-                                <Grid Margin="3,4,34,0">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <Ellipse Style="{StaticResource StatusDot}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="1" Text="{Binding AgentText}" FontSize="12" Style="{StaticResource AgentTextStyle}"
-                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding AgentText}"/>
-                                </Grid>
+                                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource CardCaption}"/>
                             </StackPanel>
                         </Button>
                         <Button Width="28" Height="28" Padding="0" Margin="0,0,8,9" HorizontalAlignment="Right" VerticalAlignment="Bottom" Style="{StaticResource IconButton}"
@@ -117,9 +121,33 @@
                             <Path Style="{StaticResource Icon13}" Data="{StaticResource Icon.Sleep}"/>
                         </Button>
                     </Grid>
-                </Border>
-                <local:WorkspaceInlineView Visibility="{Binding Expanded, Converter={StaticResource BoolToVis}}"/>
-            </StackPanel>
+                    <!-- Open: the screen takes clicks as input, so only the caption under it closes the card. -->
+                    <local:WorkspaceInlineView Margin="7,1,7,-4" Visibility="{Binding Expanded, Converter={StaticResource BoolToVis}}">
+                        <local:WorkspaceInlineView.Caption>
+                            <Grid Margin="0,8,0,0">
+                                <Button Style="{StaticResource StackItemButton}" Click="WorkingCard_Click" MouseDoubleClick="WorkspaceCard_DoubleClick"
+                                        PreviewKeyDown="WorkspaceCard_KeyDown" Tag="{Binding Id}"
+                                        ToolTip="{Binding PreviewTip}" AutomationProperties.Name="{Binding PreviewLabel}">
+                                    <!-- Right margin: room for the second button beside Sleep. -->
+                                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource CardCaption}" Margin="0,0,28,2"/>
+                                </Button>
+                                <!-- A double-click on the live screen is input for the workspace, so the page
+                                     a closed card's double-click opens has its own button here. -->
+                                <StackPanel Orientation="Horizontal" Margin="0,0,1,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Width="28" Height="28" Padding="0" Style="{StaticResource IconButton}"
+                                            Click="OpenPage_Click" Tag="{Binding Id}" ToolTip="Open full view" AutomationProperties.Name="{Binding Name, StringFormat=Open {0} in full view}">
+                                        <Path Style="{StaticResource Icon13}" Data="{StaticResource Icon.Open}"/>
+                                    </Button>
+                                    <Button Width="28" Height="28" Padding="0" Style="{StaticResource IconButton}"
+                                            Click="SleepCard_Click" Tag="{Binding Id}" ToolTip="{Binding SleepLabel}" AutomationProperties.Name="{Binding SleepLabel}">
+                                        <Path Style="{StaticResource Icon13}" Data="{StaticResource Icon.Sleep}"/>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </local:WorkspaceInlineView.Caption>
+                    </local:WorkspaceInlineView>
+                </Grid>
+            </Border>
         </DataTemplate>
 
         <DataTemplate x:Key="AsleepRowTemplate">

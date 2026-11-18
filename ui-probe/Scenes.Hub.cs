@@ -184,30 +184,30 @@ static class HubScenes
                 "Starting a workspace's computer moves it from Recent to Working");
             window.UpdateLayout();
             var stackCards = (ItemsControl)window.FindName("StackWorkingList");
-            Button workingCard = CardButtons(stackCards).Single(b => b.Tag as string == shop.Id
+            Button workingCard = CardButtons(stackCards).Single(b => b.IsVisible && b.Tag as string == shop.Id
                 && b.Style == (Style)window.FindResource("StackItemButton"));
             workingCard.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0,
                 System.Windows.Input.MouseButton.Left) { RoutedEvent = Control.MouseDoubleClickEvent });
             await Task.Delay(200);
             Program.Check(window.DisplayMode == "wide" && window.SelectedWorkspaceId == shop.Id
-                && window.WindowState == WindowState.Maximized,
-                "Double-clicking the actual working card opens its workspace fullscreen");
+                && window.WindowState == WindowState.Normal,
+                "Double-clicking the actual working card opens its workspace page at normal size, not maximized");
             window.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
                 System.Windows.PresentationSource.FromVisual(window), 0, System.Windows.Input.Key.Escape)
                 { RoutedEvent = UIElement.PreviewKeyDownEvent });
             await Task.Delay(200);
             Program.Check(window.DisplayMode == "stack" && window.WindowState == WindowState.Normal
                 && Math.Abs(window.ActualWidth - 350) < 2 && Math.Abs(window.ActualHeight - 510) < 2,
-                "Escape from fullscreen returns to the compact strip at its saved size");
+                "Escape from the workspace page returns to the compact strip at its saved size");
             var recentRows = (ItemsControl)window.FindName("StackAsleepList");
-            Button recentCard = CardButtons(recentRows).Single(b => b.Tag as string == recentOne.Id
+            Button recentCard = CardButtons(recentRows).Single(b => b.IsVisible && b.Tag as string == recentOne.Id
                 && b.Style == (Style)window.FindResource("StackItemButton"));
             recentCard.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0,
                 System.Windows.Input.MouseButton.Left) { RoutedEvent = Control.MouseDoubleClickEvent });
             await Task.Delay(200);
             Program.Check(window.DisplayMode == "wide" && window.SelectedWorkspaceId == recentOne.Id
-                && window.WindowState == WindowState.Maximized && WorkspaceRuntime.Of(recentOne.Id) is null,
-                "Double-clicking a recent workspace opens fullscreen without restarting its apps");
+                && window.WindowState == WindowState.Normal && WorkspaceRuntime.Of(recentOne.Id) is null,
+                "Double-clicking a recent workspace opens its page without restarting its apps");
             window.ShowStack();
             window.ShowWide(shop.Id);
             await Task.Delay(300);
@@ -441,6 +441,27 @@ static class HubScenes
             await Task.Delay(1300);
             Program.Check(ReferenceEquals(idleView.ScreenPicture.Source, beforeSleep),
                 "...and takes no further captures: the picture is still the exact frame it went to sleep with");
+
+            // --- a restart under the open page: its old picture takes no clicks ---------------------
+            using (WorkspaceRuntime woken = WorkspaceRuntime.Start(idling))
+            {
+                // Synchronous with the start, so no tick can have shown the new screen's frame yet.
+                Program.Check(!idleView.ScreenInput!.Press(new Point(5, 5), false) && woken.Plane?.Driving != Driver.Owner,
+                    "A workspace that restarts under its open page takes no click on the old picture");
+                for (DateTime until = DateTime.UtcNow.AddSeconds(12); !idleView.ScreenInput!.Press(new Point(5, 5), false) && DateTime.UtcNow < until;)
+                    await Task.Delay(100);
+                Program.Check(woken.Plane?.Driving == Driver.Owner, "...and does once its own frame is on screen");
+                woken.Plane!.Release();
+            }
+
+            // --- "What it did" follows the log while the page is open ---------------------------------
+            int rowsBefore = idleView.DidList.Items.Count;
+            string actionsLog = ActivityLog.LogPath(idling.Id);
+            Directory.CreateDirectory(Path.GetDirectoryName(actionsLog)!);
+            File.AppendAllText(actionsLog, $"{DateTime.UtcNow:O}\tmission\tDone\tpage refresh check\n");
+            for (DateTime until = DateTime.UtcNow.AddSeconds(8); idleView.DidList.Items.Count == rowsBefore && DateTime.UtcNow < until;)
+                await Task.Delay(150);
+            Program.Check(idleView.DidList.Items.Count > rowsBefore, "The open page shows a new step without reselecting the workspace");
 
             // --- taking over is legible ---------------------------------------------------------------
             StoredWorkspace driven = WorkspaceStore.Create("driven");

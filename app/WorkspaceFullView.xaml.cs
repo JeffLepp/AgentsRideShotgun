@@ -31,6 +31,11 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     bool _capturingScreen;
     /// <summary>A live frame has been on screen for this workspace, so the stored one is past.</summary>
     bool _liveShown;
+    /// <summary>The screen the picture on show came from. Input goes only to that screen, so a
+    /// workspace that restarted never takes clicks aimed at its old picture.</summary>
+    WorkspaceControl? _shownPlane;
+    /// <summary>What "What it did" and "Files" were last read from.</summary>
+    (long, DateTime) _didSeen, _filesSeen;
     /// <summary>Whichever runtime "You have control" is currently listening to, so the toast still
     /// clears if this workspace slept and woke again under a new WorkspaceRuntime while the page
     /// was open. Re-synced every RefreshLive tick rather than fixed once in SetWorkspace.</summary>
@@ -75,7 +80,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         _id = id;
         Reload();
         // Clicking the screen takes over right there, the same as the corner window.
-        _input = new WorkspaceScreenInput(ScreenImage, () => WorkspaceRuntime.Of(_id));
+        _input = new WorkspaceScreenInput(ScreenImage, () =>
+            WorkspaceRuntime.Of(_id ?? "") is { Plane: { } plane } runtime && ReferenceEquals(plane, _shownPlane) ? runtime : null);
         _input.OwnerActed += OwnerActed;
         // Full desktop: the agent's screen gets its taskbar here too, under the Last seen pill.
         _taskbar = new WorkspaceTaskbar(() => _id is { } shown ? WorkspaceRuntime.Of(shown) : null, () => _input?.Touch(), 40)
@@ -107,6 +113,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         PathText.Text = WorkspaceHome.IsFolder(workspace.Agents) ? workspace.Agents[folderPrefix.Length..] : WorkspaceStore.FolderOf(id);
         ScreenImage.Source = null;
         _liveShown = false;
+        _shownPlane = null;
         ShowStoredFrame(id);
         RefreshLive();
         LoadDid(id);
@@ -172,6 +179,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     void LoadDid(string id)
     {
+        _didSeen = ActivityLog.Signature(id, logs: true);
         _did.Clear();
         foreach (DidRow row in ActivityLog.Read(id)) _did.Add(row);
         DidEmptyText.Visibility = _did.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -181,6 +189,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     void LoadFiles(string id)
     {
+        _filesSeen = ActivityLog.Signature(id, logs: false);
         _files.Clear();
         foreach (FileRow row in ActivityLog.Files(id)) _files.Add(row);
         FilesEmptyText.Visibility = _files.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -218,6 +227,9 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         {
             _livedAt = Environment.TickCount64;
             RefreshLive();
+            // A finished command or a new file shows without reselecting the workspace.
+            if (ActivityLog.Signature(id, logs: true) != _didSeen) LoadDid(id);
+            if (ActivityLog.Signature(id, logs: false) != _filesSeen) LoadFiles(id);
         }
         // One capture in flight at a time: a slow Task.Run from an earlier tick must finish (or be
         // dropped below) before another starts, rather than racing it.
@@ -249,6 +261,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             if (_disposed || id != _id || !IsVisible || frame is null) return;
             ScreenImage.Source = frame;
             _liveShown = true;
+            _shownPlane = plane;
         }
         finally { _capturingScreen = false; }
     }

@@ -140,10 +140,9 @@ static class LifecycleChecks
                 encoder.Save(whole);
                 File.WriteAllBytes(frame, whole.ToArray()[..(int)(whole.Length / 2)]);
             }
+            // The workspace page loads its last picture through this same call.
             BitmapSource? hubPicture = await HubLastLook.FullAsync(cut.Id);
-            object? pagePicture = typeof(WorkspaceFullView).GetMethod("LoadImage", BindingFlags.Static | BindingFlags.NonPublic)!
-                .Invoke(null, [frame]);
-            Program.Check(hubPicture is null && pagePicture is null, "A cut-off last picture shows nothing instead of crashing the workspace page");
+            Program.Check(hubPicture is null, "A cut-off last picture shows nothing instead of crashing the workspace page");
         }
         finally { WorkspaceStore.Delete(cut.Id); }
     }

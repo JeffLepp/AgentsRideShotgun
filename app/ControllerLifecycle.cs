@@ -32,7 +32,7 @@ internal static class ControllerLifecycle
             Console.WriteLine(status);
             return status.StartsWith("Accepted:", StringComparison.Ordinal) || operation == "status" ? 0 : 1;
         }
-        catch (Exception error) when (error is IOException or JsonException or OperationCanceledException or UnauthorizedAccessException
+        catch (Exception error) when (error is IOException or JsonException or OperationCanceledException or TimeoutException or UnauthorizedAccessException
             or KeyNotFoundException or InvalidOperationException or ArgumentException)
         { Console.Error.WriteLine("ARS lifecycle command failed: " + error.Message); return 1; }
     }

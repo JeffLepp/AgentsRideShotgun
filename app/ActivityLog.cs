@@ -182,6 +182,20 @@ internal static class ActivityLog
         catch (UnauthorizedAccessException) { return []; }
     }
 
+    /// <summary>What a list was read from (log size, or the folder's file count and newest write), so
+    /// an open list can reread only when it changed.</summary>
+    public static (long, DateTime) Signature(string id, bool logs)
+    {
+        try
+        {
+            if (logs) { var log = new FileInfo(LogPath(id)); return (log.Exists ? log.Length : -1, default); }
+            // The files' own times too: editing a file need not touch the folder's.
+            var found = new DirectoryInfo(WorkspaceStore.FolderOf(id)).GetFiles();
+            return (found.Length, found.Select(f => f.LastWriteTimeUtc).DefaultIfEmpty().Max());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (-1, default); }
+    }
+
     /// <summary>Opens a file or folder with its Windows default; false when Windows refuses.</summary>
     public static bool Open(string path)
     {
