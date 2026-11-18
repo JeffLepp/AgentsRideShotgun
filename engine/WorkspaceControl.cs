@@ -693,11 +693,48 @@ public sealed partial class WorkspaceControl : IDisposable
             return 0;
         }
         int pid = _desktop.Launch(exe, arguments, _requiredLease.Value ?? 0, group, windowless: windowless);
+        Task<Started>? opening = !quiet && pid != 0
+            ? Task.Run(() => WindowReady(pid, CancellationToken.None, 10000, TimeSpan.FromMilliseconds(250))) : null;
         if (pid != 0 && _desktop.Windows().Count > 0) PresentBrowser(false);
         if (!quiet)
-            Note("open", Path.GetFileName(exe) + (arguments is null ? "" : " " + arguments),
-                pid == 0 ? "REFUSED" : "pid " + pid);
+        {
+            string detail = Path.GetFileName(exe) + (arguments is null ? "" : " " + arguments);
+            Note("open", detail, pid == 0 ? "REFUSED" : "pid " + pid);
+            if (opening is not null) _ = Task.Run(() => WatchOpen(opening, exe, detail));
+        }
         return pid;
+    }
+
+    async Task WatchOpen(Task<Started> opening, string exe, string detail)
+    {
+        try
+        {
+            if (await opening.ConfigureAwait(false) == Started.Exited && !_disposed && RunningOutside(exe) is not null)
+                Note("open", detail, "failed: already running on your desktop, so it opened there");
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException
+            or System.ComponentModel.Win32Exception) { }
+    }
+
+    internal enum Started { Showing, Starting, Exited }
+
+    // Shared with MCP, whose longer wait still gives slow applications time to draw.
+    internal async Task<Started> WindowReady(int pid, CancellationToken cancel, int waitMilliseconds, TimeSpan? windowBound = null)
+    {
+        long until = Environment.TickCount64 + waitMilliseconds;
+        while (Environment.TickCount64 < until && (windowBound is null || !_disposed))
+        {
+            IReadOnlyList<AgentWindow>? windows = windowBound is { } bound ? _desktop.Windows(bound) : _desktop.Windows();
+            // A stalled desktop cannot prove that the application never showed a window.
+            if (windows is null) return Started.Starting;
+            if (windows.Any(window =>
+                { Native.GetWindowThreadProcessId(window.Handle, out int process); return process == pid; }))
+                return Started.Showing;
+            try { using var process = Process.GetProcessById(pid); if (process.HasExited) return Started.Exited; }
+            catch (ArgumentException) { return Started.Exited; }
+            await Task.Delay(100, cancel).ConfigureAwait(false);
+        }
+        return Started.Starting;
     }
 
     /// <summary>

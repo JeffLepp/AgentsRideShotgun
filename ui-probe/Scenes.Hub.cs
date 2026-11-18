@@ -246,20 +246,62 @@ static class HubScenes
             Program.Check(raised && window.SelectedWorkspaceId == recentOne.Id,
                 "The corner window's open-in-hub opens that workspace in the wide window");
 
-            // --- opening a recent workspace starts nothing; its More menu is exactly
-            // Rename, Delete (Stop/Start computer and Who can use it are gone) -------------------
+            // Opening a recent workspace starts nothing, even in its own window.
             WorkspaceFullView moreView = window.OpenWorkspaceView!;
             Program.Check(WorkspaceRuntime.Of(recentOne.Id) is null,
                 "Opening a recent workspace starts nothing");
             moreView.MoreButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Task.Delay(100);
             var moreItems = moreView.LastMoreMenu?.Items.Cast<object>().ToList() ?? [];
-            Program.Check(moreItems.Count == 3 && moreItems[0] is MenuItem { Header: "Rename" }
-                && moreItems[1] is Separator && moreItems[2] is MenuItem { Header: "Delete" },
-                "The More menu is exactly Rename, Delete, with a separator before Delete");
+            Program.Check(moreItems.Count == 4 && moreItems[0] is MenuItem { Header: "Pop out" }
+                && moreItems[1] is MenuItem { Header: "Rename" } && moreItems[2] is Separator && moreItems[3] is MenuItem { Header: "Delete" },
+                "The More menu starts with Pop out, then Rename and a separator before Delete");
             moreView.LastMoreMenu!.IsOpen = false;
             Program.Check(WorkspaceRuntime.Of(recentOne.Id) is null,
                 "...and the More menu itself never starts that workspace's computer");
+            Program.Check(!moreView.ScreenRightDown(new Point(5, 5)) && !moreView.ScreenRightUp(),
+                "A sleeping screen neither opens a desktop menu nor consumes a pending release");
+            var popOut = (MenuItem)moreItems[0];
+            popOut.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await Task.Delay(200);
+            WorkspaceWindow? popped = WorkspaceWindow.Find(recentOne.Id);
+            Program.Check(popped is { WindowState: WindowState.Normal, Width: >= 960 and <= 1600, Height: >= 600 and <= 1000 }
+                && popped.View.WorkspaceId == recentOne.Id && popped.Title == recentOne.Name + " · ARS"
+                && window.DisplayMode == "stack", "Pop out opens a normal workspace window within its size bounds and returns the hub to the stack");
+            popOut.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Program.Check(ReferenceEquals(WorkspaceWindow.Find(recentOne.Id), popped)
+                && Application.Current.Windows.OfType<WorkspaceWindow>().Count(w => w.View.WorkspaceId == recentOne.Id) == 1,
+                "Popping out again activates the one existing window");
+            popped!.View.MoreButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Program.Check(!popped.View.LastMoreMenu!.Items.OfType<MenuItem>().Any(item => item.Header as string == "Pop out"),
+                "A pop-out's own More menu does not offer another pop-out");
+            popped.View.LastMoreMenu.IsOpen = false;
+            popped.View.LastMoreMenu.Items.OfType<MenuItem>().Single(item => item.Header as string == "Rename")
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            popped.View.RenameBox.Text = "Renamed pop-out";
+            popped.View.RenameBox.RaiseEvent(new RoutedEventArgs(UIElement.LostFocusEvent));
+            Program.Check(popped.Title == "Renamed pop-out · ARS" && window.Hub.Find(recentOne.Id)?.Name == "Renamed pop-out",
+                "Renaming in the pop-out updates its title and the hub entry");
+            window.ShowWide(recentOne.Id);
+            Program.Check(window.DisplayMode == "stack", "Reopening a popped-out workspace keeps only its separate page live");
+            popped.Close();
+            Program.Check(WorkspaceWindow.Find(recentOne.Id) is null
+                && !Application.Current.Windows.OfType<WorkspaceWindow>().Any(w => w.View.WorkspaceId == recentOne.Id),
+                "Closing the pop-out removes its window and lookup entry");
+            StoredWorkspace disposable = WorkspaceStore.Create("delete-pop-out");
+            window.PopOutWorkspace(disposable.Id);
+            WorkspaceWindow deleting = WorkspaceWindow.Find(disposable.Id)!;
+            deleting.View.MoreButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            deleting.View.LastMoreMenu!.IsOpen = false;
+            WorkspaceFullView.ConfirmDeleteForTests = () => true;
+            try
+            {
+                deleting.View.LastMoreMenu.Items.OfType<MenuItem>().Single(item => item.Header as string == "Delete")
+                    .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            }
+            finally { WorkspaceFullView.ConfirmDeleteForTests = null; }
+            Program.Check(WorkspaceWindow.Find(disposable.Id) is null && WorkspaceStore.Find(disposable.Id) is null,
+                "Deleting from a pop-out closes its window");
 
             // --- store/attention events off the UI thread; dispose vs a queued refresh
             Exception? crossThreadFailure = null;
@@ -288,7 +330,9 @@ static class HubScenes
                 "...and the still-live hub window's own view model keeps refreshing normally afterward");
             if (raceWorkspace is not null) WorkspaceStore.Delete(raceWorkspace.Id);
 
+            window.PopOutWorkspace(recentOne.Id);
             window.Dispose();
+            Program.Check(WorkspaceWindow.Find(recentOne.Id) is null, "Disposing the main window closes its pop-outs");
             WorkspaceStore.Delete(shop.Id);
             WorkspaceStore.Delete(recentOne.Id);
         }
@@ -426,6 +470,8 @@ static class HubScenes
             Program.Check(!VisibleWords(window).Contains("asleep", StringComparison.OrdinalIgnoreCase),
                 "Sleep control's wording never uses the reserved word asleep");
 
+            await ScreenMenuChecks(idleView, idlingRuntime);
+
             BitmapSource? beforeSleep = (BitmapSource?)idleView.ScreenPicture.Source;
             idleView.SleepButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Task.Delay(300);
@@ -434,6 +480,8 @@ static class HubScenes
                 "...and the hub moves it from Working to Recent");
             Program.Check(idleView.SleepButton.Visibility == Visibility.Collapsed,
                 "...and the now-sleeping page hides its own Sleep control");
+            Program.Check(!idleView.ScreenRightDown(new Point(5, 5)) && !idleView.ScreenInput!.Press(new Point(5, 5), true),
+                "A sleeping screen neither opens the desktop menu nor forwards right-clicks");
 
             // --- a sleeping workspace looks asleep instead of broken ---------------------------------
             Program.Check(idleView.ScreenPicture.Opacity < 1.0 && idleView.LastSeenPill.Visibility == Visibility.Visible,
@@ -446,7 +494,8 @@ static class HubScenes
             using (WorkspaceRuntime woken = WorkspaceRuntime.Start(idling))
             {
                 // Synchronous with the start, so no tick can have shown the new screen's frame yet.
-                Program.Check(!idleView.ScreenInput!.Press(new Point(5, 5), false) && woken.Plane?.Driving != Driver.Owner,
+                Program.Check(!idleView.ScreenRightDown(new Point(5, 5))
+                    && !idleView.ScreenInput!.Press(new Point(5, 5), false) && woken.Plane?.Driving != Driver.Owner,
                     "A workspace that restarts under its open page takes no click on the old picture");
                 for (DateTime until = DateTime.UtcNow.AddSeconds(12); !idleView.ScreenInput!.Press(new Point(5, 5), false) && DateTime.UtcNow < until;)
                     await Task.Delay(100);
@@ -488,6 +537,58 @@ static class HubScenes
             WorkspaceStore.Delete(driven.Id);
         }
         finally { window.Close(); }
+    }
+
+    static async Task ScreenMenuChecks(WorkspaceFullView view, WorkspaceRuntime runtime)
+    {
+        Point empty = new(view.ScreenPicture.ActualWidth / 2, view.ScreenPicture.ActualHeight / 2);
+        bool intercepted = false;
+        for (DateTime until = DateTime.UtcNow.AddSeconds(12); !intercepted && DateTime.UtcNow < until;)
+        {
+            intercepted = view.ScreenRightDown(empty);
+            if (!intercepted) await Task.Delay(100);
+        }
+        Program.Check(intercepted && view.ScreenRightUp() && view.LastScreenMenu?.IsOpen == true,
+            "An empty live desktop consumes both halves of a right-click and opens its menu");
+        ContextMenu menu = view.LastScreenMenu!;
+        var labels = menu.Items.OfType<MenuItem>().Select(item => item.Header as string).ToArray();
+        Program.Check(labels.Contains("Pop out") && !labels.Contains("Give back control")
+            && labels.Contains("Open an app...") == view.Taskbar!.IsVisible && runtime.Plane!.Driving != Driver.Owner,
+            "The desktop menu offers Pop out and the visible taskbar's launcher without taking control");
+        Program.Check(menu.Items.OfType<MenuItem>().All(item => AutomationProperties.GetName(item) == item.Header as string),
+            "Every desktop menu item has an accessible name");
+        menu.IsOpen = false;
+        Visibility taskbarVisibility = view.Taskbar!.Visibility;
+        view.ScreenInput!.SimulateClickForTests();
+        view.Taskbar.Visibility = Visibility.Collapsed;
+        Program.Check(view.ScreenRightDown(empty) && view.ScreenRightUp(), "The owner can open the menu while holding control");
+        menu = view.LastScreenMenu!;
+        Program.Check(!menu.Items.OfType<MenuItem>().Any(item => item.Header as string == "Open an app..."),
+            "The desktop menu hides Open an app when the taskbar is hidden");
+        menu.IsOpen = false;
+        menu.Items.OfType<MenuItem>().Single(item => item.Header as string == "Give back control")
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Program.Check(!view.ScreenInput.OwnsControl && runtime.Plane!.Driving != Driver.Owner,
+            "Give back control releases the view's owner lease");
+        view.Taskbar.Visibility = taskbarVisibility;
+
+        runtime.Computer!.Launch(Path.Combine(Environment.SystemDirectory, "notepad.exe"));
+        for (DateTime until = DateTime.UtcNow.AddSeconds(12); runtime.Computer.Windows().Count == 0 && DateTime.UtcNow < until;)
+            await Task.Delay(100);
+        AgentWindow target = runtime.Computer.Windows().First();
+        Image picture = view.ScreenPicture;
+        double scale = Math.Max(picture.ActualWidth / AgentDesktop.ScreenWidth, picture.ActualHeight / AgentDesktop.ScreenHeight);
+        var point = new Point((picture.ActualWidth - AgentDesktop.ScreenWidth * scale) / 2 + (target.X + target.Width / 2.0) * scale,
+            (picture.ActualHeight - AgentDesktop.ScreenHeight * scale) / 2 + (target.Y + target.Height / 2.0) * scale);
+        Program.Check(!view.ScreenRightDown(point) && !view.ScreenRightUp() && view.LastScreenMenu?.IsOpen != true,
+            "A right-click over a workspace window does not open or consume the desktop menu");
+        Program.Check(view.ScreenInput.Press(point, true), "That right-click is accepted by the existing workspace input adapter");
+        for (DateTime until = DateTime.UtcNow.AddSeconds(5);
+            Program.RootOf(runtime.Computer.LastClickedForTests) != target.Handle && DateTime.UtcNow < until;)
+            await Task.Delay(100);
+        Program.Check(Program.RootOf(runtime.Computer.LastClickedForTests) == target.Handle,
+            "The right-click reaches the workspace application window");
+        view.ScreenInput.Release();
     }
 
     static IEnumerable<Button> CardButtons(DependencyObject root)

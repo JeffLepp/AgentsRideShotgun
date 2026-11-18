@@ -736,6 +736,30 @@ static class Program
             && shapedRows[2] is { Prefix: "Opened ", Code: "localhost:5173", Note: "×3" }
             && shapedRows[3].Prefix == "Done: build passes",
             "Activity shows the real command with ✓/✗, folds repeats and says the day once");
+        const string launchReason = "already running on your desktop, so it opened there";
+        string[] originalLines = File.ReadAllLines(ActivityLog.LogPath(shaped.Id));
+        File.AppendAllLines(ActivityLog.LogPath(shaped.Id),
+        [
+            $"{at.AddMinutes(7):O}\topen\tDiscord.exe\tpid 42",
+            $"{at.AddMinutes(8):O}\topen\tDiscord.exe\tfailed: {launchReason}",
+        ]);
+        List<DidRow> warned = ActivityLog.Read(shaped.Id);
+        Check(warned.Count == shapedRows.Count + 1 && warned[^1] is { Prefix: "Opened ", Code: "Discord.exe", Mark: "⚠", Failed: true }
+            && warned[^1].Warning == launchReason,
+            "A failed open updates its earlier row with a warning and reason, without adding a row");
+        List<DidRow> trimmed = ActivityLog.Parse([$"{at:O}\topen\tDiscord.exe\tfailed: {launchReason}"], null, 40);
+        Check(trimmed.Count == 1 && trimmed[0] is { Code: "Discord.exe", Mark: "⚠", Failed: true }
+            && trimmed[0].Warning == launchReason, "A failed open whose start was trimmed still shows one warning row");
+        List<DidRow> repeated = ActivityLog.Parse(
+        [
+            $"{at:O}\topen\tDiscord.exe\tpid 41",
+            $"{at:O}\topen\tDiscord.exe\tpid 42",
+            $"{at:O}\tpage\tDiscord.exe\tok",
+            $"{at:O}\topen\tDiscord.exe\tfailed: {launchReason}",
+        ], null, 40);
+        Check(repeated.Count == 3 && !repeated[0].Failed && repeated[1].Warning == launchReason && !repeated[2].Failed,
+            "A failed open marks only the most recent matching launch, not an earlier launch or page");
+        File.WriteAllLines(ActivityLog.LogPath(shaped.Id), originalLines);
         _window.OpenInStack(shaped.Id);
         await Settle();
         WorkspaceInlineView? shapedInline = null;

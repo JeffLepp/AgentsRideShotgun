@@ -354,14 +354,51 @@
         <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="Padding" Value="4"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContextMenu">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <ItemsPresenter/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
     <Style x:Key="AppMenuItemStyle" TargetType="MenuItem">
         <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
         <Setter Property="Padding" Value="10,6"/>
         <Setter Property="Background" Value="Transparent"/>
-        <Style.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger></Style.Triggers>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+        </Style.Triggers>
     </Style>
-    <Style TargetType="ContextMenu" BasedOn="{StaticResource AppContextMenuStyle}"/>
+    <Style x:Key="AppMenuSeparatorStyle" TargetType="Separator">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Margin="0,4" Background="{DynamicResource HairlineBrush}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="ContextMenu" BasedOn="{StaticResource AppContextMenuStyle}">
+        <Style.Resources>
+            <Style TargetType="Separator" BasedOn="{StaticResource AppMenuSeparatorStyle}"/>
+            <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator" BasedOn="{StaticResource AppMenuSeparatorStyle}"/>
+        </Style.Resources>
+    </Style>
     <Style TargetType="MenuItem" BasedOn="{StaticResource AppMenuItemStyle}"/>
     <Style TargetType="ToolTip">
         <Setter Property="Background" Value="{DynamicResource CardBrush}"/>

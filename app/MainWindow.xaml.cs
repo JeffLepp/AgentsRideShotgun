@@ -151,6 +151,12 @@ public partial class MainWindow : Window, IDisposable
 
     internal void ShowWide(string? select)
     {
+        if (WorkspaceWindow.Find(select ?? _selectedId ?? "") is { } popped)
+        {
+            ShowStack();
+            popped.BringForward();
+            return;
+        }
         CloseCardSettings(animate: false);
         RememberPlacement();
         _mode = "wide";
@@ -168,6 +174,12 @@ public partial class MainWindow : Window, IDisposable
 
     internal void SelectWorkspace(string id)
     {
+        if (WorkspaceWindow.Find(id) is { } popped)
+        {
+            ShowStack();
+            popped.BringForward();
+            return;
+        }
         _selectedId = id;
         _hub.Select(id);
         RebuildStackLists();
@@ -180,9 +192,22 @@ public partial class MainWindow : Window, IDisposable
     {
         if (_workspaceView is not null) return;
         _workspaceView = new WorkspaceFullView();
-        _workspaceView.Renamed += (id, name) => { if (_hub.Find(id) is { } entry) entry.Name = name; };
+        _workspaceView.Renamed += WorkspaceRenamed;
         _workspaceView.Deleted += id => { if (_selectedId == id) ShowStack(); };
         MainSlot.Content = _workspaceView;
+    }
+
+    internal void WorkspaceRenamed(string id, string name)
+    {
+        if (_hub.Find(id) is { } entry) entry.Name = name;
+    }
+
+    internal void PopOutWorkspace(string id)
+    {
+        _workspaceView?.ScreenInput?.Release();
+        WorkspaceWindow popped = WorkspaceWindow.Open(this, id);
+        ShowStack();
+        popped.BringForward();
     }
 
     internal void ShowSettings()
@@ -692,6 +717,7 @@ public partial class MainWindow : Window, IDisposable
         if (_disposed) return;
         SavePreferences();
         _disposed = true;
+        WorkspaceWindow.CloseAll();
         ModuleEntry.HubShowing = false;
         _cardPreviews.Stop();
         _cardPreviews.Tick -= CardPreviews_Tick;

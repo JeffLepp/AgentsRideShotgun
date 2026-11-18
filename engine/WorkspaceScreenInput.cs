@@ -731,6 +731,16 @@ public sealed class WorkspaceScreenInput : IDisposable
             _screen.Stretch, out x, out y, clamp);
     }
 
+    internal bool EmptyDesktop(Point picturePoint)
+    {
+        // A browser viewport is all application content, never empty desktop.
+        if (BrowserPlane is not null || _runtime()?.Computer is not { } computer
+            || !Map(picturePoint, out int x, out int y)) return false;
+        if (computer.Windows(TimeSpan.FromMilliseconds(100)) is not { } windows) return false;
+        return !windows.Any(window => x >= window.X && y >= window.Y
+            && x < window.X + window.Width && y < window.Y + window.Height);
+    }
+
     (double Width, double Height) PictureDimensions() => BrowserPlane is not null && _screen.Source is BitmapSource picture
         ? (picture.PixelWidth, picture.PixelHeight) : (AgentDesktop.ScreenWidth, AgentDesktop.ScreenHeight);
 

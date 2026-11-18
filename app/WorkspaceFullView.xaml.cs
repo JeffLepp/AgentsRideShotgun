@@ -231,9 +231,6 @@ public partial class WorkspaceFullView : UserControl, IDisposable
             if (ActivityLog.Signature(id, logs: true) != _didSeen) LoadDid(id);
             if (ActivityLog.Signature(id, logs: false) != _filesSeen) LoadFiles(id);
         }
-        // One capture in flight at a time: a slow Task.Run from an earlier tick must finish (or be
-        // dropped below) before another starts, rather than racing it.
-        if (_capturingScreen) return;
         WorkspaceControl? plane = WorkspaceRuntime.Of(id)?.Plane;
         // Asleep: the picture is the last one it had, dimmed, and says so rather than looking live
         // or broken.
@@ -249,6 +246,10 @@ public partial class WorkspaceFullView : UserControl, IDisposable
                 LastSeenText.Text = "Last seen " + stored.LastUsed.ToLocalTime().ToString("MMM d, h:mm tt");
             return;
         }
+        // One capture in flight at a time: a slow Task.Run from an earlier tick must finish (or be
+        // dropped below) before another starts. Checked after the asleep look above, so Sleep dims
+        // the picture at once even while a capture is still landing.
+        if (_capturingScreen) return;
         _capturingScreen = true;
         try
         {
@@ -258,7 +259,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
                 catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or System.ComponentModel.Win32Exception) { return null; }
             });
             // Drop a result that lands after the view hid or moved on to another workspace.
-            if (_disposed || id != _id || !IsVisible || frame is null) return;
+            if (_disposed || id != _id || !IsVisible || frame is null
+                || !ReferenceEquals(WorkspaceRuntime.Of(id)?.Plane, plane)) return;
             ScreenImage.Source = frame;
             _liveShown = true;
             _shownPlane = plane;
@@ -362,16 +364,10 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         if (_id is not { } id) return;
         HeaderError.Visibility = Visibility.Collapsed;
         var menu = new ContextMenu { PlacementTarget = MoreButton, Placement = PlacementMode.Bottom };
-        void Add(string label, Action action)
-        {
-            var item = new MenuItem { Header = label };
-            item.Click += (_, _) => action();
-            menu.Items.Add(item);
-        }
-        // Exactly Rename, Delete: no Stop/Start computer (automatic) or Who can use it.
-        Add("Rename", BeginRename);
+        if (Window.GetWindow(this) is not WorkspaceWindow) AddMenuItem(menu, "Pop out", PopOut);
+        AddMenuItem(menu, "Rename", BeginRename);
         menu.Items.Add(new Separator());
-        Add("Delete", () => DeleteWorkspace(id));
+        AddMenuItem(menu, "Delete", () => DeleteWorkspace(id));
         // Test seam (ui-probe/Scenes.Hub.cs): the UI probe drives this exact menu instance rather than
         // rebuilding its own copy of the item list above.
         LastMoreMenu = menu;
@@ -379,6 +375,57 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     }
 
     internal ContextMenu? LastMoreMenu;
+
+    static void AddMenuItem(ContextMenu menu, string label, Action action)
+    {
+        var item = new MenuItem { Header = label };
+        System.Windows.Automation.AutomationProperties.SetName(item, label);
+        item.Click += (_, _) => action();
+        menu.Items.Add(item);
+    }
+
+    void PopOut()
+    {
+        if (_id is { } id && Window.GetWindow(this) is MainWindow main) main.PopOutWorkspace(id);
+    }
+
+    ContextMenu? _pendingScreenMenu;
+    internal ContextMenu? LastScreenMenu;
+
+    internal bool ScreenRightDown(Point point)
+    {
+        if (!_liveShown || _input?.EmptyDesktop(point) != true) return false;
+        var menu = new ContextMenu { PlacementTarget = ScreenImage, Placement = PlacementMode.RelativePoint,
+            HorizontalOffset = point.X, VerticalOffset = point.Y };
+        if (_taskbar is { IsVisible: true } taskbar) AddMenuItem(menu, "Open an app...", taskbar.OpenMenu);
+        if (Window.GetWindow(this) is not WorkspaceWindow) AddMenuItem(menu, "Pop out", PopOut);
+        if (_input.OwnsControl) AddMenuItem(menu, "Give back control", _input.Release);
+        LastScreenMenu = _pendingScreenMenu = menu;
+        return true;
+    }
+
+    internal bool ScreenRightUp()
+    {
+        if (_pendingScreenMenu is not { } menu) return false;
+        _pendingScreenMenu = null;
+        if (ScreenImage.IsMouseCaptured) ScreenImage.ReleaseMouseCapture();
+        // Open after release so the popup cannot steal the matching button-up.
+        if (_id is { } id && ReferenceEquals(WorkspaceRuntime.Of(id)?.Plane, _shownPlane) && IsVisible)
+            menu.IsOpen = true;
+        return true;
+    }
+
+    void Screen_RightDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!ScreenRightDown(e.GetPosition(ScreenImage))) return;
+        ScreenImage.CaptureMouse();
+        e.Handled = true;
+    }
+
+    void Screen_RightUp(object sender, MouseButtonEventArgs e)
+    {
+        if (ScreenRightUp()) e.Handled = true;
+    }
 
     void BeginRename()
     {
@@ -457,6 +504,10 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     void StopLive()
     {
+        _pendingScreenMenu = null;
+        if (LastScreenMenu is { } menu) menu.IsOpen = false;
+        if (LastMoreMenu is { } more) more.IsOpen = false;
+        if (ScreenImage.IsMouseCaptured) ScreenImage.ReleaseMouseCapture();
         if (_screenTimer is not null) { _screenTimer.Stop(); _screenTimer.Tick -= ScreenTick; _screenTimer = null; }
         if (_driverRuntime is not null) { _driverRuntime.DriverChanged -= OnDriverChanged; _driverRuntime = null; }
         ControlToast.Visibility = Visibility.Collapsed;

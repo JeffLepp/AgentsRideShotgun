@@ -27,7 +27,8 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="{Binding Time}" FontFamily="{DynamicResource MonoFontFamily}" FontSize="11"
                                    Foreground="{DynamicResource FaintInkBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1" Text="{Binding Mark}" Style="{StaticResource RunMark}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Mark}" Style="{StaticResource RunMark}"
+                                   ToolTip="{Binding Warning}" AutomationProperties.HelpText="{Binding Warning}"/>
                         <TextBlock Grid.Column="2" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
                                    ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
                             <Run Text="{Binding Prefix, Mode=OneWay}"/><Run Text="{Binding Code, Mode=OneWay}"

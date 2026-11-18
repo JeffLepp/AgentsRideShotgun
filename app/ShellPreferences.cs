@@ -166,6 +166,19 @@ internal sealed record ShellPlacement(double Left, double Top, double Width, dou
         return new ShellPlacement(leftPx, topPx, width, height, device);
     }
 
+    /// <summary>A popped-out workspace: about 80% of the main window's monitor, within 960x600..1600x1000
+    /// DIP, centred. Restore still fits it to a smaller monitor.</summary>
+    internal static ShellPlacement ForWorkspaceWindow(Window main)
+    {
+        var screen = System.Windows.Forms.Screen.FromHandle(new WindowInteropHelper(main).Handle);
+        var work = screen.WorkingArea;
+        double scale = ScaleAt(new NativePoint(work.Left + work.Width / 2, work.Top + work.Height / 2), main);
+        double width = Math.Clamp(work.Width / scale * 0.8, 960, 1600);
+        double height = Math.Clamp(work.Height / scale * 0.8, 600, 1000);
+        return new(work.Left + (work.Width - width * scale) / 2, work.Top + (work.Height - height * scale) / 2,
+            width, height, screen.DeviceName);
+    }
+
     static double ScaleAt(NativePoint point, Window? window)
     {
         double scale = window is not null ? VisualTreeHelper.GetDpi(window).DpiScaleX : 1.0;

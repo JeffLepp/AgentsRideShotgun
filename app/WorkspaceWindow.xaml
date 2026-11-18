@@ -1,0 +1,11 @@
+<Window x:Class="Deskweave.WorkspaceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Deskweave"
+        Title="ARS" Icon="Assets/ARS.ico" Width="960" Height="600" MinWidth="960" MinHeight="600"
+        WindowStartupLocation="Manual" WindowState="Normal" ResizeMode="CanResize"
+        FontFamily="{DynamicResource SkinFontFamily}" FontSize="13"
+        Foreground="{DynamicResource InkBrush}" Background="{DynamicResource WindowBrush}"
+        TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
+    <local:WorkspaceFullView x:Name="View" Margin="20"/>
+</Window>

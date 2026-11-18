@@ -65,7 +65,8 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="{Binding Time}" FontFamily="{DynamicResource MonoFontFamily}"
                                    FontSize="11.5" Foreground="{DynamicResource FaintInkBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1" Text="{Binding Mark}" Style="{StaticResource RunMark}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Mark}" Style="{StaticResource RunMark}"
+                                   ToolTip="{Binding Warning}" AutomationProperties.HelpText="{Binding Warning}"/>
                         <TextBlock Grid.Column="2" FontSize="12.5" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0">
                             <Run Text="{Binding Prefix, Mode=OneWay}"/><Run Text="{Binding Code, Mode=OneWay}"
                                  FontFamily="{DynamicResource MonoFontFamily}" Foreground="{DynamicResource AccentBrush}"/>
@@ -181,6 +182,7 @@
                 <!-- The hand says the picture is the workspace itself and not a screenshot of it,
                      the same as the corner window's. -->
                 <Image x:Name="ScreenImage" Stretch="UniformToFill" Cursor="Hand"
+                       PreviewMouseRightButtonDown="Screen_RightDown" PreviewMouseRightButtonUp="Screen_RightUp"
                        AutomationProperties.Name="Live workspace screen"/>
                 <!-- Builds on the existing "Last seen" pill rather than adding a second,
                      competing indicator. ScreenImage's own Opacity (set in code) dims the picture

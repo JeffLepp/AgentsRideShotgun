@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows.Media.Imaging;
+using Started = Deskweave.AgentWorkspaces.WorkspaceControl.Started;
 
 namespace Deskweave.AgentWorkspaces;
 
@@ -663,28 +664,14 @@ public sealed class WorkspaceMcp : IDisposable
         if (shown is not null) _control.Arrange(shown.Handle, WindowArrangement.Front);
     }
 
-    enum Started { Showing, Starting, Exited }
-
     /// <summary>
     /// Waits for the program to put a window up. Measured: a large WPF app took 57 s to draw in
     /// a workspace at the default power and 21 s at Fast, so the old two-second wait answered "no
     /// windows are open" for everything bigger than Notepad and the agent read that as a failure.
     /// This waits long enough for an ordinary application and returns the moment one appears.
     /// </summary>
-    async Task<Started> WindowReady(int pid, CancellationToken cancel)
-    {
-        long until = Environment.TickCount64 + WindowWaitMilliseconds;
-        while (Environment.TickCount64 < until)
-        {
-            if (_control.Windows().Any(window =>
-                { Native.GetWindowThreadProcessId(window.Handle, out int process); return process == pid; }))
-                return Started.Showing;
-            try { using var process = System.Diagnostics.Process.GetProcessById(pid); if (process.HasExited) return Started.Exited; }
-            catch (ArgumentException) { return Started.Exited; }
-            await Task.Delay(100, cancel).ConfigureAwait(false);
-        }
-        return Started.Starting;
-    }
+    Task<Started> WindowReady(int pid, CancellationToken cancel) =>
+        _control.WindowReady(pid, cancel, WindowWaitMilliseconds);
 
     const int WindowWaitMilliseconds = 25000;
 

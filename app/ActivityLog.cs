@@ -13,7 +13,7 @@ namespace Deskweave;
 /// <paramref name="mark"/> is ✓ or ✗ for a finished command, <paramref name="note"/> its duration,
 /// exit code or a ×N repeat count.</summary>
 internal sealed class DidRow(string time, string prefix, string code, BitmapSource? thumb,
-    string day = "", string mark = "", bool failed = false, string note = "")
+    string day = "", string mark = "", bool failed = false, string note = "", string warning = "")
 {
     public string Time => time;
     public string Prefix => prefix;
@@ -26,6 +26,8 @@ internal sealed class DidRow(string time, string prefix, string code, BitmapSour
     public string Mark => mark;
     public bool Failed => failed;
     public string Note => note;
+    /// <summary>Null without a warning, so the mark's tooltip binding shows nothing rather than an empty box.</summary>
+    public string? Warning => warning.Length > 0 ? warning : null;
 }
 
 internal sealed class FileRow(string name, string when, string path = "")
@@ -48,7 +50,7 @@ internal static class ActivityLog
     sealed class Step
     {
         public DateTimeOffset When;
-        public string Prefix = "", Code = "", Mark = "", Note = "";
+        public string Prefix = "", Code = "", Mark = "", Note = "", Warning = "";
         public bool Failed;
         public int Repeat = 1;
         public string Frame = "";
@@ -75,12 +77,26 @@ internal static class ActivityLog
     {
         var steps = new List<Step>();
         var runs = new Dictionary<string, Step>(StringComparer.Ordinal);
+        var opens = new Dictionary<string, Step>(StringComparer.Ordinal);
         foreach (string line in lines)
         {
             string[] parts = line.Split('\t');
             if (parts.Length < 4 || !DateTimeOffset.TryParse(parts[0], CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset when)) continue;
             string action = parts[1], detail = parts[2], outcome = parts[3];
             if (action.StartsWith("computer.", StringComparison.Ordinal) || QuietActions.Contains(action)) continue;
+            if (action == "open" && outcome.StartsWith("failed", StringComparison.Ordinal))
+            {
+                if (!opens.TryGetValue(detail, out Step? opened))
+                {
+                    opened = new Step { When = when, Prefix = "Opened ", Code = detail };
+                    steps.Add(opened);
+                    opens[detail] = opened;
+                }
+                opened.Failed = true;
+                opened.Mark = "⚠";
+                opened.Warning = outcome["failed".Length..].TrimStart(':', ' ');
+                continue;
+            }
             if (action == "run")
             {
                 // "run <job> <command> started…" then later "run <job> completed, exit code 0, 1.2 s".
@@ -100,7 +116,9 @@ internal static class ActivityLog
                 continue;
             }
             (string prefix, string code) = Describe(action, detail, outcome);
-            steps.Add(new Step { When = when, Prefix = prefix, Code = code, Frame = parts.Length > 4 ? parts[4] : "" });
+            var step = new Step { When = when, Prefix = prefix, Code = code, Frame = parts.Length > 4 ? parts[4] : "" };
+            steps.Add(step);
+            if (action == "open") opens[detail] = step;
         }
         // Back-to-back identical steps read as one with a count, so eight page loads are one row.
         // Only when nothing that differs would be hidden: same result, no screenshot of their own.
@@ -108,7 +126,8 @@ internal static class ActivityLog
         foreach (Step step in steps)
         {
             if (folded.Count > 0 && folded[^1] is { } last && last.Prefix == step.Prefix && last.Code == step.Code
-                && last.Mark == step.Mark && last.Note == step.Note && last.Frame.Length == 0 && step.Frame.Length == 0)
+                && last.Mark == step.Mark && last.Note == step.Note && last.Warning == step.Warning
+                && last.Frame.Length == 0 && step.Frame.Length == 0)
             {
                 last.Repeat++;
                 last.When = step.When;
@@ -127,7 +146,7 @@ internal static class ActivityLog
             // Decoded only for the rows kept, never for the thousands scanned.
             BitmapSource? thumb = frame is not null && step.Frame.Length > 0 ? frame(step.Frame) : null;
             rows.Add(new DidRow(local.ToString("h:mm tt", CultureInfo.CurrentCulture), step.Prefix, step.Code, thumb,
-                header, step.Mark, step.Failed, note));
+                header, step.Mark, step.Failed, note, step.Warning));
         }
         return rows;
     }

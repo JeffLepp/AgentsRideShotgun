@@ -286,7 +286,7 @@ public sealed class WorkspaceTaskbar : Border
             ?.RaiseAutomationEvent(System.Windows.Automation.Peers.AutomationEvents.LiveRegionChanged);
     }
 
-    async void OpenMenu()
+    internal async void OpenMenu()
     {
         _launchMessage.Visibility = Visibility.Collapsed;
         _search.Text = string.Empty;
