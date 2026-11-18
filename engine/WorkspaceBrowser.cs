@@ -343,12 +343,25 @@ public sealed partial class WorkspaceBrowser : IDisposable
                 fromChrome.Dispose();
                 // Preserve a successfully returned browser. A failed/cancelled attempt must release
                 // its profile before an explicit port fallback, and can stop only its workspace job.
-                if (pid > 0 && desktop.OwnsProcess(pid)) Stop(pid);
+                Stop(desktop, pid);
             }
         }
     }
 
-    static void Stop(int pid)
+    /// <summary>Stops this workspace's browser so the next one can take its profile. Measured with
+    /// Edge 157: the launched process can hand its startup to a new process of its own and exit;
+    /// that one holds the profile lock, and every retry then exits with "lock file can not be
+    /// created". So every browser process in this workspace's job goes, not only the one launched.</summary>
+    static void Stop(AgentDesktop desktop, int pid)
+    {
+        if (pid > 0 && desktop.OwnsProcess(pid)) Kill(pid);
+        foreach (Process copy in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(ChromePath)))
+            using (copy) if (copy.Id != pid && desktop.OwnsProcess(copy.Id)) Kill(copy.Id);
+        // Chrome's own shutdown has to finish releasing the profile lock before the next one starts.
+        Thread.Sleep(1500);
+    }
+
+    static void Kill(int pid)
     {
         try { using Process chrome = Process.GetProcessById(pid); chrome.Kill(entireProcessTree: true); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException
@@ -356,8 +369,6 @@ public sealed partial class WorkspaceBrowser : IDisposable
         {
             // Already gone, which is the state we wanted.
         }
-        // Chrome's own shutdown has to finish releasing the profile lock before the next one starts.
-        Thread.Sleep(1500);
     }
 
     /// <summary>Whether a launched process is still there, the same way <see cref="Alive"/> checks
@@ -442,7 +453,7 @@ public sealed partial class WorkspaceBrowser : IDisposable
             {
                 browser?.Dispose();
                 socket?.Dispose();
-                if (desktop.OwnsProcess(pid)) Stop(pid);
+                Stop(desktop, pid);
             }
         }
     }
@@ -856,6 +867,6 @@ public sealed partial class WorkspaceBrowser : IDisposable
     internal void Abandon()
     {
         Dispose();
-        if (_desktop.OwnsProcess(ProcessId)) Stop(ProcessId);
+        Stop(_desktop, ProcessId);
     }
 }

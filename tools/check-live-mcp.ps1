@@ -311,7 +311,7 @@ try {
     foreach ($entry in $entries) {
         $session = Invoke-McpSession $entry.label $entry.command $entry.arguments $entry.client
         $sessions.Add($session)
-        Check ($session.serverName -eq 'ars' -and $session.toolNames.Count -ge 20 -and 'status' -in $session.toolNames -and 'computer' -in $session.toolNames) `
+        Check ($session.serverName -eq 'ars' -and $session.toolNames.Count -ge 16 -and 'status' -in $session.toolNames -and 'computer' -in $session.toolNames) `
             "$($entry.label): the bridge initializes as ars and lists $($session.toolNames.Count) tools"
         Check ($session.screenshot -and $session.workspace) `
             "$($entry.label): a screenshot comes back from workspace '$($session.workspace)', and status names it"

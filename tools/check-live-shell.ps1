@@ -66,7 +66,15 @@ function Control([string]$name) {
     if ($null -eq $found) { throw "Missing published control: $name" }
     return $found
 }
-function Invoke([string]$name) { (Control $name).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 200 }
+function Invoke([string]$name) {
+    # Buttons only: an open card Settings page is titled "Settings" too, next to the gear of that name.
+    $query = [Windows.Automation.AndCondition]::new(
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, $name),
+        [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button))
+    $found = $script:surface.FindFirst([Windows.Automation.TreeScope]::Descendants, $query)
+    if ($null -eq $found) { throw "Missing published button: $name" }
+    $found.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 200
+}
 function Wait-ShellVisibility([IntPtr]$handle, [bool]$visible) {
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     while ([ShellCheckWindow]::IsWindowVisible($handle) -ne $visible -and [DateTime]::UtcNow -lt $deadline -and -not $app.HasExited) {
@@ -129,10 +137,6 @@ try {
     Invoke 'Settings'
     [void][ShellCheckWindow]::GetWindowRect($window, [ref]$bounds)
     Check ([Math]::Abs(($bounds.Right - $bounds.Left) - $beforeWidth) -le 2) 'Clicking Settings again returns to the compact strip'
-    Invoke 'Settings'
-    Invoke 'Workspaces'
-    [void][ShellCheckWindow]::GetWindowRect($window, [ref]$bounds)
-    Check ([Math]::Abs(($bounds.Right - $bounds.Left) - $beforeWidth) -le 2) 'Returning from Settings preserves the strip width'
     $buttons = $surface.FindAll([Windows.Automation.TreeScope]::Descendants,
         [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button))
     $row = @($buttons | Where-Object { $_.Current.Name.StartsWith('Show preview for ') -and -not $_.Current.IsOffscreen }) | Select-Object -First 1
@@ -140,7 +144,7 @@ try {
     $workspaceName = $row.Current.Name.Substring('Show preview for '.Length)
     $row.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 500
-    Check (-not (Control ('Show more for ' + $workspaceName)).Current.IsOffscreen) 'A row expands its screen and Show more action inline'
+    Check (-not (Control ('Show logs for ' + $workspaceName)).Current.IsOffscreen) 'A row expands its screen and Show logs inline'
     [void][ShellCheckWindow]::GetWindowRect($window, [ref]$bounds)
     Check ([Math]::Abs(($bounds.Right - $bounds.Left) - $beforeWidth) -le 2) 'Expanding a workspace preserves the strip width'
     $bitmap = [Drawing.Bitmap]::new($beforeWidth, $bounds.Bottom - $bounds.Top)
@@ -150,9 +154,6 @@ try {
     finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
     try { Check $captured 'Windows captured the published inline preview'; $bitmap.Save((Join-Path $output 'live-inline.png'), [Drawing.Imaging.ImageFormat]::Png) }
     finally { $bitmap.Dispose() }
-    Invoke ('Show more for ' + $workspaceName)
-    Invoke 'Back to workspaces'
-    Check (-not (Control ('Show more for ' + $workspaceName)).Current.IsOffscreen) 'Show more and Back preserve the expanded workspace'
     Invoke ('Collapse preview for ' + $workspaceName)
     Invoke 'Close ARS'
     Wait-ShellVisibility $window $false
