@@ -154,8 +154,8 @@ static class HubScenes
             await Task.Delay(100);
             Program.Check(Math.Abs(window.ActualWidth - 350) < 2 && Math.Abs(window.ActualHeight - 510) < 2,
                 "Returning from Settings restores the strip's size even after an immediate resize");
-            Program.Check(window.FindName("NewButton") is null,
-                "The title bar has no new-workspace button");
+            Program.Check(window.FindName("NewButton") is Button { IsVisible: true },
+                "The title bar's new-workspace button is back after Settings");
             Program.Check(!VisibleWords(window).Contains("asleep", StringComparison.OrdinalIgnoreCase),
                 "No visible word, tooltip or accessible name in the stack says asleep");
 

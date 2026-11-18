@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
@@ -200,7 +200,8 @@ static class Program
             && _window.FindName("HelpButton") is null && _window.FindName("SearchBox") is null
             && _window.FindName("AppearanceButton") is null && _window.FindName("FocusSlot") is null,
             "The icon rail, overview grid, compact/collapsed modes, search box, help panel and boss panel are gone");
-        Check(_window.FindName("NewButton") is null, "The title bar has no new-workspace button");
+        Check(_window.FindName("NewButton") is Button && _window.FindName("ThemeButton") is null,
+            "The title bar has a new-workspace button in place of day and night");
         Check(AppearanceManager.Choice == ThemeChoice.FollowWindows && AppearanceManager.Dark == AppearanceManager.WindowsIsDark(),
             "The theme follows Windows until Settings forces one");
         CheckSettings();
@@ -315,7 +316,7 @@ static class Program
         await Settle();
         Check(_window.DisplayMode == "stack" && _window.IsVisible, "Reopening from the tray returns to the stack");
 
-        // The engine asking for a specific workspace opens it in the wide window.
+        // The engine asking for a specific workspace opens its card in the stack, not the wide page.
         ModuleEntry.Selected = created.Id;
         bool raised = false;
         void OnOpen() => raised = true;
@@ -323,8 +324,9 @@ static class Program
         ModuleEntry.RequestDashboardOpen();
         await Settle();
         ModuleEntry.DashboardOpenRequested -= OnOpen;
-        Check(raised && _window.DisplayMode == "wide" && _window.SelectedWorkspaceId == created.Id,
-            "The corner window's open-in-hub opens that workspace in the wide window");
+        Check(raised && _window.DisplayMode == "stack" && _window.SelectedWorkspaceId == created.Id
+            && _window.Hub.Find(created.Id)?.Expanded == true,
+            "The corner window's open-in-hub opens that workspace's card in the stack");
         _window.ShowStack();
         await Settle();
 
@@ -350,16 +352,16 @@ static class Program
         await Settle();
         _window.Dispose();
         var saved = ShellPreferences.Read();
-        Check(File.Exists(Path.Combine(_output, "shell.json")) && saved.Mode == "wide"
+        Check(File.Exists(Path.Combine(_output, "shell.json"))
             && saved.SelectedWorkspace == created.Id && saved.Wide is not null,
-            "Window mode, selection and geometry persist to the isolated app store");
+            "Selection and geometry persist to the isolated app store");
         _window.Close();
         _window = new MainWindow { ShowActivated = false };
         _window.Show();
         await Settle();
-        Check(_window.DisplayMode == saved.Mode && _window.SelectedWorkspaceId == created.Id
-            && Math.Abs(_window.ActualWidth - saved.Wide!.Width) <= 2,
-            "A new app window restores the saved mode, selection and width");
+        Check(_window.DisplayMode == "stack" && _window.SelectedWorkspaceId == created.Id
+            && (saved.Stack is null || Math.Abs(_window.ActualWidth - saved.Stack.Width) <= 2),
+            "A new app window opens on the stack with the saved selection and stack width, never the wide page");
         Check(File.ReadAllText(Path.Combine(_output, "settings.json")).Contains("\"Theme\": \"Dark\"") && AppearanceManager.Dark,
             "An explicit theme persists and wins over Windows after reopening");
 
@@ -710,11 +712,76 @@ static class Program
             && emptyView.DidEmptyText.Visibility == Visibility.Visible && emptyView.FilesEmptyText.Visibility == Visibility.Visible,
             "An empty workspace shows \"Nothing yet\" and \"No files yet\" instead of blank columns");
 
-        // Both are throwaway: left behind, they would sit under Recent for the rest of the run and
+        // A command's start and finish read as one row with its real command, result and time;
+        // back-to-back repeats fold into one row; the date is said once.
+        StoredWorkspace shaped = WorkspaceStore.Create("Format check");
+        string shapedEvidence = Path.Combine(WorkspaceStore.FolderOf(shaped.Id), "evidence");
+        Directory.CreateDirectory(shapedEvidence);
+        DateTime at = DateTime.UtcNow.AddMinutes(-10);
+        File.WriteAllLines(Path.Combine(shapedEvidence, "actions.log"),
+        [
+            $"{at:O}\trun\tjob-1 dotnet build app\tstarted, pid 1, no runtime limit",
+            $"{at.AddSeconds(12):O}\trun\tjob-1\tcompleted, exit code 0, 12.4 s",
+            $"{at.AddMinutes(1):O}\trun\tjob-2 dotnet test\tstarted, pid 2, no runtime limit",
+            $"{at.AddMinutes(2):O}\trun\tjob-2\tfailed, exit code 1, 3.0 s",
+            $"{at.AddMinutes(3):O}\tpage\tlocalhost:5173\tok",
+            $"{at.AddMinutes(4):O}\tpage\tlocalhost:5173\tok",
+            $"{at.AddMinutes(5):O}\tpage\tlocalhost:5173\tok",
+            $"{at.AddMinutes(6):O}\tmission\tDone\tbuild passes",
+        ]);
+        List<DidRow> shapedRows = ActivityLog.Read(shaped.Id);
+        Check(shapedRows.Count == 4
+            && shapedRows[0] is { Code: "dotnet build app", Mark: "✓", Failed: false, Note: "12s", HasDay: true }
+            && shapedRows[1] is { Code: "dotnet test", Mark: "✗", Failed: true, Note: "exit 1", HasDay: false }
+            && shapedRows[2] is { Prefix: "Opened ", Code: "localhost:5173", Note: "×3" }
+            && shapedRows[3].Prefix == "Done: build passes",
+            "Activity shows the real command with ✓/✗, folds repeats and says the day once");
+        _window.OpenInStack(shaped.Id);
+        await Settle();
+        WorkspaceInlineView? shapedInline = null;
+        void Walk(DependencyObject node)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node) && shapedInline is null; i++)
+            {
+                DependencyObject child = VisualTreeHelper.GetChild(node, i);
+                if (child is WorkspaceInlineView { IsVisible: true, DataContext: HubEntry { Id: var shown } } view && shown == shaped.Id) shapedInline = view;
+                else Walk(child);
+            }
+        }
+        Walk(_window);
+        var steps = shapedInline?.FindName("StepList") as ItemsControl;
+        var files = shapedInline?.FindName("FileList") as ItemsControl;
+        var showActions = shapedInline?.FindName("ShowLogsButton") as Button;
+        var showFiles = shapedInline?.FindName("ShowFilesButton") as Button;
+        Check(steps is { IsVisible: false } && files is { IsVisible: false } && showActions is { IsVisible: true } && showFiles is { IsVisible: true },
+            "Opening a card shows its screen and two buttons, no list");
+        showActions?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Settle(); // the list is read off the UI thread
+        Check(steps is { IsVisible: true, Items.Count: 4 } && files is { IsVisible: false } && showActions?.Content as string == "Hide logs",
+            "Show logs opens every step in place, and only that list");
+        steps?.BringIntoView();
+        await Settle();
+        Mvp.Save(Mvp.Photograph(_window), Path.Combine(_output, "logs-rows.png"));
+        File.AppendAllText(Path.Combine(shapedEvidence, "actions.log"), $"{DateTime.UtcNow:O}\tsave\tlater.txt\tok\n");
+        await Task.Delay(4000);
+        Check(steps is { Items.Count: 5 }, "An open log picks up a new step by itself, without reopening");
+        File.WriteAllText(Path.Combine(WorkspaceStore.FolderOf(shaped.Id), "notes.txt"), "x");
+        showFiles?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Settle();
+        Check(files is { IsVisible: true, Items.Count: 1 } && steps is { IsVisible: false },
+            "Show files swaps the logs for the workspace's files");
+        Mvp.Save(Mvp.Photograph(_window), Path.Combine(_output, "files-rows.png"));
+        showFiles?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Settle();
+        Check(files is { IsVisible: false } && steps is { IsVisible: false } && showFiles?.Content as string == "Show files",
+            "Clicking it again folds the list away");
+
+        // All three are throwaway: left behind, they would sit under Recent for the rest of the run and
         // throw off every later check that counts the stack's asleep workspaces.
         _window.ShowStack();
         WorkspaceStore.Delete(busy.Id);
         WorkspaceStore.Delete(empty.Id);
+        WorkspaceStore.Delete(shaped.Id);
         await Settle();
     }
 

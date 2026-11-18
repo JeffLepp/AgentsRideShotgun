@@ -12,19 +12,6 @@ using Deskweave.AgentWorkspaces;
 namespace Deskweave;
 
 internal sealed class PillInfo(string text, bool working) { public string Text => text; public bool Working => working; }
-/// <summary>One "What it did" row. <paramref name="code"/> is the part shown in accent mono, such
-/// as the address a page was opened at ("Opened `localhost:5173`"); empty for a step
-/// that is plain text throughout.</summary>
-internal sealed class DidRow(string time, string prefix, string code, BitmapSource? thumb)
-{
-    public string Time => time;
-    public string Prefix => prefix;
-    public string Code => code;
-    public bool HasCode => code.Length > 0;
-    public BitmapSource? Thumb => thumb;
-    public bool HasThumb => thumb is not null;
-}
-internal sealed class FileRow(string name, string when) { public string Name => name; public string When => when; }
 
 /// <summary>
 /// A workspace in full: header, the live screen, "What it did" and "Files". Its own
@@ -183,80 +170,20 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     // --- "What it did", from the workspace's own evidence log --------------------------------
 
-    static readonly HashSet<string> QuietActions = new(StringComparer.Ordinal)
-        { "workspace", "control", "policy", "elements", "marks", "wait", "ceiling", "window", "untrusted" };
-
     void LoadDid(string id)
     {
         _did.Clear();
-        // Set before the early-return paths below too, so a missing or unreadable log reads as
-        // "nothing yet" rather than a blank column.
-        DidEmptyText.Visibility = Visibility.Visible;
-        string log = Path.Combine(WorkspaceStore.FolderOf(id), "evidence", "actions.log");
-        if (!File.Exists(log)) return;
-        string[] lines;
-        try { lines = File.ReadAllLines(log); }
-        catch (IOException) { return; }
-        catch (UnauthorizedAccessException) { return; }
-        // The newest 40 steps, shown oldest first. Walking back from the end is what keeps the
-        // latest ones: taking 40 from the front of the last 200 dropped exactly what just happened.
-        var rows = new List<DidRow>();
-        foreach (string line in lines.TakeLast(200).Reverse())
-        {
-            string[] parts = line.Split('\t');
-            if (parts.Length < 4) continue;
-            if (!DateTimeOffset.TryParse(parts[0], out DateTimeOffset when)) continue;
-            string action = parts[1];
-            if (action.StartsWith("computer.", StringComparison.Ordinal) || QuietActions.Contains(action)) continue;
-            string detail = parts[2];
-            BitmapSource? thumb = null;
-            if (parts.Length > 4 && parts[4].Length > 0)
-            {
-                string framePath = Path.Combine(WorkspaceStore.FolderOf(id), "evidence", parts[4]);
-                if (File.Exists(framePath)) thumb = LoadImage(framePath);
-            }
-            (string prefix, string code) = Describe(action, detail);
-            DateTimeOffset local = when.ToLocalTime();
-            rows.Add(new DidRow(local.ToString(local.Date == DateTime.Today ? "HH:mm:ss" : "MMM d HH:mm"), prefix, code, thumb));
-            if (rows.Count >= 40) break;
-        }
-        rows.Reverse();
-        foreach (DidRow row in rows) _did.Add(row);
-        if (_did.Count > 0) DidEmptyText.Visibility = Visibility.Collapsed;
+        foreach (DidRow row in ActivityLog.Read(id)) _did.Add(row);
+        DidEmptyText.Visibility = _did.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    static (string Prefix, string Code) Describe(string action, string detail) => action switch
-    {
-        "page" => ("Opened ", detail),
-        "computer" => (detail.Length > 0 && detail != "desktop" ? "Used the computer (" + detail + ")" : "Used the computer", ""),
-        "run" => ("Ran a command", ""),
-        "save" => ("Saved " + detail, ""),
-        "file" => ("Read " + detail, ""),
-        "browser" => ("Opened the browser", ""),
-        "owner" => ("You said: " + detail, ""),
-        "mission" => (detail, ""),
-        _ when action.Length > 0 => (char.ToUpperInvariant(action[0]) + action[1..], ""),
-        _ => (action, ""),
-    };
-
     // --- "Files", newest first from the workspace folder --------------------------------------
-
-    static readonly HashSet<string> MachineNames = new(StringComparer.OrdinalIgnoreCase)
-        { "workspace.json", "last-frame.png", "last-frame.png.part" };
 
     void LoadFiles(string id)
     {
         _files.Clear();
-        FilesEmptyText.Visibility = Visibility.Visible;
-        string folder = WorkspaceStore.FolderOf(id);
-        if (!Directory.Exists(folder)) return;
-        IEnumerable<FileInfo> found;
-        try { found = new DirectoryInfo(folder).GetFiles().Where(f => !MachineNames.Contains(f.Name)); }
-        catch (IOException) { return; }
-        catch (UnauthorizedAccessException) { return; }
-        foreach (FileInfo file in found.OrderByDescending(f => f.LastWriteTimeUtc).Take(30))
-            _files.Add(new FileRow(file.Name, file.LastWriteTime.ToString("HH:mm")));
-        if (_files.Count > 0) FilesEmptyText.Visibility = Visibility.Collapsed;
+        foreach (FileRow row in ActivityLog.Files(id)) _files.Add(row);
+        FilesEmptyText.Visibility = _files.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     // --- the live screen -----------------------------------------------------------------------
@@ -345,22 +272,6 @@ public partial class WorkspaceFullView : UserControl, IDisposable
                 LastSeenText.Text = "Last seen " + stored.LastUsed.ToLocalTime().ToString("MMM d, h:mm tt");
         }
         SizeScreen();
-    }
-
-    static BitmapSource? LoadImage(string path)
-    {
-        try
-        {
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.UriSource = new Uri(path);
-            image.EndInit();
-            image.Freeze();
-            return image;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException
-            or FormatException) { return null; }
     }
 
     void Root_SizeChanged(object sender, SizeChangedEventArgs e)

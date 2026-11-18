@@ -455,7 +455,7 @@ static class SettingsScenes
                 var settings = shell.CardSettings!;
                 bool sameView = cached is null || ReferenceEquals(cached, settings);
                 cached = settings;
-                Program.Check(settings.AtCardHome && cardBack.IsVisible && shell.ThemeButton.Visibility != Visibility.Visible,
+                Program.Check(settings.AtCardHome && cardBack.IsVisible && shell.NewButton.Visibility != Visibility.Visible,
                     "Settings opens on the card's home with a back arrow in the title bar");
                 settings.Show(category);
                 await Task.Delay(350);
@@ -475,26 +475,27 @@ static class SettingsScenes
                 cardBack.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 await Task.Delay(350);
                 Program.Check(shell.DisplayMode == "stack" && Math.Abs(shell.ActualWidth - 340) < 2
-                    && Math.Abs(shell.ActualHeight - 560) < 2 && shell.ThemeButton.Visibility == Visibility.Visible,
+                    && Math.Abs(shell.ActualHeight - 560) < 2 && shell.NewButton.Visibility == Visibility.Visible,
                     "Back again leaves Settings on the same compact strip");
                 shell.Hide();
                 shell.RestoreWorkspaceWindow();
                 await Task.Delay(100);
             }
 
-            // The sun and moon: one click picks the other theme and the glyph follows.
-            bool wasDark = AppearanceManager.Dark;
-            ThemeChoice chosen = AppSettingsStore.Current.Theme;
-            shell.ThemeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await Task.Delay(300);
-            Program.Check(AppearanceManager.Dark != wasDark && shell.ThemeIcon.Dark == AppearanceManager.Dark
-                && AppSettingsStore.Current.Theme == (wasDark ? ThemeChoice.Light : ThemeChoice.Dark),
-                "The title bar's sun and moon switches day and night in one click");
-            shell.ThemeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await Task.Delay(300);
-            Program.Check(AppearanceManager.Dark == wasDark && shell.ThemeIcon.Dark == wasDark,
-                "Clicking it again switches back");
-            AppSettingsStore.Update(s => s with { Theme = chosen });
+            // The title bar's +: one click makes a workspace, starts its screen and opens its card.
+            var before = WorkspaceStore.All().Select(w => w.Id).ToHashSet();
+            shell.NewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(1500);
+            StoredWorkspace? made = WorkspaceStore.All().SingleOrDefault(w => !before.Contains(w.Id));
+            Program.Check(made is not null && made.Name.StartsWith("Workspace", StringComparison.Ordinal)
+                && shell.DisplayMode == "stack" && shell.SelectedWorkspaceId == made.Id
+                && shell.Hub.Find(made.Id) is { Expanded: true, Working: true } && WorkspaceRuntime.Of(made.Id) is not null,
+                "+ creates a workspace, starts its screen and opens its card in the stack");
+            if (made is not null)
+            {
+                WorkspaceRuntime.Of(made.Id)?.Dispose();
+                WorkspaceStore.Delete(made.Id);
+            }
         }
         finally
         {

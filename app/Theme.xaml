@@ -260,6 +260,24 @@
         <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}"/>
     </Style>
 
+    <!-- Activity rows (ActivityLog): the date once per day, and a finished command's ✓ or ✗. -->
+    <Style x:Key="DayLabel" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource FaintInkBrush}"/>
+        <Setter Property="Margin" Value="0,10,0,3"/>
+    </Style>
+    <Style x:Key="RunMark" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Failed}" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource DangerInkBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
     <Style TargetType="TextBox">
         <Setter Property="Background" Value="{DynamicResource WindowBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>

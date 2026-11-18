@@ -58,9 +58,6 @@ public partial class MainWindow : Window, IDisposable
         ModuleEntry.DashboardOpenRequested += EngineRequestedWorkspace;
         LocationChanged += (_, _) => QueuePreferenceSave();
         Loaded += Window_Loaded;
-        ThemeIcon.Dark = AppearanceManager.Dark;
-        ThemeButton.ToolTip = ThemeTip();
-        AppearanceManager.Changed += ThemeRepainted;
     }
 
     void Window_Loaded(object sender, RoutedEventArgs e)
@@ -133,8 +130,8 @@ public partial class MainWindow : Window, IDisposable
         _widePlacement = preferences.Wide;
         _wasMaximized = preferences.Maximized;
         _selectedId = preferences.SelectedWorkspace;
-        if (preferences.Mode == "wide" && _selectedId is not null) ShowWide(_selectedId);
-        else ShowStack();
+        // The wide page is only ever a fullscreen visit now, so a new window always opens on the stack.
+        ShowStack();
         if (_wasMaximized) WindowState = WindowState.Maximized;
         _restoringPreferences = false;
     }
@@ -275,8 +272,8 @@ public partial class MainWindow : Window, IDisposable
         CardSettingsSlot.Visibility = Visibility.Visible;
         StackRoot.IsHitTestVisible = false;
         FilterButton.Visibility = Visibility.Collapsed;
-        // The Night tile does its job here, and a page name needs the room.
-        ThemeButton.Visibility = Visibility.Collapsed;
+        // A page name needs the room.
+        NewButton.Visibility = Visibility.Collapsed;
         TitleMark.Visibility = Visibility.Hidden;
         CardBackButton.Visibility = Visibility.Visible;
         CardTitleChanged();
@@ -293,7 +290,7 @@ public partial class MainWindow : Window, IDisposable
         _mode = "stack";
         StackRoot.IsHitTestVisible = true;
         FilterButton.Visibility = Visibility.Visible;
-        ThemeButton.Visibility = Visibility.Visible;
+        NewButton.Visibility = Visibility.Visible;
         TitleMark.Visibility = Visibility.Visible;
         CardBackButton.Visibility = Visibility.Collapsed;
         TitleText.Text = "ARS";
@@ -334,21 +331,59 @@ public partial class MainWindow : Window, IDisposable
         shift.BeginAnimation(TranslateTransform.XProperty, slide);
     }
 
-    // --- day and night: one tap picks the other; Settings, General, Theme follows Windows again --
+    // --- + : a fresh workspace, its screen started, open under its own card ----------------------
 
-    void Theme_Click(object sender, RoutedEventArgs e)
+    void New_Click(object sender, RoutedEventArgs e)
     {
-        ThemeChoice next = AppearanceManager.Dark ? ThemeChoice.Light : ThemeChoice.Dark;
-        AppSettingsStore.Update(s => s with { Theme = next });
+        StoredWorkspace created = WorkspaceStore.Create(NewName());
+        string? error = WorkspaceInlineView.StartScreen(created.Id);
+        OpenInStack(created.Id, error);
     }
 
-    void ThemeRepainted()
+    /// <summary>"Workspace", then "Workspace 2", 3… skipping names already taken.</summary>
+    static string NewName()
     {
-        ThemeIcon.Dark = AppearanceManager.Dark;
-        ThemeButton.ToolTip = ThemeTip();
+        var taken = WorkspaceStore.All().Select(w => w.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        string name = "Workspace";
+        for (int n = 2; taken.Contains(name); n++) name = "Workspace " + n;
+        return name;
     }
 
-    static string ThemeTip() => AppearanceManager.Dark ? "Switch to day" : "Switch to night";
+    /// <summary>Shows a workspace the way the stack does: its card open in place, scrolled into
+    /// view. Every "open this workspace" request lands here instead of the wide page.</summary>
+    internal void OpenInStack(string id, string? startError = null)
+    {
+        if (_mode != "stack") ShowStack();
+        // A search that hides this workspace would leave its card expanded but nowhere on screen.
+        if (FilterHost.Visibility == Visibility.Visible) ClearFilter();
+        _selectedId = id;
+        _hub.Refresh();
+        _hub.Select(id);
+        RebuildStackLists();
+        foreach (HubEntry entry in _hub.Working.Concat(_hub.Asleep)) entry.Expanded = entry.Id == id;
+        QueuePreferenceSave();
+        // After layout, so the card's container and its inline view exist.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            if (_hub.Find(id) is not { } entry) return;
+            var container = (StackWorkingList.ItemContainerGenerator.ContainerFromItem(entry)
+                ?? StackAsleepList.ItemContainerGenerator.ContainerFromItem(entry)) as FrameworkElement;
+            container?.BringIntoView();
+            if (startError is not null && container is not null && Descendant<WorkspaceInlineView>(container) is { } inline)
+                inline.ShowStartError(startError);
+        });
+    }
+
+    static T? Descendant<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T hit) return hit;
+            if (Descendant<T>(child) is { } deeper) return deeper;
+        }
+        return null;
+    }
 
     // --- filter, clicks --------------------------------------------------------------------------
 
@@ -377,10 +412,6 @@ public partial class MainWindow : Window, IDisposable
     {
         bool expand = _hub.Find(id)?.Expanded == false;
         foreach (HubEntry entry in _hub.Working.Concat(_hub.Asleep)) entry.Expanded = expand && entry.Id == id;
-    }
-    void Inline_ShowMore(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: HubEntry entry }) ShowWide(entry.Id);
     }
     void SidebarItem_Checked(object sender, RoutedEventArgs e) { if (sender is RadioButton { DataContext: HubEntry entry }) SelectWorkspace(entry.Id); }
 
@@ -548,7 +579,7 @@ public partial class MainWindow : Window, IDisposable
             Show();
             if (WindowState == WindowState.Minimized) WindowState = _wasMaximized ? WindowState.Maximized : WindowState.Normal;
             if (AllowActivationForTests) Activate();
-            if (ModuleEntry.Selected is { } id) ShowWide(id);
+            if (ModuleEntry.Selected is { } id) OpenInStack(id);
             UpdateVisibleWork();
         });
     }
@@ -680,7 +711,6 @@ public partial class MainWindow : Window, IDisposable
         _cardPreviews.Tick -= CardPreviews_Tick;
         _savePreferences.Stop();
         ModuleEntry.DashboardOpenRequested -= EngineRequestedWorkspace;
-        AppearanceManager.Changed -= ThemeRepainted;
         _hub.Working.CollectionChanged -= HubChanged;
         _hub.Asleep.CollectionChanged -= HubChanged;
         _hub.ActivityChanged -= ShowToday;

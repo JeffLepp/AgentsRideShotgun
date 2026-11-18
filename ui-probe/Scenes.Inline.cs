@@ -34,7 +34,7 @@ internal static class InlineScenes
             WorkspaceInlineView view = Inline(shell, first.Id)!;
             Program.Check(shell.DisplayMode == "stack" && Math.Abs(shell.ActualWidth - 340) < 2
                 && WorkspaceRuntime.Running.Count == initialRunning && !view.Interactive
-                && ((TextBlock)view.FindName("StateText")).Text.Contains("Last picture"),
+                && ((TextBlock)view.FindName("StateText")).Text.Contains("click to start"),
                 "A stopped workspace expands its labelled last picture inside the strip without starting a screen");
             ClickRow(shell, second.Id);
             await Until(() => Inline(shell, second.Id) is not null, "the second inline row expands");
@@ -46,14 +46,26 @@ internal static class InlineScenes
 
             ClickRow(shell, first.Id);
             await Until(() => Inline(shell, first.Id) is not null, "the saved picture reopens");
-            Click((Button)Inline(shell, first.Id)!.FindName("StartButton"));
+            // Clicking the stopped picture starts the screen, the job of the old Start screen button.
+            var startOverlay = (Button)Inline(shell, first.Id)!.FindName("StartOverlay");
+            await Until(() => startOverlay.IsVisible, "the stopped picture's start button shows");
+            Program.Check(startOverlay.Cursor == System.Windows.Input.Cursors.Hand && startOverlay.Focusable
+                && AutomationProperties.GetName(startOverlay).StartsWith("Start screen", StringComparison.Ordinal),
+                $"A stopped picture is a real, named button with a hand cursor (cursor={startOverlay.Cursor}, focusable={startOverlay.Focusable}, name={AutomationProperties.GetName(startOverlay)})");
+            await Task.Delay(System.Windows.Forms.SystemInformation.DoubleClickTime + 50);
+            Click(startOverlay);
             await Until(() => WorkspaceRuntime.Of(first.Id) is not null && Inline(shell, first.Id)?.Interactive == true,
-                "Start screen produces a live inline frame", 12000);
+                "a started screen produces a live inline frame", 12000);
             WorkspaceRuntime runtime = WorkspaceRuntime.Of(first.Id)!;
             view = Inline(shell, first.Id)!;
             Program.Check(ReferenceEquals(shell.Hub.Find(first.Id)!.PreviewPlane, runtime.Plane)
-                && ((Image)view.FindName("Screen")).Source is not null && !((Button)view.FindName("StartButton")).IsVisible,
-                "Start screen uses the real runtime and only enables input after a frame from that exact runtime arrives");
+                && ((Image)view.FindName("Screen")).Source is not null,
+                "A started screen uses the real runtime and only enables input after a frame from that exact runtime arrives");
+            shell.UpdateLayout();
+            HubEntry startedEntry = shell.Hub.Find(first.Id)!;
+            Program.Check(startedEntry.Expanded
+                && Descendants<Image>(shell.StackRoot).Count(i => i.IsVisible && ReferenceEquals(i.DataContext, startedEntry)) == 1,
+                "An open running card shows exactly one screen, not its thumbnail and a second copy");
 
             // The same input adapter used by the page sends a real click to a window on this desktop.
             // A workspace starts empty now, so the check brings its own.
@@ -105,10 +117,13 @@ internal static class InlineScenes
             await Until(() => Inline(shell, first.Id)?.Interactive == true, "the inline picture returns after explicit reopen");
 
             view = Inline(shell, first.Id)!;
-            Click((Button)view.FindName("MoreButton"));
+            Program.Check(view.FindName("MoreButton") is null && view.FindName("StartButton") is null
+                && view.FindName("ShowLogsButton") is Button { IsVisible: true },
+                "The open card has no Show more or Start screen, only Show logs and Show files");
+            shell.OpenWorkspaceFullscreen(first.Id);
             await Task.Delay(150);
             Program.Check(shell.DisplayMode == "wide" && shell.SelectedWorkspaceId == first.Id && !view.Interactive,
-                "Show more opens the same workspace's full page and releases the hidden inline adapter");
+                "Fullscreen opens the same workspace's full page and releases the hidden inline adapter");
             Click(shell.BackButton);
             await Task.Delay(100);
             Program.Check(shell.DisplayMode == "stack" && Math.Abs(shell.ActualWidth - 340) < 2,
@@ -135,13 +150,27 @@ internal static class InlineScenes
                     shell.UpdateLayout();
                     await Task.Delay(150);
                     view = Inline(shell, first.Id)!;
-                    var more = (Button)view.FindName("MoreButton");
+                    var more = (Button)view.FindName("ShowLogsButton");
                     var screen = (Image)view.FindName("Screen");
                     Rect button = more.TransformToAncestor(shell).TransformBounds(new Rect(more.RenderSize));
                     Program.Check(screen.ActualWidth >= 270 && button.Left >= 0 && button.Right <= shell.ActualWidth
                         && ProbeWindow.IsOffScreen(shell),
-                        $"The {width} DIP {look} inline preview and Show more action fit the strip off the owner's monitors");
+                        $"The {width} DIP {look} inline preview and Show logs button fit the strip off the owner's monitors");
+                    more.BringIntoView();
+                    shell.UpdateLayout();
+                    await Task.Delay(150);
                     Mvp.Save(Mvp.Photograph(shell), Path.Combine(captures, $"live-{look.ToString().ToLowerInvariant()}-{width}.png"));
+                    if (width != 340) continue;
+                    Click(more);
+                    shell.UpdateLayout();
+                    await Task.Delay(150);
+                    Mvp.Save(Mvp.Photograph(shell), Path.Combine(captures, $"logs-{look.ToString().ToLowerInvariant()}.png"));
+                    var filesToggle = (Button)view.FindName("ShowFilesButton");
+                    Click(filesToggle);
+                    shell.UpdateLayout();
+                    await Task.Delay(150);
+                    Mvp.Save(Mvp.Photograph(shell), Path.Combine(captures, $"files-{look.ToString().ToLowerInvariant()}.png"));
+                    Click(filesToggle);
                 }
             }
 

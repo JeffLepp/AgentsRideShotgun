@@ -91,11 +91,15 @@
                                 PreviewKeyDown="WorkspaceCard_KeyDown" Tag="{Binding Id}"
                                 ToolTip="{Binding PreviewTip}" AutomationProperties.Name="{Binding PreviewLabel}">
                             <StackPanel Margin="7,7,7,8">
+                                <!-- Hidden while expanded: the open card's one screen is the interactive one below. -->
                                 <Border Tag="0.625" Loaded="AspectBorder_Loaded" CornerRadius="6" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
-                                        Background="{DynamicResource PreviewBrush}" ClipToBounds="True">
+                                        Background="{DynamicResource PreviewBrush}" ClipToBounds="True" Margin="0,0,0,8">
+                                    <Border.Style><Style TargetType="Border"><Style.Triggers>
+                                        <DataTrigger Binding="{Binding Expanded}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                    </Style.Triggers></Style></Border.Style>
                                     <Image Source="{Binding Preview}" Stretch="UniformToFill"/>
                                 </Border>
-                                <Grid Margin="3,8,34,0">
+                                <Grid Margin="3,0,34,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Grid.ColumnSpan="2" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
                                                Foreground="{DynamicResource InkBrush}" TextTrimming="CharacterEllipsis"/>
@@ -114,7 +118,7 @@
                         </Button>
                     </Grid>
                 </Border>
-                <local:WorkspaceInlineView Visibility="{Binding Expanded, Converter={StaticResource BoolToVis}}" ShowMore="Inline_ShowMore"/>
+                <local:WorkspaceInlineView Visibility="{Binding Expanded, Converter={StaticResource BoolToVis}}"/>
             </StackPanel>
         </DataTemplate>
 
@@ -145,7 +149,7 @@
                     </Grid>
                 </Border>
             </Button>
-            <local:WorkspaceInlineView Visibility="{Binding Expanded, Converter={StaticResource BoolToVis}}" ShowMore="Inline_ShowMore"/>
+            <local:WorkspaceInlineView Visibility="{Binding Expanded, Converter={StaticResource BoolToVis}}"/>
             </StackPanel>
         </DataTemplate>
 
@@ -220,12 +224,12 @@
                     <Button x:Name="BackButton" Visibility="Collapsed" Style="{StaticResource IconButton}" Click="Back_Click" ToolTip="Back to workspaces" AutomationProperties.Name="Back to workspaces">
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Back}"/>
                     </Button>
-                    <!-- No new-workspace button: workspaces make themselves. -->
                     <Button x:Name="FilterButton" Width="30" Style="{StaticResource IconButton}" Click="Filter_Click" ToolTip="Find a workspace" AutomationProperties.Name="Find a workspace">
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Search}"/>
                     </Button>
-                    <Button x:Name="ThemeButton" Width="30" Style="{StaticResource IconButton}" Click="Theme_Click" AutomationProperties.Name="Switch day and night">
-                        <local:DayNightIcon x:Name="ThemeIcon"/>
+                    <!-- Day and night live in Settings; this spot starts a fresh workspace. -->
+                    <Button x:Name="NewButton" Width="30" Style="{StaticResource IconButton}" Click="New_Click" ToolTip="New workspace" AutomationProperties.Name="New workspace">
+                        <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Plus}"/>
                     </Button>
                     <Button x:Name="SettingsButton" Width="30" Style="{StaticResource IconButton}" Click="Settings_Click" ToolTip="Settings" AutomationProperties.Name="Settings">
                         <Path Style="{StaticResource Icon15}" Data="{StaticResource Icon.Cog}"/>

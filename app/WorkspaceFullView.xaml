@@ -51,26 +51,35 @@
             <Setter Property="Padding" Value="0,7,0,7"/>
         </Style>
         <DataTemplate x:Key="DidTemplate">
-            <Border Style="{StaticResource ActRow}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="62"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="44"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="{Binding Time}" FontFamily="{DynamicResource MonoFontFamily}"
-                               FontSize="11.5" Foreground="{DynamicResource FaintInkBrush}" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" FontSize="12.5" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0">
-                        <Run Text="{Binding Prefix, Mode=OneWay}"/><Run Text="{Binding Code, Mode=OneWay}"
-                             FontFamily="{DynamicResource MonoFontFamily}" Foreground="{DynamicResource AccentBrush}"/>
-                    </TextBlock>
-                    <!-- 44 wide, 16:10 -->
-                    <Border Grid.Column="2" Height="27.5" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
-                            Visibility="{Binding HasThumb, Converter={StaticResource BoolToVis}}">
-                        <Image Source="{Binding Thumb}" Stretch="UniformToFill"/>
-                    </Border>
-                </Grid>
-            </Border>
+            <StackPanel>
+                <TextBlock Text="{Binding Day}" Style="{StaticResource DayLabel}"
+                           Visibility="{Binding HasDay, Converter={StaticResource BoolToVis}}"/>
+                <Border Style="{StaticResource ActRow}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="64"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="{Binding Time}" FontFamily="{DynamicResource MonoFontFamily}"
+                                   FontSize="11.5" Foreground="{DynamicResource FaintInkBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Mark}" Style="{StaticResource RunMark}"/>
+                        <TextBlock Grid.Column="2" FontSize="12.5" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0">
+                            <Run Text="{Binding Prefix, Mode=OneWay}"/><Run Text="{Binding Code, Mode=OneWay}"
+                                 FontFamily="{DynamicResource MonoFontFamily}" Foreground="{DynamicResource AccentBrush}"/>
+                        </TextBlock>
+                        <TextBlock Grid.Column="3" Text="{Binding Note}" FontSize="11.5" Foreground="{DynamicResource FaintInkBrush}"
+                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <!-- 44 wide, 16:10 -->
+                        <Border Grid.Column="4" Width="44" Height="27.5" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}"
+                                Visibility="{Binding HasThumb, Converter={StaticResource BoolToVis}}">
+                            <Image Source="{Binding Thumb}" Stretch="UniformToFill"/>
+                        </Border>
+                    </Grid>
+                </Border>
+            </StackPanel>
         </DataTemplate>
         <DataTemplate x:Key="FileTemplate">
             <Border Style="{StaticResource FileRow}">

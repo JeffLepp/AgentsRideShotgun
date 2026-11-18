@@ -230,7 +230,7 @@ public partial class App : Application
             finally { window.Loaded -= onLoaded; }
         }
         else window.RestoreWorkspaceWindow();
-        if (workspace is not null) window.ShowWide(workspace);
+        if (workspace is not null) window.OpenInStack(workspace);
     }
 
     internal static void HideOnClose(Window window, CancelEventArgs e)
