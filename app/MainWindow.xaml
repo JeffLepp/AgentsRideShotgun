@@ -131,8 +131,7 @@
                                     <!-- Right margin: room for the second button beside Sleep. -->
                                     <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource CardCaption}" Margin="0,0,28,2"/>
                                 </Button>
-                                <!-- A double-click on the live screen is input for the workspace, so the page
-                                     a closed card's double-click opens has its own button here. -->
+                                <!-- The page a double-click opens, as a button you can see. -->
                                 <StackPanel Orientation="Horizontal" Margin="0,0,1,0" HorizontalAlignment="Right" VerticalAlignment="Center">
                                     <Button Width="28" Height="28" Padding="0" Style="{StaticResource IconButton}"
                                             Click="OpenPage_Click" Tag="{Binding Id}" ToolTip="Open full view" AutomationProperties.Name="{Binding Name, StringFormat=Open {0} in full view}">

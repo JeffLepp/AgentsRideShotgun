@@ -130,6 +130,17 @@ internal static class InlineScenes
             await Task.Delay(100);
             Program.Check(shell.DisplayMode == "stack" && Math.Abs(shell.ActualWidth - 340) < 2,
                 "The visible title-bar back action restores the narrow strip");
+            await Until(() => Inline(shell, first.Id)?.Interactive == true, "the live picture is back after the page");
+            var doubleClick = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0,
+                System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent };
+            typeof(System.Windows.Input.MouseButtonEventArgs).GetProperty("ClickCount")!.SetValue(doubleClick, 2);
+            ((Border)Inline(shell, first.Id)!.FindName("Frame")).RaiseEvent(doubleClick);
+            await Task.Delay(150);
+            Program.Check(doubleClick.Handled && shell.DisplayMode == "wide" && shell.SelectedWorkspaceId == first.Id
+                && shell.WindowState == WindowState.Normal && runtime.Plane!.Driving != Driver.Owner,
+                "Double-clicking an open card's live screen opens its page at normal size, not input for the workspace");
+            shell.ShowStack();
+            await Task.Delay(100);
             Click(shell.SettingsButton);
             await Task.Delay(150);
             Program.Check(shell.DisplayMode == "cardsettings" && ((ContentControl)shell.FindName("CardSettingsSlot")).ActualWidth > 300

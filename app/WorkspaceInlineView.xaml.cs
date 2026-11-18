@@ -30,9 +30,6 @@ public partial class WorkspaceInlineView : UserControl
     /// seconds so a finished command or a new file shows without reopening the list.</summary>
     DispatcherTimer? _watch;
     (long, DateTime) _seen;
-    /// <summary>When this card last opened: a click that lands on its screen within the double-click
-    /// time is the second half of the double-click that opened it, never input for the workspace.</summary>
-    long _shownAt;
 
     public WorkspaceInlineView()
     {
@@ -43,7 +40,7 @@ public partial class WorkspaceInlineView : UserControl
         IsVisibleChanged += (_, _) =>
         {
             // Closing the card folds its list again, so the next open shows only the screen.
-            if (IsVisible) _shownAt = Environment.TickCount64; else _open = "";
+            if (!IsVisible) _open = "";
             LoadActivity();
             Refresh();
         };
@@ -140,13 +137,12 @@ public partial class WorkspaceInlineView : UserControl
         Refresh();
     }
 
-    /// <summary>Opening a running card puts this screen where its thumbnail was, so the second click
-    /// of a double-click lands here. Within the double-click time it finishes that double-click (the
-    /// workspace page) and never reaches the workspace as a click.</summary>
+    /// <summary>A double-click on this screen opens the workspace page, the same as on the closed card,
+    /// whose second click lands here once the first has opened it. Its second click never reaches the
+    /// workspace; double-clicking inside the workspace is done on the page.</summary>
     void Frame_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // Only that second click: an ordinary click just after opening still reaches Start or the screen.
-        if (e.ClickCount < 2 || Environment.TickCount64 - _shownAt > System.Windows.Forms.SystemInformation.DoubleClickTime) return;
+        if (e.ClickCount < 2) return;
         e.Handled = true;
         if (_entry is { } entry && Window.GetWindow(this) is MainWindow shell) shell.ShowWide(entry.Id);
     }

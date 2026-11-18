@@ -42,10 +42,18 @@ public partial class App : Application
                 return;
             }
 
+            LogLifecycle("started" + (e.Args.Length > 0 ? " " + string.Join(' ', e.Args) : ""));
+            // A crash on a background thread ends the process without reaching the dispatcher handler below.
+            AppDomain.CurrentDomain.UnhandledException += (_, failure) =>
+            {
+                LogFailure(failure.ExceptionObject as Exception ?? new Exception(failure.ExceptionObject?.ToString()));
+                LogLifecycle("crashed off the UI thread, see last-error.txt");
+            };
             DispatcherUnhandledException += (_, failure) =>
             {
                 failure.Handled = true;
                 LogFailure(failure.Exception);
+                LogLifecycle("closing after an error, see last-error.txt");
                 MessageBox.Show("ARS hit an unexpected error and will close to release its workspaces. " +
                     "Your saved workspace files are retained.\n\n" + failure.Exception.Message,
                     "ARS", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -281,8 +289,32 @@ public partial class App : Application
             try { ModuleEntry.Shutdown(); }
             catch (Exception failure) { LogFailure(failure); }
         }
+        if (_ownsInstance) LogLifecycle("exited with code " + e.ApplicationExitCode);
         ExitHoldingInstance(() => base.OnExit(e), _instance, _ownsInstance);
     }
+
+    /// <summary>One line per start and exit in logs/lifecycle.log. A start with no exit after it means
+    /// the process was killed or died in native code, which leaves no other trace.</summary>
+    internal static void LogLifecycle(string what)
+    {
+        try
+        {
+            string path = Path.Combine(ProductContext.Local("logs"), "lifecycle.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            // Bounded: past 256 KB only the newer half is kept.
+            if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024)
+            {
+                string[] lines = File.ReadAllLines(path);
+                File.WriteAllLines(path, lines[(lines.Length / 2)..]);
+            }
+            File.AppendAllText(path, $"{DateTimeOffset.Now:O}\tpid {Environment.ProcessId}\t{ProductVersion}\t{what}\n");
+        }
+        catch (Exception loggingFailure) { Debug.WriteLine(loggingFailure.Message); }
+    }
+
+    static string ProductVersion => typeof(App).Assembly
+        .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "?";
 
     /// <summary>
     /// Raises Exit with the one-per-account lock still held. "Delete all data" and Uninstall remove
