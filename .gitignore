@@ -27,6 +27,11 @@ node_modules/
 /scratch/
 /launch/
 
+# Local Claude Code instructions and configuration.
+/CLAUDE.md
+/.claude/
+/.claude-plugin/
+
 # Signing material and local secrets. Never committed.
 *.pfx
 *.p12
