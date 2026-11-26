@@ -1,10 +1,24 @@
-param([string]$Version = '', [switch]$SkipPublish, [switch]$Sign, [string]$PayloadDirectory, [string]$VpkPath)
+param([string]$Version = '', [switch]$SkipPublish, [switch]$Sign, [string]$PayloadDirectory, [string]$VpkPath, [switch]$UseAzureCli)
 # Builds ARS-Setup: a per-user install (no admin) with a Start menu shortcut and an Apps &
 # features uninstall that takes ARS out of the agents' configs. Publishes fresh first, so
 # ARS must be closed. -SkipPublish packages a separately published, version-matched payload.
 # -Sign signs every binary and Setup with the Azure identity; public releases are always signed.
 $ErrorActionPreference = 'Stop'
 if ($PayloadDirectory -and -not $SkipPublish) { throw 'A separately published PayloadDirectory requires -SkipPublish.' }
+if ($UseAzureCli -and -not $Sign) { throw '-UseAzureCli requires -Sign.' }
+if ($Sign) {
+    $signingVariables = @('DESKWEAVE_SIGN_ACCOUNT', 'DESKWEAVE_SIGN_ENDPOINT', 'DESKWEAVE_SIGN_PROFILE')
+    if ($UseAzureCli) {
+        if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI is required for -UseAzureCli.' }
+        & az account show --only-show-errors --output none
+        if ($LASTEXITCODE -ne 0) { throw 'Sign in to the Azure CLI before using -UseAzureCli.' }
+    } else {
+        $signingVariables += @('AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID')
+    }
+    foreach ($name in $signingVariables) {
+        if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Signing needs $name in the environment." }
+    }
+}
 # A local SDK can build ARS without registering a machine-wide .NET runtime.
 # Resolve the same SDK for the vpk apphost in this process only.
 if (-not $env:DOTNET_ROOT) {
@@ -59,15 +73,12 @@ $staging = Join-Path $root ('artifacts\installer-staging\' + [DateTime]::UtcNow.
 $packageRuntime = 'win10.0.19041-x64'
 $signing = @()
 if ($Sign) {
-    # Azure Artifact Signing through the service principal already in the environment; the
-    # metadata file holds no secret and is deleted after packing.
-    foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'DESKWEAVE_SIGN_ACCOUNT', 'DESKWEAVE_SIGN_ENDPOINT', 'DESKWEAVE_SIGN_PROFILE')) {
-        if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Signing needs $name in the environment." }
-    }
+    # Select one Azure credential source. The metadata file holds only the profile configuration.
+    $disabledCredential = if ($UseAzureCli) { 'EnvironmentCredential' } else { 'AzureCliCredential' }
     $signMetadata = Join-Path ([IO.Path]::GetTempPath()) ('deskweave-sign-' + [Guid]::NewGuid().ToString('N') + '.json')
     $signJson = [ordered]@{
         Endpoint = $env:DESKWEAVE_SIGN_ENDPOINT; CodeSigningAccountName = $env:DESKWEAVE_SIGN_ACCOUNT; CertificateProfileName = $env:DESKWEAVE_SIGN_PROFILE
-        ExcludeCredentials = @('ManagedIdentityCredential', 'WorkloadIdentityCredential', 'SharedTokenCacheCredential', 'VisualStudioCredential', 'VisualStudioCodeCredential', 'AzureCliCredential', 'AzurePowerShellCredential', 'AzureDeveloperCliCredential', 'InteractiveBrowserCredential')
+        ExcludeCredentials = @('ManagedIdentityCredential', 'WorkloadIdentityCredential', 'SharedTokenCacheCredential', 'VisualStudioCredential', 'VisualStudioCodeCredential', $disabledCredential, 'AzurePowerShellCredential', 'AzureDeveloperCliCredential', 'InteractiveBrowserCredential')
     } | ConvertTo-Json
     # No byte-order mark: the signing library fails on one with only "SignerSign() failed".
     [IO.File]::WriteAllText($signMetadata, $signJson)

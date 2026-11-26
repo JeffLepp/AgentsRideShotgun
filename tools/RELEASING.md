@@ -25,6 +25,9 @@ gh release list --repo JeffLepp/AgentsRideShotgun --limit 5
    `DESKWEAVE_SIGN_PROFILE` when `-Sign` is used. Keep their values out of source
    control and logs. Put the .NET 10 SDK and the matching Velopack CLI on `PATH`;
    the script checks the CLI against the SDK version in `app/ARS.csproj`.
+   For an Azure CLI session with the Artifact Signing Certificate Profile
+   Signer role, use `-Sign -UseAzureCli` with the three `DESKWEAVE_SIGN_*`
+   variables. Sign in with `az login --use-device-code` on a headless shell.
 3. Save workspace work and quit the development controller before publishing.
    The publish script refuses to replace a running build. Build the signed
    package from the repository root:
@@ -67,10 +70,9 @@ gh release list --repo JeffLepp/AgentsRideShotgun --limit 5
    Replace the previous version path when a newer release has been published.
    The local clean install check needs Windows Sandbox. On Windows Home, use
    the **Release installation validation** GitHub Actions workflow on its
-   disposable Windows runner. The workflow template is
-   `tools/release-validation.workflow.yml`; install it as
-   `.github/workflows/release-validation.yml` to enable it. GitHub OAuth pushes
-   that add a workflow require the `workflow` scope. Its default run builds an unsigned test package
+   disposable Windows runner at `.github/workflows/release-validation.yml`.
+   GitHub OAuth pushes that change a workflow require the `workflow` scope.
+   Its default run builds an unsigned test package
    and validates source packaging only. After uploading the signed package to
    a draft GitHub release, run it again with that `release_tag` to validate the
    actual release installer before making the release public. A successful build or an old
