@@ -166,6 +166,7 @@ static partial class CornerScenes
         await RenderingLifecycleChecks();
         await DockTransitionChecks();
         await EmptyScreenChecks();
+        await RecentRuntimeChecks();
         await DockPolicyChecks();
         await IntegrationChecks();
         // These drive the real WorkspacePeekHost and a
@@ -217,6 +218,77 @@ static partial class CornerScenes
             WorkspacePeekPolicy.Wanted(CornerShow.ComesAndGoes, true, false, false, true, false, false, false, TimeSpan.Zero, fade, showable: false)
             && WorkspacePeekPolicy.Wanted(CornerShow.Always, true, false, false, false, false, false, true, TimeSpan.Zero, fade, showable: false),
             "A summon or Always still shows a workspace with no window on it");
+        Program.Check(
+            !WorkspacePeekPolicy.Wanted(CornerShow.ComesAndGoes, true, false, false, false, true, false, false, TimeSpan.Zero, fade, showable: false)
+            && !WorkspacePeekPolicy.Wanted(CornerShow.ComesAndGoes, true, false, false, false, true, false, false, TimeSpan.FromMinutes(5), fade, showable: false),
+            "A pinned (or once dragged) card stays away for agent work that shows no window");
+        Program.Check(
+            !WorkspacePeekPolicy.Docked(CornerShow.ComesAndGoes, true, false, false, showable: false)
+            && !WorkspacePeekPolicy.Docked(CornerShow.Always, true, false, false, showable: false),
+            "A running workspace with nothing to show leaves no edge tab");
+        Program.Check(
+            WorkspacePeekPolicy.Docked(CornerShow.ComesAndGoes, true, false, false, showable: true)
+            && WorkspacePeekPolicy.Docked(CornerShow.ComesAndGoes, true, true, true, showable: false)
+            && !WorkspacePeekPolicy.Docked(CornerShow.ComesAndGoes, true, true, false, showable: true)
+            && !WorkspacePeekPolicy.Docked(CornerShow.Off, true, false, true, showable: true)
+            && !WorkspacePeekPolicy.Docked(CornerShow.ComesAndGoes, false, false, false, showable: true),
+            "...while a workspace with something to show, or a question, keeps its tab, and Off, the open hub, or nothing running leave none");
+        DropWatchChecks();
+    }
+
+    /// <summary>
+    /// Spec (owner, 2026-11-20, after a field report of pointer lag on 0.3.10 with ARS in the tray
+    /// and the PC short of memory): ARS never makes the owner's mouse wait on it. Drag-to-corner is
+    /// a Settings switch, on by default, and while on it polls instead of hooking the mouse.
+    /// </summary>
+    static void DropWatchChecks()
+    {
+        // No global input hook anywhere in the engine: with one, every pointer move on the PC
+        // waits for ARS, and a slow ARS is a laggy mouse.
+        Assembly engine = typeof(WorkspacePeekHost).Assembly;
+        string[] hooks = engine.GetTypes()
+            .SelectMany(t => t.GetMethods(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.DeclaredOnly))
+            .Where(m => m.GetCustomAttribute<System.Runtime.InteropServices.DllImportAttribute>() is { } import
+                && ((import.EntryPoint ?? m.Name).StartsWith("SetWindowsHookEx", StringComparison.Ordinal)))
+            .Select(m => m.DeclaringType!.Name + "." + m.Name).ToArray();
+        Program.Check(hooks.Length == 0,
+            "The engine installs no global mouse or keyboard hook, so ARS can never make the pointer wait" + (hooks.Length > 0 ? ": " + string.Join(", ", hooks) : ""));
+        Program.Check(new AppSettings().CornerDragOpens,
+            "Drag-to-corner is on by default");
+        Program.Check(WorkspacePeekDropWatch.Tick <= TimeSpan.FromMilliseconds(50),
+            "Drag-to-corner notices a drag within 50 ms");
+
+        var corner = new Rect(900, 600, 300, 200);
+        bool Desk(Point p) => p.X < 500;
+        WorkspacePeekDropWatch.State s = default;
+        bool fired;
+        int fires = 0;
+        (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(100, 100), Desk, () => corner); fires += fired ? 1 : 0;
+        (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(600, 400), Desk, () => corner); fires += fired ? 1 : 0;
+        Program.Check(fires == 0, "A drag from the desktop does not open the corner before it reaches it");
+        (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(950, 650), Desk, () => corner); fires += fired ? 1 : 0;
+        (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(1000, 700), Desk, () => corner); fires += fired ? 1 : 0;
+        Program.Check(fires == 1, "A drag from the desktop opens the corner once when it reaches it, not again while it lingers");
+        (s, _) = WorkspacePeekDropWatch.Step(s, false, default, Desk, () => corner);
+        (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(700, 100), Desk, () => corner);
+        (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(950, 650), Desk, () => corner);
+        Program.Check(!fired, "A press that starts in another app never opens the corner");
+        // A desktop icon or a file in a maximized Explorer window can sit under the corner: a click
+        // there, however long it is held, is a click and not a drag.
+        (s, _) = WorkspacePeekDropWatch.Step(s, false, default, Desk, () => corner);
+        fires = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(950 + (i % 2) * 3, 650), p => true, () => corner);
+            fires += fired ? 1 : 0;
+        }
+        Program.Check(fires == 0, "A click held still inside the corner area, even jittering under the drag threshold, opens nothing");
+        (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(970, 660), p => true, () => corner);
+        Program.Check(fired, "...and the same press opens it once it moves past the drag threshold");
+        (s, _) = WorkspacePeekDropWatch.Step(s, false, default, Desk, () => corner);
+        (s, _) = WorkspacePeekDropWatch.Step(s, true, new Point(100, 100), Desk, () => corner);
+        (s, fired) = WorkspacePeekDropWatch.Step(s, true, new Point(950, 650), Desk, () => corner);
+        Program.Check(fired, "A new press after the button came up is a new drag");
     }
 
     /// <summary>An agent at work on a screen with no window on it - a command, a browser still
@@ -239,6 +311,37 @@ static partial class CornerScenes
             await Task.Delay(1500);
             Program.Check(GateWindow() is not { IsVisible: true },
                 "An agent at work on a screen with no window on it leaves the corner away");
+
+            // Pinned (a drag or resize sets it too) and with the card already built, so the host's
+            // tab branch runs: still no card and no edge tab over an empty screen.
+            WorkspacePeekHost.ShowEmptyForTests = true;
+            InvokeHost("StirFrom", stored.Id);
+            await Task.Delay(400);
+            Program.Check(GateWindow() is { IsVisible: true }, "Fixture: the card is built and up before the pinned empty-screen check");
+            WorkspacePeekHost.ShowEmptyForTests = false;
+            AppSettingsStore.Update(s => s with { CornerPinned = true });
+            InvokeHost("StirFrom", stored.Id);
+            await Task.Delay(1500);
+            Program.Check(GateWindow() is { } pinnedCard && !pinnedCard.Docked && !pinnedCard.IsVisible,
+                "A pinned card stays away, and leaves no edge tab, while an agent works on a screen with nothing on it");
+
+            // The corner is hidden with a workspace running: the one state drag-to-corner watches in.
+            Program.Check(WorkspacePeekHost.DropWatchArmed, "Fixture: with the corner hidden and drag-to-corner on, the drag watch runs");
+            AppSettingsStore.Update(s => s with { CornerDragOpens = false });
+            await Task.Delay(300);
+            bool offStops = !WorkspacePeekHost.DropWatchArmed;
+            InvokeHost("StirFrom", stored.Id);
+            await Task.Delay(1500);
+            Program.Check(offStops && !WorkspacePeekHost.DropWatchArmed,
+                "Turning drag-to-corner off in Settings stops the watch at once, and nothing starts it again");
+            AppSettingsStore.Update(s => s with { CornerDragOpens = true });
+            await Task.Delay(300);
+            Program.Check(WorkspacePeekHost.DropWatchArmed, "Turning it back on starts the watch again");
+            AppSettingsStore.Update(s => s with { CornerShow = CornerShow.Off });
+            await Task.Delay(300);
+            Program.Check(!WorkspacePeekHost.DropWatchArmed, "Turning the corner window off stops a watch already running");
+            AppSettingsStore.Update(s => s with { CornerShow = CornerShow.ComesAndGoes });
+            await Task.Delay(300);
             runtime.Plane.Release();
         }
         finally
@@ -247,6 +350,45 @@ static partial class CornerScenes
             WorkspacePeekHost.Stop();
             AppSettingsStore.Update(_ => saved);
         }
+    }
+
+    /// <summary>Recent's time through real runtimes stopping (spec in Scenes.Hub RecentTimeChecks):
+    /// what is stored is the last use, not the moment it stopped, even while an agent still holds
+    /// it or after Pause every agent took and handed it back.</summary>
+    static async Task RecentRuntimeChecks()
+    {
+        StoredWorkspace held = WorkspaceStore.Create("Recent held fixture");
+        WorkspaceAccessStore.Write(held.Id, new WorkspaceAccessPolicy(Enabled: true) { PrewarmBrowser = false });
+        WorkspaceRuntime heldRuntime = WorkspaceRuntime.Start(held);
+        DateTimeOffset used = DateTimeOffset.Now;
+        heldRuntime.Access!.AcquireForTests();
+        await Task.Delay(2500);
+        heldRuntime.Dispose();
+        StoredWorkspace? heldAfter = WorkspaceStore.Find(held.Id);
+        Program.Check(heldAfter is { Slept: { } slept } && heldAfter.LastUsed - used < TimeSpan.FromSeconds(1)
+                && slept - heldAfter.LastUsed >= TimeSpan.FromSeconds(2),
+            "A workspace an agent still holds but stopped using reads as last used at its last call, and slept later");
+
+        StoredWorkspace paused = WorkspaceStore.Create("Recent pause fixture");
+        WorkspaceRuntime pausedRuntime = WorkspaceRuntime.Start(paused);
+        DateTimeOffset started = DateTimeOffset.Now;
+        await Task.Delay(1500);
+        pausedRuntime.HeldByPause = true;
+        pausedRuntime.Plane!.OwnerTakes();
+        await Task.Delay(300);
+        pausedRuntime.Dispose();
+        StoredWorkspace? pausedAfter = WorkspaceStore.Find(paused.Id);
+        Program.Check(pausedAfter is { } p && p.LastUsed - started < TimeSpan.FromSeconds(1),
+            "Pause every agent holding a workspace as it stops is not the owner using it");
+
+        StoredWorkspace owned = WorkspaceStore.Create("Recent owner fixture");
+        WorkspaceRuntime ownedRuntime = WorkspaceRuntime.Start(owned);
+        await Task.Delay(1500);
+        ownedRuntime.Plane!.OwnerTakes();
+        ownedRuntime.Dispose();
+        StoredWorkspace? ownedAfter = WorkspaceStore.Find(owned.Id);
+        Program.Check(ownedAfter is { Slept: { } s } && s - ownedAfter.LastUsed < TimeSpan.FromSeconds(1),
+            "A workspace the owner has in hand as it stops reads as used just now");
     }
 
     static void SizeChecks()

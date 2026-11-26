@@ -64,12 +64,12 @@ internal static class LiveRouter
                 // ARS quits under a connected agent, then opens again.
                 WorkspaceRouter.Stop();
                 Check(!File.Exists(ticket), "Quitting ARS withdraws its own router ticket");
-                Thread.Sleep(500);   // the bridge hears the pipe close; a call racing that is answered as "closed"
+                Thread.Sleep(500);   // the bridge hears the pipe close
                 var waited = Stopwatch.StartNew();
                 JsonElement closed = session.Tool("status");
-                Check(Failed(closed) && Text(closed) == "ARS isn't open. Ask the owner to open ARS, then try again."
-                    && waited.Elapsed < TimeSpan.FromSeconds(5),
-                    "A tool call while ARS is closed is answered in one line within five seconds, and the bridge stays up");
+                Check(Failed(closed) && Text(closed) == BridgeTexts.Restarting
+                    && waited.Elapsed < TimeSpan.FromSeconds(5) && !session.Exited,
+                    "A tool call while ARS is closed is answered with the retry text within five seconds, and the bridge stays up");
                 WorkspaceRouter.Start();
                 Check(WorkspaceRouter.Pipe is { } again && again != pipe && Text(session.Tool("status")).StartsWith("No workspace yet", StringComparison.Ordinal),
                     "Once ARS is open again the same agent session reaches the new router without reconnecting");
@@ -111,19 +111,20 @@ internal static class LiveRouter
             File.Delete(ticket);
 
             // Nothing is open: a missing ticket, a ticket from a crash, and one from another version.
-            (int code, string errors, string output, TimeSpan took) = Once(ticket, "missing", outputDirectory);
-            Check(code == 1 && errors.Trim() == "ARS isn't open. Open ARS, then reconnect this MCP server."
-                && output.Length == 0 && took < TimeSpan.FromSeconds(5),
-                "With no ticket the bridge exits in under five seconds with one line and nothing on the MCP stream");
+            // The session starts anyway: the handshake and tool list come from the bridge, each call
+            // says why ARS cannot take it, and only the client leaving ends the bridge.
+            Offline missing = Once(ticket, "missing", outputDirectory);
+            Check(missing.Started && missing.Call == BridgeTexts.Restarting && missing.Code == 0
+                && missing.Hello < TimeSpan.FromSeconds(5) && missing.Answered < TimeSpan.FromSeconds(5),
+                "With no ticket the bridge initializes and lists the tools in under five seconds, answers a call with the retry text, and stays until EOF");
             File.WriteAllText(ticket, StaleTicket(dead));
-            (code, errors, output, took) = Once(ticket, "stale", outputDirectory);
-            Check(code == 1 && errors.Trim() == "ARS isn't open. Open ARS, then reconnect this MCP server."
-                && output.Length == 0 && took < TimeSpan.FromSeconds(5),
-                "A ticket naming a pipe nobody serves fails in under five seconds instead of waiting ten on it");
+            Offline stale = Once(ticket, "stale", outputDirectory);
+            Check(stale.Started && stale.Call == BridgeTexts.Restarting && stale.Code == 0
+                && stale.Hello < TimeSpan.FromSeconds(5) && stale.Answered < TimeSpan.FromSeconds(5),
+                "A ticket naming a pipe nobody serves is answered in under five seconds instead of waiting ten on it");
             File.WriteAllText(ticket, "{\"schema\":2}");
-            (code, errors, output, took) = Once(ticket, "old-schema", outputDirectory);
-            Check(code == 2 && errors.Trim().StartsWith("This MCP entry doesn't match the ARS on this PC.", StringComparison.Ordinal)
-                && output.Length == 0 && took < TimeSpan.FromSeconds(2),
+            Offline old = Once(ticket, "old-schema", outputDirectory);
+            Check(old.Started && old.Call == BridgeTexts.Mismatched && old.Code == 0 && old.Answered < TimeSpan.FromSeconds(3),
                 "A ticket from another version says to connect the agent again, at once and not silently");
             File.Delete(ticket);
 
@@ -140,11 +141,12 @@ internal static class LiveRouter
                 Thread.Sleep(500);
                 slow.Dispose();
                 bool answered = running.Wait(TimeSpan.FromSeconds(5));
-                Check(answered && Failed(running.Result)
-                    && Text(running.Result) == "ARS closed while this was running. Ask the owner to open ARS, then try again.",
-                    "A tool call in flight when ARS closes is answered at once with one line");
+                Check(answered && Failed(running.Result) && Text(running.Result) == BridgeTexts.Interrupted && !session.Exited,
+                    "A tool call in flight when ARS closes is answered at once, is not replayed, and the bridge stays up");
             }
             WorkspaceAccessStore.Withdraw("in-flight");
+            CheckToolFailures(Check);
+            CheckServerBacklog(Check);
             CheckQueuedReplies(Check);
             CheckQueuedDisconnect(Check);
             CheckRevokedRoute(Check);
@@ -175,6 +177,81 @@ internal static class LiveRouter
             WorkspacePipeProtocol.Write(pipe, request, 256, bound.Token).GetAwaiter().GetResult();
         check(requests.All(request => WorkspacePipeProtocol.Read(pipe, 256, bound.Token).GetAwaiter().GetResult() == request),
             "Pipelined requests each receive one reply in the original order");
+    }
+
+    /// <summary>A tool's own time limit, or any other failure inside it, is that call's answer. The
+    /// connection, and the bridge's session on it, carry on to the next call.</summary>
+    static void CheckToolFailures(Action<bool, string> check)
+    {
+        int connects = 0;
+        using var server = new WorkspacePipeServer(() =>
+        {
+            Interlocked.Increment(ref connects);
+            return new(async (body, cancel) =>
+            {
+                using var json = JsonDocument.Parse(body);
+                if (!json.RootElement.TryGetProperty("id", out JsonElement id)) return null;
+                // Not the caller's cancel: a tool that gave up on something it was waiting for.
+                if (body.Contains("\"timeout\"", StringComparison.Ordinal))
+                { await Task.Delay(10, CancellationToken.None); throw new OperationCanceledException(); }
+                if (body.Contains("\"explode\"", StringComparison.Ordinal)) throw new InvalidOperationException("fixture failure");
+                return "{\"jsonrpc\":\"2.0\",\"id\":" + id.GetRawText() + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"fine\"}]}}";
+            }, () => { });
+        });
+        WorkspaceAccessStore.Publish("tool-failures", server);
+        try
+        {
+            using var session = new Bridge(WorkspaceAccessStore.Connection("tool-failures"));
+            JsonElement timedOut = session.Tool("timeout");
+            JsonElement exploded = session.Tool("explode");
+            JsonElement fine = session.Tool("fine");
+            check(Failed(timedOut) && Text(timedOut) == WorkspaceMcp.TimedOut
+                && Failed(exploded) && Text(exploded).Contains("InvalidOperationException", StringComparison.Ordinal)
+                && !Failed(fine) && Text(fine) == "fine" && Volatile.Read(ref connects) == 1 && !session.Exited,
+                "A timeout or failure inside a tool is answered for that call alone and the same connection serves the next call");
+        }
+        finally { WorkspaceAccessStore.Withdraw("tool-failures"); }
+    }
+
+    /// <summary>Past 16 waiting requests the pipe server refuses each extra one, in order, and keeps the connection.</summary>
+    static void CheckServerBacklog(Action<bool, string> check)
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var server = new WorkspacePipeServer(async (request, cancel) =>
+        {
+            if (request.Contains("\"id\":0,", StringComparison.Ordinal)) await release.Task.WaitAsync(cancel);
+            return request;
+        });
+        using var pipe = new NamedPipeClientStream(".", server.Name, PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        pipe.ConnectAsync(bound.Token).GetAwaiter().GetResult();
+        WorkspacePipeProtocol.Write(pipe, server.Capability, 256, bound.Token).GetAwaiter().GetResult();
+        if (WorkspacePipeProtocol.Read(pipe, 256, bound.Token).GetAwaiter().GetResult() != "workspace-pipe/1")
+            throw new IOException("Backlog probe did not authenticate.");
+        string Frame(int id) => "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"method\":\"ping\"}";
+        int extra = 4, total = 1 + WorkspacePipeServer.MaxWaiting + extra;
+        for (int id = 0; id < total; id++) WorkspacePipeProtocol.Write(pipe, Frame(id), 256, bound.Token).GetAwaiter().GetResult();
+        Thread.Sleep(300);   // the server reads them all while the first is running
+        release.SetResult();
+        bool ordered = true;
+        try
+        {
+            for (int id = 0; id < total; id++)
+            {
+                string? reply = WorkspacePipeProtocol.Read(pipe, WorkspacePipeProtocol.MaxResponseBytes, bound.Token).GetAwaiter().GetResult();
+                if (id <= WorkspacePipeServer.MaxWaiting) { ordered &= reply == Frame(id); continue; }
+                using var json = JsonDocument.Parse(reply ?? "null");
+                ordered &= json.RootElement.ValueKind == JsonValueKind.Object
+                    && json.RootElement.GetProperty("id").GetInt32() == id
+                    && json.RootElement.GetProperty("error").GetProperty("message").GetString() == WorkspacePipeServer.Busy;
+            }
+            WorkspacePipeProtocol.Write(pipe, Frame(99), 256, bound.Token).GetAwaiter().GetResult();
+            ordered &= WorkspacePipeProtocol.Read(pipe, 256, bound.Token).GetAwaiter().GetResult() == Frame(99);
+        }
+        catch (Exception error) when (error is IOException or OperationCanceledException or JsonException or KeyNotFoundException
+            or InvalidDataException) { ordered = false; }
+        check(ordered, "Past 16 waiting requests the pipe server refuses each extra one in order and keeps the connection");
     }
 
     static void CheckQueuedDisconnect(Action<bool, string> check)
@@ -244,32 +321,42 @@ internal static class LiveRouter
         return ready();
     }
 
-    static bool Failed(JsonElement reply) => reply.TryGetProperty("error", out _)
+    internal static bool Failed(JsonElement reply) => reply.TryGetProperty("error", out _)
         || reply.GetProperty("result").TryGetProperty("isError", out JsonElement error) && error.GetBoolean();
 
-    static string Text(JsonElement reply) => reply.TryGetProperty("error", out JsonElement error)
+    internal static string Text(JsonElement reply) => reply.TryGetProperty("error", out JsonElement error)
         ? error.GetProperty("message").GetString()!
         : reply.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
 
-    /// <summary>Starts the bridge as an agent would, sends initialize, and waits for it to end.</summary>
-    static (int Code, string Errors, string Output, TimeSpan Took) Once(string ticket, string scenario, string? outputDirectory)
+    /// <summary>What a session with no ARS to reach got: whether the handshake and tool list were
+    /// answered, the text of its one tool call, how long those took, and the exit code once its client left.</summary>
+    internal sealed record Offline(bool Started, string Call, TimeSpan Hello, TimeSpan Answered, int Code);
+
+    /// <summary>Starts the bridge as an agent would, initializes, lists the tools, makes one call, then closes stdin.</summary>
+    static Offline Once(string ticket, string scenario, string? outputDirectory)
     {
         var waited = Stopwatch.StartNew();
         using var bridge = new Bridge(ticket);
-        bridge.Send("initialize", Hello);
-        int code = bridge.Exit(TimeSpan.FromSeconds(20));
-        TimeSpan exited = waited.Elapsed;
-        string errors = bridge.Errors, output = bridge.Output;
-        TimeSpan took = waited.Elapsed;
-        // Keep the existing end-to-end timing bound. Distinguish process startup/exit from stream
-        // drain delays so a heavily loaded test run leaves enough evidence to diagnose a failure.
+        JsonElement hello = bridge.Request("initialize", Hello);
+        TimeSpan greeted = waited.Elapsed;
+        JsonElement tools = bridge.Request("tools/list", new { });
+        JsonElement call = bridge.Tool("status");
+        TimeSpan answered = waited.Elapsed;
+        bool started = hello.TryGetProperty("result", out JsonElement result)
+            && result.GetProperty("serverInfo").GetProperty("name").GetString() == "ars"
+            && tools.TryGetProperty("result", out JsonElement list)
+            && list.GetProperty("tools").GetArrayLength() == WorkspaceMcp.ExternalToolSchemas.Length;
+        string text = Failed(call) ? Text(call) : "";
+        bool aliveBeforeEof = !bridge.Exited;
+        int code = bridge.Close();
+        if (!aliveBeforeEof) code = -2;
         if (outputDirectory is not null)
-            File.AppendAllText(Path.Combine(outputDirectory, "router-bridge-exits.jsonl"), JsonSerializer.Serialize(new
+            File.AppendAllText(Path.Combine(outputDirectory, "router-bridge-offline.jsonl"), JsonSerializer.Serialize(new
             {
-                scenario, observedAt = DateTimeOffset.UtcNow, code, stdout = output, stderr = errors,
-                exitedMs = exited.TotalMilliseconds, elapsedMs = took.TotalMilliseconds,
+                scenario, observedAt = DateTimeOffset.UtcNow, code, started, call = text, stderr = bridge.Errors,
+                helloMs = greeted.TotalMilliseconds, answeredMs = answered.TotalMilliseconds,
             }) + Environment.NewLine);
-        return (code, errors, output, took);
+        return new(started, text, greeted, answered, code);
     }
 
     /// <summary>Repeats only the router/transport gate, with isolated stores and no visible windows.</summary>
@@ -320,6 +407,7 @@ internal static class LiveRouter
         }
 
         internal string Errors => _errors.GetAwaiter().GetResult();
+        internal bool Exited => _process.HasExited;
         internal string Output => (_output ??= _process.StandardOutput.ReadToEndAsync()).GetAwaiter().GetResult();
 
         internal void Send(string method, object parameters)

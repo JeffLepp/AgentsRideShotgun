@@ -20,8 +20,8 @@ namespace Deskweave;
 /// </summary>
 public sealed class FirstRunWindow : Window
 {
-    internal const string Headline = "ARS works on its own";
-    internal const string Explanation = "Press Start once and you're done. Claude Code and Codex use ARS by themselves to test apps on their own screen, and you can watch in a small corner window while you keep using your desktop. You never have to do anything in this app.";
+    internal const string Headline = "Let agents work in the background";
+    internal const string Explanation = "Click Start to connect the selected agents. They can open and test apps on a separate screen while you keep using yours.";
     internal const string LocalLine = "ARS runs only on this PC";
     internal const string NoAgentLine = "No Claude Code or Codex yet. Install one and ARS connects it.";
     internal const string StartLabel = "Start";
@@ -84,11 +84,10 @@ public sealed class FirstRunWindow : Window
         body.Children.Add(AgentCard());
         // A short screen at a high scale has less room than two agent rows and an error line need.
         // The window stops at the work area, the words scroll, and Start stays under them in reach.
-        var scroll = new ScrollViewer
-        {
-            Content = body, Focusable = false,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        };
+        // Overlay bar: in a SizeToContent window a bar that took width would rewrap the words,
+        // change the height, and could hide the bar again.
+        var scroll = new ScrollViewer { Content = body, Focusable = false };
+        scroll.SetResourceReference(StyleProperty, "OverlayScrollViewer");
         FrameworkElement foot = Foot(out _start);
         foot.Margin = new Thickness(28, 0, 28, 24);
 

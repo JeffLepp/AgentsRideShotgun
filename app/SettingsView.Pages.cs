@@ -70,14 +70,16 @@ public partial class SettingsView
         var browserModeHint = Styled("", "RowHint");
         browserText.Children.Add(browserModeHint);
         browserText.Children.Add(connectBrowser);
-        browserText.Children.Add(Styled("Agents can use your signed-in sites as you; page content and screenshots may reach your AI provider. ARS is not a sandbox.", "RowHint"));
+        var sharedBrowserHint = Styled("Agents can act as you on signed-in sites. Page content and screenshots may reach your AI provider.", "RowHint");
+        browserText.Children.Add(sharedBrowserHint);
         browserText.Children.Add(browserSetupError);
         _followers.Add(s =>
         {
             browserModeHint.Text = s.SeparateBrowserProfile
-                ? "Separate browser: your sign-ins aren't available here. Changes apply when the browser next opens."
-                : "Uses your browser's sign-ins after you allow ARS to connect. Otherwise, uses a separate browser where you must sign in. Changes apply when the browser next opens.";
+                ? "Agents sign in separately in each workspace. Applies the next time the browser opens."
+                : "Connect your browser to let agents use your existing sign-ins. Applies the next time the browser opens.";
             connectBrowser.Visibility = s.SeparateBrowserProfile ? Visibility.Collapsed : Visibility.Visible;
+            sharedBrowserHint.Visibility = connectBrowser.Visibility;
             browserSetupError.Visibility = Visibility.Collapsed;
         });
 
@@ -104,6 +106,11 @@ public partial class SettingsView
         var cornerText = new StackPanel();
         cornerText.Children.Add(RowText("Show the corner window"));
         cornerText.Children.Add(cornerAsk);
+        var cornerDrag = Toggle("Open the corner window when you drag a file toward it", s => s.CornerDragOpens,
+            (s, v) => s with { CornerDragOpens = v });
+        var cornerDragText = new StackPanel();
+        cornerDragText.Children.Add(RowText("Open the corner window when you drag a file toward it"));
+        cornerDragText.Children.Add(Styled("Turn off to stop ARS watching the pointer while its window is closed.", "RowHint"));
 
         string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
         var versionRow = Row(RowText("Version"), Styled(version, "RowHint"));
@@ -137,7 +144,8 @@ public partial class SettingsView
                     Row(RowText("Theme"), theme),
                     Row(RowText("Agent screens", "How the agent's screen looks behind its windows"), agentScreen),
                     Row(browserText, separateBrowser),
-                    Row(cornerText, cornerShow))),
+                    Row(cornerText, cornerShow),
+                    Row(cornerDragText, cornerDrag))),
                 Section(null, Group(versionRow, licenseStack, openData)),
             },
         };

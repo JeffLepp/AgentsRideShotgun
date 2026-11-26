@@ -11,13 +11,30 @@ using Deskweave.AgentWorkspaces;
 
 // stdout belongs exclusively to MCP. The host-issued capability arrives through the child
 // environment or a connection ticket, never a persisted provider configuration or an argument.
+//
+// This bridge lives exactly as long as its MCP client: stdin EOF, a failed client stream or the
+// client process exiting ends it, and nothing else does. ARS quitting, restarting, updating or
+// crashing, a pipe error, an oversized or excess request: each is answered for that one request,
+// and the next call finds ARS again.
 const string NotOpen = "ARS isn't open.";
 const string NotAnswering = "ARS isn't answering.";
 const string Closed = "ARS closed while this was running.";
 const string Mismatched = "This MCP entry doesn't match the ARS on this PC. Connect the agent again from ARS's Settings.";
 const string Off = "The user turned ARS off.";
+// What the agent reads. None of them invites it to do workspace work some other way.
+const string Restarting = "ARS is restarting. Retry this call in a few seconds. "
+    + "Do not do this work with your own desktop, computer-use or browser tools.";
+const string Interrupted = "ARS restarted while this call was running, so it may have partly happened. "
+    + "Check, then retry it in a few seconds if needed. Do not do this work with your own desktop, computer-use or browser tools.";
+const string TurnedOff = "The owner turned ARS off, so it will not come back on its own. Ask the user before doing this work another way.";
+const string Stuck = "ARS isn't answering. Retry this call in a few seconds, and ask the user if it keeps failing. "
+    + "Do not do this work with your own desktop, computer-use or browser tools.";
+const string TooLarge = "This request is larger than ARS accepts (1 MB). Send less in one call.";
+const string Busy = "ARS is still working through earlier calls from this session. Retry this call in a few seconds.";
+const string ListChanged = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}";
 // Beside the ticket, left by the owner's Quit. Must match WorkspaceAccessStore.QuitMark.
 const string QuitMark = "quit";
+const int Queued = 16;
 
 string? capability = Environment.GetEnvironmentVariable("DESKWEAVE_WORKSPACE_PIPE_KEY");
 Environment.SetEnvironmentVariable("DESKWEAVE_WORKSPACE_PIPE_KEY", null);
@@ -26,16 +43,21 @@ string fixedPipe = "";
 if (args.Length == 2 && args[0] == "--workspace" && Path.IsPathFullyQualified(args[1])) ticket = args[1];
 else if (args.Length == 1 && args[0].StartsWith("Deskweave.Workspace.", StringComparison.Ordinal)
     && !string.IsNullOrEmpty(capability)) fixedPipe = args[0];
+// A command line no ARS writes: there is no ticket to ever reach, so this is the one exit that
+// is not the client leaving.
 else return await Say(Mismatched, 2);
 
 try { ClientLifetime.WatchParent(); }
 catch (Exception error) when (error is IOException or Win32Exception or OverflowException)
 { Console.Error.WriteLine("Parent exit monitoring is unavailable; this bridge will watch stdin EOF: " + error.Message); }
 
+var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+var output = new Lock();
+
 // Read ahead independently of controller startup and pipe backpressure. A disconnected
 // client must not leave a bridge blocked on a server that has stopped reading.
 var disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-var input = Channel.CreateBounded<string>(new BoundedChannelOptions(16) { SingleReader = true, SingleWriter = true });
+var input = Channel.CreateBounded<string>(new BoundedChannelOptions(Queued) { SingleReader = true, SingleWriter = true });
 _ = Task.Run(async () =>
 {
     try
@@ -43,6 +65,7 @@ _ = Task.Run(async () =>
         using var reader = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false, true));
         var buffer = new char[4096];
         var line = new StringBuilder();
+        bool oversized = false;
         while (true)
         {
             int count = await reader.ReadAsync(buffer);
@@ -51,19 +74,23 @@ _ = Task.Run(async () =>
             {
                 if (buffer[i] != '\n')
                 {
-                    if (line.Length >= WorkspacePipeProtocol.MaxRequestBytes) throw new InvalidDataException("MCP request too large.");
+                    // Past the limit the rest of the line is skipped, not kept: its start is enough
+                    // to find the id the refusal answers.
+                    if (oversized) continue;
+                    if (line.Length >= WorkspacePipeProtocol.MaxRequestBytes) { oversized = true; continue; }
                     line.Append(buffer[i]);
                 }
                 else
                 {
                     string message = line.ToString().TrimEnd('\r');
                     line.Clear();
-                    if (message.Length > 0 && !input.Writer.TryWrite(message)) throw new InvalidDataException("Too many queued MCP requests.");
+                    if (oversized) { oversized = false; RefuseStart(message, TooLarge); }
+                    else if (message.Length > 0 && !input.Writer.TryWrite(message)) Refuse(Read(message), Busy);
                 }
             }
         }
     }
-    catch (Exception error) when (error is IOException or DecoderFallbackException)
+    catch (Exception error) when (error is IOException or DecoderFallbackException or ObjectDisposedException)
     { input.Writer.TryComplete(error); }
     finally { disconnected.TrySetResult(); }
 });
@@ -71,10 +98,10 @@ _ = Task.Run(async () =>
 _ = Task.Run(async () => { await disconnected.Task; await Task.Delay(250); Environment.Exit(0); });
 string quitFolder = ticket is null ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
     "ARS", "agent-workspaces.access") : Path.GetDirectoryName(ticket)!;
+// Per-workspace connection tickets live one directory below the shared quit mark.
 if (ticket is not null && Path.GetFileName(ticket).Equals("connection.json", StringComparison.OrdinalIgnoreCase))
     quitFolder = Path.GetDirectoryName(quitFolder)!;
 string quitPath = Path.Combine(quitFolder, QuitMark);
-DateTime? initialQuit = File.Exists(quitPath) ? File.GetLastWriteTimeUtc(quitPath) : null;
 
 // Where the agent is working, so ARS can give each project its own workspace. Claude Code
 // names its project; other clients start their servers in theirs.
@@ -83,9 +110,10 @@ string cwd = Environment.GetEnvironmentVariable("CLAUDE_PROJECT_DIR") is { Lengt
 string context = "{\"jsonrpc\":\"2.0\",\"method\":\"deskweave/context\",\"params\":{\"cwd\":\""
     + JsonEncodedText.Encode(cwd) + "\"}}";
 
-var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
-var output = new Lock();
 string? hello = null;
+// Set once this bridge has answered tools/list itself; the real list's return is then announced.
+bool offlineList = false;
+(string Initialize, string Tools)? offline = null;
 // These pipes belong to this MCP session. Process.Start otherwise copies their inheritable
 // handles into the long-lived app, keeping the provider's readers open after this bridge exits.
 // Change only this process's inheritance bits; the streams themselves remain open and usable.
@@ -93,34 +121,21 @@ bool mayLaunchApp = PreventStandardPipeInheritance();
 
 // An ARS that is starting (at sign-in, or for another agent a moment ago) gets as long as one
 // this bridge starts itself; one not running at all is started in the background. Both stay under
-// Codex's 10 s MCP startup timeout. Past that, the client hears one line rather than a long hang.
-(Link? link, string why) = await Reach(TimeSpan.FromSeconds(9));
-// Explicit owner Quit ends the transport too. Opening ARS later requires an MCP refresh;
-// an ordinary controller restart leaves this bridge alive and reconnects on the next call.
-if (link is null && why == Off) return 0;
-if (link is null) return await Say(why switch
-{
-    NotOpen => why + " Open ARS, then reconnect this MCP server.",
-    NotAnswering => why + " Restart ARS, then reconnect this MCP server.",
-    _ => why,
-}, why == Mismatched ? 2 : 1);
+// Codex's 10 s MCP startup timeout. Past that the session still starts: this bridge answers the
+// handshake and the tool list itself, and each tool call says why ARS cannot take it yet.
+(Link? link, string why) = await Reach(TimeSpan.FromSeconds(9), launch: true);
 if (link?.Send(context, new(null, "deskweave/context", Discard: true)) is { } sent) await sent;
-_ = Task.Run(async () =>
-{
-    while (true)
-    {
-        // A controller that authenticated during Reach wins over an unchanged stale mark.
-        // A new explicit Quit, or a disconnected controller with the mark still present, ends us.
-        Link? active = Volatile.Read(ref link);
-        if (File.Exists(quitPath) && (initialQuit is null || File.GetLastWriteTimeUtc(quitPath) != initialQuit
-            || active is null || active.Broken)) { Environment.Exit(0); return; }
-        await Task.Delay(200);
-    }
-});
+else if (link is null) Console.Error.WriteLine(why + " This bridge stays connected and reaches ARS on the next call.");
 
 try
 {
-    await foreach (string message in input.Reader.ReadAllAsync()) await Forward(message);
+    await foreach (string message in input.Reader.ReadAllAsync())
+    {
+        // One request's failure is that request's answer. It never ends the session.
+        try { await Forward(message); }
+        catch (Exception error)
+        { Refuse(Read(message), "ARS could not pass this call on (" + error.GetType().Name + "). Retry it in a few seconds."); }
+    }
     return 0;
 }
 catch (Exception error) when (error is IOException or ChannelClosedException)
@@ -141,43 +156,123 @@ async Task Forward(string message)
                 + ",\"error\":{\"code\":-32601,\"message\":\"Owner methods are unavailable to agents.\"}}");
         return;
     }
+    // Under the line limit in characters can still be over it in bytes. Sending it would fail the
+    // whole connection, and every call waiting on it, for one request.
+    if (Encoding.UTF8.GetByteCount(message) > WorkspacePipeProtocol.MaxRequestBytes) { Refuse(expect, TooLarge); return; }
     if (expect.Method == "initialize") hello = message;
-if (link is null || link.Broken)
+    if (link is null || link.Broken)
     {
         link?.Dispose();
-        (link, why) = await Reach(TimeSpan.FromSeconds(1));
+        // Only a tool call waits for ARS, or starts it. The handshake and the tool list are answered
+        // at once from this bridge's own copy, inside the client's startup timeout.
+        bool call = expect.Method == "tools/call";
+        (link, why) = await Reach(call ? TimeSpan.FromSeconds(1) : TimeSpan.Zero, launch: call);
         if (link is not null)
         {
             // A new session on ARS's side: it hears where the agent works and who it is again.
             if (link.Send(context, new(null, "deskweave/context", Discard: true)) is { } sending) await sending;
             if (hello is not null && expect.Method != "initialize"
                 && link.Send(hello, Read(hello) with { Discard = true }) is { } greeting) await greeting;
+            if (offlineList) { offlineList = false; Write(ListChanged); }
         }
     }
     if (link?.Send(message, expect) is { } forwarding) await forwarding;
-    else Unreachable(expect, link is null ? why : Closed);
+    else if (Local(expect)) return;
+    // Not sent: a connection that broke just now is ARS going away, not a call cut off.
+    else Unreachable(expect, link is null ? why : NotOpen);
+}
+
+// What this bridge answers by itself while ARS cannot: the handshake, the tool list and ping.
+// The copy is taken from ARS's own replies at build time; the engine probe checks they still match.
+bool Local(Expect expect)
+{
+    if (expect.Id is null || expect.Method is not ("initialize" or "tools/list" or "ping")) return false;
+    offline ??= Offline();
+    string result = expect.Method switch
+    {
+        "initialize" => offline.Value.Initialize,
+        "tools/list" => offline.Value.Tools,
+        _ => "{}",
+    };
+    if (expect.Method == "tools/list") offlineList = true;
+    Write("{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"result\":" + result + "}");
+    return true;
+}
+
+static (string Initialize, string Tools) Offline()
+{
+    using Stream stream = typeof(Expect).Assembly.GetManifestResourceStream("offline.json")
+        ?? throw new InvalidOperationException("The bridge's offline tool list is missing.");
+    using var json = JsonDocument.Parse(stream);
+    return (json.RootElement.GetProperty("initialize").GetRawText(), json.RootElement.GetProperty("tools").GetRawText());
 }
 
 void Unreachable(Expect expect, string reason)
 {
-    if (expect.Id is null || expect.Discard) return;
-    string text = reason switch
+    if (expect.Discard) return;
+    // Read at the moment of answering: the owner's Quit leaves its mark before ARS closes.
+    bool quit = File.Exists(quitPath);
+    Refuse(expect, reason switch
     {
-        NotAnswering => reason + " Ask the owner to restart ARS, then try again.",
-        Mismatched => reason,
-        Off => reason + " Carry on with your own tools as if ARS were not installed.",
-        _ => reason + " Ask the owner to open ARS, then try again.",
-    };
-    string reply = expect.Method == "tools/call"
-        ? "{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
-            + JsonEncodedText.Encode(text) + "\"}],\"isError\":true}}"
-        : "{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"error\":{\"code\":-32000,\"message\":\"" + JsonEncodedText.Encode(text) + "\"}}";
-    Write(reply);
+        Mismatched => Mismatched,
+        Off => TurnedOff,
+        NotAnswering => Stuck,
+        Closed => quit ? TurnedOff : Interrupted,
+        _ => quit ? TurnedOff : Restarting,
+    });
 }
 
+// The one reply to a request that was not forwarded: an isError result for a tool call, so the
+// agent reads it as that tool's answer, a JSON-RPC error for anything else.
+void Refuse(Expect expect, string text)
+{
+    if (expect.Id is null || expect.Discard) return;
+    Write(expect.Method == "tools/call"
+        ? "{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+            + JsonEncodedText.Encode(text) + "\"}],\"isError\":true}}"
+        : "{\"jsonrpc\":\"2.0\",\"id\":" + expect.Id + ",\"error\":{\"code\":-32000,\"message\":\"" + JsonEncodedText.Encode(text) + "\"}}");
+}
+
+// A line too long to keep: its id and method are read from the part that was kept. A request
+// whose id is not found there is answered with a null id, as JSON-RPC does for unreadable requests.
+void RefuseStart(string start, string text)
+{
+    (string? id, string method) = Begins(start);
+    if (id is not null) Refuse(new(id, method, false), text);
+    else Write("{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"" + JsonEncodedText.Encode(text) + "\"}}");
+}
+
+static (string? Id, string Method) Begins(string start)
+{
+    string? id = null;
+    string method = "";
+    var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(start), isFinalBlock: false, state: default);
+    try
+    {
+        while (reader.Read())
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1) continue;
+            bool isId = reader.ValueTextEquals("id"), isMethod = reader.ValueTextEquals("method");
+            if (!reader.Read()) break;
+            // One contiguous buffer, so a value is always a span.
+            if (isId && reader.TokenType == JsonTokenType.Number) id = Encoding.UTF8.GetString(reader.ValueSpan);
+            else if (isId && reader.TokenType == JsonTokenType.String) id = "\"" + JsonEncodedText.Encode(reader.GetString() ?? "") + "\"";
+            else if (isMethod && reader.TokenType == JsonTokenType.String) method = reader.GetString() ?? "";
+            if (id is not null && method.Length > 0) break;
+        }
+    }
+    catch (Exception error) when (error is JsonException or InvalidOperationException) { }
+    return (id, method);
+}
+
+// A client that can no longer take its replies has gone: that ends the session.
 void Write(string json)
 {
-    lock (output) stdout.WriteLine(json);
+    lock (output)
+    {
+        try { stdout.WriteLine(json); }
+        catch (Exception error) when (error is IOException or ObjectDisposedException) { Environment.Exit(1); }
+    }
 }
 
 static Expect Read(string message)
@@ -195,14 +290,14 @@ static Expect Read(string message)
     catch (JsonException) { return new(null, "", false); }
 }
 
-// Joins ARS, starting it first when it is not running: an agent that needs a screen should not
-// have to ask the owner to open an app. An ARS that is running but still starting gets the
-// patience. Only the real install's router ticket is started or waited on that long; any other
-// ticket (a probe's fixture store) gets two seconds and never starts an app. One the owner quit
-// is not started or waited on: it stays closed until they open it.
-async Task<(Link?, string)> Reach(TimeSpan patience)
+// Joins ARS, starting it first when it is not running and launch is allowed: an agent that needs a
+// screen should not have to ask the owner to open an app. An ARS that is running but still starting
+// gets the patience. Only the real install's router ticket is started or waited on that long; any
+// other ticket (a probe's fixture store) gets two seconds and never starts an app. One the owner quit
+// is not started or waited on: it stays closed until they open it, and then the next call finds it.
+async Task<(Link?, string)> Reach(TimeSpan patience, bool launch)
 {
-    if (ticket is not null && File.Exists(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ticket))!, QuitMark)))
+    if (File.Exists(quitPath))
     {
         // Still quitting, or a mark its start could not remove: an ARS that answers wins.
         (Link? now, string closed) = await Open(TimeSpan.Zero);
@@ -211,7 +306,8 @@ async Task<(Link?, string)> Reach(TimeSpan patience)
     if (App() is not { } app) return await Open(TimeSpan.FromSeconds(Math.Min(patience.TotalSeconds, 2)));
     bool running = Running();
     (Link? found, string reason) = await Open(running ? patience : TimeSpan.Zero);
-    if (found is null && reason == NotOpen && !running && Launch(app, mayLaunchApp)) (found, reason) = await Open(TimeSpan.FromSeconds(9));
+    if (launch && found is null && reason == NotOpen && !running && Launch(app, mayLaunchApp))
+        (found, reason) = await Open(TimeSpan.FromSeconds(9));
     return (found, reason);
 }
 

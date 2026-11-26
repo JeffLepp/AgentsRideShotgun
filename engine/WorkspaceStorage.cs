@@ -18,16 +18,22 @@ public sealed record StoragePolicy
     public int LogCapMb { get; init; } = 64;
     public int LogDays { get; init; } = 30;
     public int UnusedDays { get; init; } = 30;
+    public int RecorderLimitGb { get; init; } // Zero keeps all recorder runs.
+    public int WorkspaceTargetGb { get; init; } // Used only for owner-reviewed workspace selection.
     public StoragePolicy Sane() => this with { CacheCapMb = Math.Clamp(CacheCapMb, 16, 16384),
-        LogCapMb = Math.Clamp(LogCapMb, 1, 4096), LogDays = Math.Clamp(LogDays, 1, 3650), UnusedDays = Math.Clamp(UnusedDays, 1, 3650) };
+        LogCapMb = Math.Clamp(LogCapMb, 1, 4096), LogDays = Math.Clamp(LogDays, 1, 3650), UnusedDays = Math.Clamp(UnusedDays, 1, 3650),
+        RecorderLimitGb = Math.Clamp(RecorderLimitGb, 0, 1024), WorkspaceTargetGb = Math.Clamp(WorkspaceTargetGb, 0, 4096) };
 }
 public sealed record StorageCleanup(string Category, bool DryRun, long PreviewBytes, long FreedBytes,
     string[] Paths, string[] Skipped, string[] Errors,
-    [property: System.Text.Json.Serialization.JsonIgnore] StorageFile[] ReviewedFiles);
+    [property: System.Text.Json.Serialization.JsonIgnore] StorageFile[] ReviewedFiles)
+{
+    [System.Text.Json.Serialization.JsonIgnore] public string[] WorkspaceFolders { get; init; } = [];
+}
 
 /// <summary>Logical file lengths, counted once. Caches are an allowlist, never a whole profile.
 /// Cleanup is planned and revalidated under the same admission lock as workspace startup.</summary>
-public sealed class WorkspaceStorage
+public sealed partial class WorkspaceStorage
 {
     readonly string _data, _install, _workspaces;
     readonly Func<string, bool> _running;
@@ -113,6 +119,7 @@ public sealed class WorkspaceStorage
     {
         "workspace-data" => "Workspace files and app data", "browser-profiles" => "Browser profiles and sign-ins",
         "caches" => "Browser caches", "captures" => "Screen captures", "logs" => "Logs", "temp" => "Temporary files",
+        "recorder-runs" => "Recorder runs",
         "packages" => "Update packages", "versions" => "Previous versions and rollback", "current" => "Installed app",
         "bridge-hosts" => "Agent bridge hosts", _ => "Settings and other ARS files",
     };
@@ -121,6 +128,7 @@ public sealed class WorkspaceStorage
     {
         string p = relative.Replace('\\', '/');
         string[] parts = p.Split('/');
+        if (parts.Length > 1 && parts[0].Equals("recorder-runs", StringComparison.OrdinalIgnoreCase)) return "recorder-runs";
         if (parts[0].Equals("chrome-profile", StringComparison.OrdinalIgnoreCase))
         {
             // Chromium's known disposable caches only. Cookies, Local Storage, IndexedDB,
@@ -155,10 +163,21 @@ public sealed class WorkspaceStorage
         return "settings";
     }
 
-    public async Task<StorageCleanup> Clean(string category, bool dryRun = true, bool retention = false, IReadOnlyList<StorageFile>? reviewed = null)
+    public Task<StorageCleanup> Clean(string category, bool dryRun = true, bool retention = false, IReadOnlyList<StorageFile>? reviewed = null)
+        => CleanSelected([category], dryRun, reviewed, retention);
+
+    internal async Task<StorageCleanup> CleanSelected(IReadOnlyList<string> categories, bool dryRun,
+        IReadOnlyList<StorageFile>? reviewed = null, bool retention = false, IReadOnlySet<string>? workspaceIds = null,
+        IReadOnlyList<string>? reviewedFolders = null)
     {
-        if (category is not ("caches" or "logs" or "captures" or "temp" or "workspaces" or "packages" or "versions" or "retention"))
-            throw new ArgumentException("Choose caches, logs, captures, temp, workspaces, packages, versions, or retention.");
+        var kinds = categories.ToHashSet(StringComparer.Ordinal);
+        if (kinds.Count == 0 || kinds.Any(k => k is not ("caches" or "logs" or "captures" or "temp" or "browser-profiles" or "recorder-runs" or "workspaces" or "packages" or "versions" or "retention")))
+            throw new ArgumentException("Unknown storage cleanup category.");
+        if (kinds.Count > 1 && (kinds.Contains("workspaces") || kinds.Contains("retention")))
+            throw new ArgumentException("Review workspace removal and retention separately.");
+        string category = kinds.Count == 1 ? kinds.Single() : "selection";
+        if (workspaceIds != null && (category != "workspaces" || retention || !dryRun && (reviewed == null || reviewedFolders == null)))
+            throw new ArgumentException("Selected workspaces require a separate reviewed cleanup.");
         await Gate.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -171,20 +190,27 @@ public sealed class WorkspaceStorage
             var approved = reviewed?.ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
             long preview = 0, freed = 0;
             bool automatic = retention || category == "retention";
+            var folders = new List<string>();
+            var expiredRuns = automatic ? RecorderRunsOverLimit(report, policy.RecorderLimitGb) : [];
             foreach (var workspace in report.Items.Where(i => i.WorkspaceId is not null).GroupBy(i => i.WorkspaceId!))
             {
                 StorageItem first = workspace.First();
+                if (workspaceIds != null && !workspaceIds.Contains(workspace.Key)) continue;
                 if (first.Running) { skipped.Add(first.Name + ": workspace is running"); continue; }
-                bool removeWorkspace = category == "workspaces" && first.LastUsed is { } used
-                    && used < DateTimeOffset.UtcNow.AddDays(-policy.UnusedDays);
+                bool removeWorkspace = category == "workspaces" && (workspaceIds != null || first.LastUsed is { } used
+                    && used < DateTimeOffset.UtcNow.AddDays(-policy.UnusedDays));
+                if (removeWorkspace && workspace.Any(i => !string.Equals(i.Path, Path.Combine(_workspaces, "ARS-" + workspace.Key), StringComparison.OrdinalIgnoreCase)))
+                { skipped.Add(first.Name + ": unrecognized workspace folder"); continue; }
                 StorageFile[] selected = removeWorkspace ? workspace.SelectMany(i => i.Files).ToArray()
-                    : workspace.Where(i => category == i.Category || automatic && i.Category is "caches" or "logs" or "captures" or "temp")
-                        .SelectMany(i => Select(i, automatic, policy)).ToArray();
-                if (selected.Length == 0) continue;
+                    : workspace.Where(i => kinds.Contains(i.Category) || automatic && i.Category is "caches" or "logs" or "captures" or "temp")
+                        .SelectMany(i => Select(i, automatic, policy)).Concat(workspace.Where(i => i.Category == "recorder-runs" && expiredRuns.Count > 0)
+                            .SelectMany(i => i.Files.Where(f => expiredRuns.Contains(RecorderRun(i, f))))).ToArray();
+                if (selected.Length == 0 && !(removeWorkspace && workspaceIds != null)) continue;
                 bool accepted = _idle(workspace.Key, () =>
                 {
                     if (_running(workspace.Key)) return false;
-                    if (removeWorkspace)
+                    if (!Safe(first.Path, _workspaces)) { skipped.Add(first.Name + ": linked or inaccessible folder"); return true; }
+                    if (removeWorkspace && workspaceIds == null)
                     {
                         try
                         {
@@ -195,8 +221,49 @@ public sealed class WorkspaceStorage
                         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
                         { skipped.Add("Workspace record unavailable: " + first.Path); return true; }
                     }
-                    foreach (StorageFile file in selected) Delete(file, first.Path);
-                    if (removeWorkspace && !dryRun && errors.Count == 0) RemoveEmpty(first.Path, _workspaces);
+                    if (removeWorkspace && workspaceIds != null && !dryRun && (!reviewedFolders!.Contains(first.Path, StringComparer.OrdinalIgnoreCase)
+                        || selected.Any(f => !approved!.TryGetValue(f.Path, out var prior) || prior != f)))
+                    { skipped.Add(first.Name + ": workspace changed since review"); return true; }
+                    if (removeWorkspace) folders.Add(first.Path);
+                    string record = Path.Combine(first.Path, "workspace.json");
+                    foreach (StorageFile file in selected)
+                        if (dryRun || !removeWorkspace || !file.Path.Equals(record, StringComparison.OrdinalIgnoreCase)) Delete(file, first.Path);
+                    if (!dryRun && !removeWorkspace && (kinds.Contains("recorder-runs") || expiredRuns.Count > 0))
+                    {
+                        foreach (var item in workspace.Where(i => i.Category == "recorder-runs"))
+                        {
+                            var runs = item.Files.Where(f => approved == null || approved.ContainsKey(f.Path))
+                                .Select(f => RecorderRun(item, f)).Distinct(StringComparer.OrdinalIgnoreCase);
+                            foreach (string run in runs.Where(r => (kinds.Contains("recorder-runs") || expiredRuns.Contains(r)) && Directory.Exists(r)))
+                            {
+                                try { RemoveEmpty(run, first.Path); }
+                                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { errors.Add(run + ": " + e.Message); }
+                            }
+                        }
+                    }
+                    if (!dryRun && removeWorkspace)
+                    {
+                        try
+                        {
+                            // Keep the workspace's identity intact if a file was locked, linked or added.
+                            foreach (string dir in Directory.GetDirectories(first.Path)) RemoveEmpty(dir, first.Path);
+                            if (Directory.EnumerateFileSystemEntries(first.Path).Any(p => !p.Equals(record, StringComparison.OrdinalIgnoreCase)))
+                            { skipped.Add(first.Name + ": remaining files kept with the workspace"); return true; }
+                            var metadata = selected.FirstOrDefault(f => f.Path.Equals(record, StringComparison.OrdinalIgnoreCase));
+                            if (metadata != null) Delete(metadata, first.Path);
+                            if (!Directory.EnumerateFileSystemEntries(first.Path).Any())
+                            {
+                                Directory.Delete(first.Path);
+                                if (_workspaces.Equals(WorkspaceStore.Root, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    WorkspaceAccessStore.Write(workspace.Key, new WorkspaceAccessPolicy());
+                                    WorkspaceAccessStore.Withdraw(workspace.Key);
+                                    WorkspaceStore.NotifyRemoved();
+                                }
+                            }
+                        }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { errors.Add(first.Path + ": " + e.Message); }
+                    }
                     return true;
                 });
                 if (!accepted) skipped.Add(first.Name + ": started before cleanup; skipped");
@@ -204,7 +271,7 @@ public sealed class WorkspaceStorage
             foreach (StorageItem item in report.Items.Where(i => i.WorkspaceId is null))
             {
                 // Global temp/captures/logs may be used by any live workspace. Be conservative.
-                if ((category == item.Category || automatic) && item.Category is "logs" or "temp" or "captures")
+                if ((kinds.Contains(item.Category) || automatic) && item.Category is "logs" or "temp" or "captures")
                 {
                     bool accepted = _idle("", () =>
                     {
@@ -215,12 +282,13 @@ public sealed class WorkspaceStorage
                     if (!accepted) skipped.Add(item.Name + ": a workspace is running");
                 }
             }
-            if (category is "packages" or "versions")
+            foreach (string kind in kinds.Where(k => k is "packages" or "versions"))
             {
                 // An updater owns its files. Automatic retention never races update downloads.
-                foreach (StorageFile file in OldInstallFiles(report, category)) Delete(file, _install);
+                foreach (StorageFile file in OldInstallFiles(report, kind)) Delete(file, _install);
             }
-            return new(category, dryRun, preview, freed, paths.ToArray(), skipped.Distinct().ToArray(), errors.ToArray(), selectedFiles.ToArray());
+            return new(category, dryRun, preview, freed, paths.ToArray(), skipped.Distinct().ToArray(), errors.ToArray(), selectedFiles.ToArray())
+                { WorkspaceFolders = folders.ToArray() };
 
             void Delete(StorageFile file, string root)
             {
@@ -245,6 +313,32 @@ public sealed class WorkspaceStorage
             }
         }
         finally { Gate.Release(); }
+    }
+
+    static string RecorderRun(StorageItem item, StorageFile file)
+    {
+        string root = Path.Combine(item.Path, "recorder-runs");
+        string relative = Path.GetRelativePath(root, file.Path);
+        int split = relative.IndexOf(Path.DirectorySeparatorChar);
+        return Path.Combine(root, split < 0 ? relative : relative[..split]);
+    }
+
+    static HashSet<string> RecorderRunsOverLimit(StorageReport report, int limitGb)
+    {
+        var expired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (limitGb <= 0) return expired;
+        var items = report.Items.Where(i => i.Category == "recorder-runs").ToArray();
+        long excess = items.Sum(i => i.Bytes) - limitGb * 1073741824L;
+        if (excess <= 0) return expired;
+        var runs = items.Where(i => !i.Running).SelectMany(i => i.Files.GroupBy(f => RecorderRun(i, f), StringComparer.OrdinalIgnoreCase))
+            .OrderBy(run => run.Max(f => f.LastWriteUtc));
+        foreach (var run in runs)
+        {
+            expired.Add(run.Key);
+            excess -= run.Sum(f => f.Bytes);
+            if (excess <= 0) break;
+        }
+        return expired;
     }
 
     static IEnumerable<StorageFile> Select(StorageItem item, bool retention, StoragePolicy policy)
@@ -301,10 +395,14 @@ public sealed class WorkspaceStorage
     static IEnumerable<StorageFile> Scan(string root, List<string> warnings, string? exclude = null)
     {
         if (!Directory.Exists(root)) yield break;
+        // Check the root's ancestors once. Every directory below is pushed only after its own
+        // enumeration entry showed no reparse point, so re-walking each one's ancestors (the old
+        // per-directory Safe) cost ~9 s on a 38k-file install for no extra protection.
+        // Deletion still revalidates every path with Safe.
+        if (!Safe(root, root)) { warnings.Add("Skipped link: " + root); yield break; }
         var pending = new Stack<DirectoryInfo>(); pending.Push(new(root));
         while (pending.TryPop(out DirectoryInfo? directory))
         {
-            if (!Safe(directory.FullName, root)) { warnings.Add("Skipped link: " + directory.FullName); continue; }
             FileSystemInfo[] entries;
             try { entries = directory.GetFileSystemInfos(); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { warnings.Add(directory.FullName + ": " + e.Message); continue; }
@@ -334,7 +432,13 @@ public sealed class WorkspaceStorage
         try
         {
             for (string? part = Path.GetFullPath(path); part is not null; part = Path.GetDirectoryName(part))
-                if ((File.Exists(part) || Directory.Exists(part)) && (File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0) return false;
+            {
+                // One attribute lookup per ancestor, including for directories. Callers also check
+                // prospective evidence paths, so missing components still require checking parents.
+                try { if ((File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0) return false; }
+                catch (FileNotFoundException) { }
+                catch (DirectoryNotFoundException) { }
+            }
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }

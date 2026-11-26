@@ -169,7 +169,7 @@
 
         <!-- Card mode (the hub's own 340 DIP stack): no category list; this
              home page of quick tiles and one row per category instead, and the page slides in over it. -->
-        <ScrollViewer x:Name="CardHome" Grid.Column="1" Visibility="Collapsed" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+        <ScrollViewer x:Name="CardHome" Grid.Column="1" Visibility="Collapsed" Focusable="False" Style="{StaticResource OverlayScrollViewer}"
                       Background="{DynamicResource WindowBrush}">
             <ScrollViewer.RenderTransform><TranslateTransform/></ScrollViewer.RenderTransform>
             <StackPanel x:Name="CardHomeContent" Margin="16,4,16,16"/>
@@ -182,7 +182,7 @@
                 <RowDefinition/>
             </Grid.RowDefinitions>
             <TextBlock x:Name="PageTitle" Margin="28,22,28,0" FontSize="21" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-            <ScrollViewer x:Name="Scroller" Grid.Row="1" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer x:Name="Scroller" Grid.Row="1" Focusable="False" Style="{StaticResource OverlayScrollViewer}">
                 <Grid x:Name="PageFrame" Margin="28,20,28,22">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" MaxWidth="720"/>

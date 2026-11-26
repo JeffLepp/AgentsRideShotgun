@@ -287,6 +287,10 @@ static partial class Native
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool EnumDesktopWindows(nint desktop, EnumDesktopProc callback, nint parameter);
 
+    /// <summary>A thread's top-level windows, on whichever desktop that thread is on.</summary>
+    [DllImport("user32.dll")]
+    public static extern bool EnumThreadWindows(int thread, EnumDesktopProc callback, nint parameter);
+
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(nint window);
 
@@ -600,6 +604,16 @@ static partial class Native
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern nint OpenProcess(uint access, bool inherit, int processId);
+
+    /// <summary>A process's executable path; needs only query-limited access, so it also reads an
+    /// elevated process's path, which reading its main module cannot.</summary>
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern bool QueryFullProcessImageNameW(nint process, int flags, StringBuilder name, ref int size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetProcessTimes(nint process, out long created, out long exited, out long kernel, out long user);
+
+    public const int ErrorInvalidParameter = 87;
 
     public const int JobBasicAccountingInformation = 1, JobBasicUiRestrictions = 4,
         JobExtendedLimitInformation = 9,

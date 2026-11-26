@@ -99,7 +99,7 @@ static class Program
     {
         if (IsHiveMindHost(args)) return false;
         if (args.Contains(StartWithWindows.Background)) return false;
-        if (Updates.OtherControllerReason().Length > 0) return false;
+        if (Updates.MaintenanceProcessReason().Length > 0) return false;
         if (!Mutex.TryOpenExisting(instance, out Mutex? running)) return true;
         running.Dispose();
         return false;

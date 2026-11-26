@@ -455,15 +455,9 @@ internal sealed class WorkspaceRouter : IDisposable
                     _hello = body;
                     if (parameters.ValueKind == JsonValueKind.Object && parameters.TryGetProperty("clientInfo", out JsonElement info)
                         && info.ValueKind == JsonValueKind.Object) _client = Text(info, "name");
-                    return Ok(id, new
-                    {
-                        protocolVersion = "2025-06-18",
-                        capabilities = new { tools = new { } },
-                        serverInfo = new { name = "ars", version = "1" },
-                        instructions = WorkspaceMcp.RouterInstructions,
-                    });
+                    return Ok(id, Hello);
                 case "tools/list":
-                    return Ok(id, new { tools = WorkspaceMcp.ExternalToolSchemas });
+                    return Ok(id, ToolList);
                 case "ping":
                     return Ok(id, new { });
             }
@@ -526,6 +520,23 @@ internal sealed class WorkspaceRouter : IDisposable
             element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
                 ? value.GetString() ?? string.Empty : string.Empty;
     }
+
+    /// <summary>The router's initialize result. The bridge keeps a copy (engine/Bridge/offline.json) to
+    /// answer with while ARS is away; listChanged lets it say when the real tool list is back.</summary>
+    internal static object Hello => new
+    {
+        protocolVersion = "2025-06-18",
+        capabilities = new { tools = new { listChanged = true } },
+        serverInfo = new { name = "ars", version = "1" },
+        instructions = WorkspaceMcp.RouterInstructions,
+    };
+
+    /// <summary>The router's tools/list result, copied into the bridge with <see cref="Hello"/>.</summary>
+    internal static object ToolList => new { tools = WorkspaceMcp.ExternalToolSchemas };
+
+    /// <summary>The bridge's offline copy as it should be: both results, serialized as the router sends them.</summary>
+    internal static string OfflineCopy() =>
+        "{\"initialize\":" + JsonSerializer.Serialize(Hello) + ",\"tools\":" + JsonSerializer.Serialize(ToolList) + "}";
 
     static string Ok(object? id, object result) => JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result });
 

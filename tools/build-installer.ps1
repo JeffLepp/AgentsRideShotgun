@@ -4,6 +4,7 @@ param([string]$Version = '', [switch]$SkipPublish, [switch]$Sign, [string]$Paylo
 # ARS must be closed. -SkipPublish packages a separately published, version-matched payload.
 # -Sign signs every binary and Setup with the Azure identity; public releases are always signed.
 $ErrorActionPreference = 'Stop'
+if ($PayloadDirectory -and -not $SkipPublish) { throw 'A separately published PayloadDirectory requires -SkipPublish.' }
 # A local SDK can build ARS without registering a machine-wide .NET runtime.
 # Resolve the same SDK for the vpk apphost in this process only.
 if (-not $env:DOTNET_ROOT) {
@@ -40,7 +41,6 @@ if (-not $SkipPublish) {
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed; no installer was built.' }
 }
 $payload = if ($PayloadDirectory) { [IO.Path]::GetFullPath($PayloadDirectory) } else { Join-Path $root 'out' }
-if ($PayloadDirectory -and -not $SkipPublish) { throw 'A separately published PayloadDirectory requires -SkipPublish.' }
 foreach ($file in @('ARS.exe', 'ARS.dll', 'coreclr.dll', 'PresentationFramework.dll', 'Bridge\ARS.WorkspaceBridge.exe', 'Bridge\coreclr.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payload $file) -PathType Leaf)) { throw "Incomplete published app: $file" }
 }
@@ -84,6 +84,7 @@ finally { if ($signMetadata) { Remove-Item -LiteralPath $signMetadata -ErrorActi
 # A signing run once produced a package holding 38 of the app's files and still exited 0.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $package = Get-ChildItem -LiteralPath $staging -Filter '*-full.nupkg' | Select-Object -First 1
+if (-not $package) { throw "vpk reported success but produced no full NuGet package in $staging." }
 $zip = [IO.Compression.ZipFile]::OpenRead($package.FullName)
 # Compared by name: vpk adds its own few files, which would hide as many missing ones in a count.
 try { $packed = [Collections.Generic.HashSet[string]]::new([string[]]@($zip.Entries | Where-Object { $_.FullName -like 'lib/app/*' -and $_.Name } | ForEach-Object { $_.FullName.Substring(8) }), [StringComparer]::OrdinalIgnoreCase) }

@@ -8,7 +8,68 @@ internal sealed record ComputerAction(string Type, int X = 0, int Y = 0, string 
     int Milliseconds = 0, ComputerPoint[]? Path = null, int Control = 0);
 internal sealed record ComputerRequest(string Target, bool Screenshot, IReadOnlyList<ComputerAction> Actions,
     bool Marks = false);
-internal sealed record ComputerReceipt(string Status, int Next, string Reason, IReadOnlyList<string> Completed);
+internal sealed record ComputerReceipt(string Status, int Next, string Reason, IReadOnlyList<string> Completed,
+    IReadOnlyList<WindowEffect>? Effects = null);
+
+/// <summary>Where a top-level window was, in workspace pixels (the window tool's), and its state.</summary>
+internal sealed record WindowBox(int X, int Y, int Width, int Height, bool Maximized, bool Minimized)
+{
+    public override string ToString() => $"({X},{Y}) {Width}x{Height}" + (Maximized ? " maximized" : Minimized ? " minimized" : "");
+}
+
+/// <summary>
+/// What a drag or a double-click did to the top-level window it landed on, read back from Windows
+/// rather than assumed from delivery. Delivered input is not a moved window: a drag on a title bar
+/// reaches the app as client messages and the window stays exactly where it was.
+/// </summary>
+/// <param name="Index">Zero-based position of the action in its group, as the receipt's Next counts.</param>
+/// <param name="After">Null when the window could not be read afterwards (see <paramref name="Closed"/>).</param>
+/// <param name="NearTop">The drag started in the window's top strip, where a title bar usually is.</param>
+internal sealed record WindowEffect(int Index, string Type, nint Window, string Title, WindowBox Before,
+    WindowBox? After, bool Closed, bool NearTop)
+{
+    internal bool Moved => After is { } after && (after.X != Before.X || after.Y != Before.Y);
+    internal bool Resized => After is { } after && (after.Width != Before.Width || after.Height != Before.Height);
+    internal bool Maximized => After is { Maximized: true } && !Before.Maximized;
+    internal bool Restored => After is { Maximized: false, Minimized: false } && (Before.Maximized || Before.Minimized);
+    internal bool Minimized => After is { Minimized: true } && !Before.Minimized;
+    internal bool Changed => Closed || Moved || Resized || Maximized || Restored || Minimized;
+
+    /// <summary>The effect as the computer tool's JSON reports it. <paramref name="number"/> is the window
+    /// tool's number for this window, when the connection has listed it.</summary>
+    internal object Json(int? number) => new
+    {
+        action = Index, type = Type, window = number, title = Title,
+        before = Box(Before), after = After is null ? null : Box(After),
+        moved = Moved, resized = Resized, maximized = Maximized, restored = Restored, minimized = Minimized, closed = Closed,
+        unread = After is null && !Closed ? true : (bool?)null,
+    };
+
+    static object Box(WindowBox box) => new
+    { x = box.X, y = box.Y, width = box.Width, height = box.Height, maximized = box.Maximized, minimized = box.Minimized };
+
+    /// <summary>One sentence for the receipt's reason. Says what the window did, and nothing it did not.</summary>
+    internal string Sentence()
+    {
+        string who = $"{Type} (action {Index}): window \"{(Title.Length > 0 ? Title : "untitled")}\"";
+        if (Closed) return who + " closed.";
+        if (After is null) return who + $" was at {Before} before; it could not be read afterwards, so its effect is unknown. Look before continuing.";
+        if (!Changed)
+        {
+            string still = who + $" did not move or resize (still at {Before}, workspace pixels).";
+            return Type == "drag" && NearTop
+                ? still + " A drag on a title bar does not move a window in the workspace; use window with action=move (or maximize/restore) to arrange it."
+                : still;
+        }
+        var what = new List<string>();
+        if (Maximized) what.Add("was maximized");
+        if (Restored) what.Add("was restored");
+        if (Minimized) what.Add("was minimized");
+        if (Moved) what.Add("moved");
+        if (Resized) what.Add("resized");
+        return who + " " + string.Join(", ", what) + $": {Before} -> {After} (workspace pixels).";
+    }
+}
 
 /// <summary>Provider-neutral computer actions. No model calls, automatic retries, or hidden pacing.</summary>
 internal static class WorkspaceComputer
@@ -144,7 +205,7 @@ internal static class WorkspaceComputer
     }
 
     internal static async Task<ComputerReceipt> Execute(IReadOnlyList<ComputerAction> actions, Func<bool> ownsLease,
-        Func<ComputerAction, Task<bool>> apply, CancellationToken cancel)
+        Func<ComputerAction, int, Task<bool>> apply, CancellationToken cancel)
     {
         var completed = new List<string>();
         for (int i = 0; i < actions.Count; i++)
@@ -157,7 +218,7 @@ internal static class WorkspaceComputer
                 {
                     "screenshot" => true, // One image at the end, never one image per intermediate step.
                     "wait" => await Delay(actions[i].Milliseconds, cancel).ConfigureAwait(false),
-                    _ => await apply(actions[i]).ConfigureAwait(false),
+                    _ => await apply(actions[i], i).ConfigureAwait(false),
                 };
                 if (!delivered) return new("interrupted", i, "The action was not confirmed and may be partially applied. Inspect the result before continuing; never replay the group automatically.", completed);
                 completed.Add(actions[i].Type);

@@ -29,10 +29,18 @@ internal static class WorkspacePeekPolicy
         return show switch
         {
             CornerShow.Always => true,
-            CornerShow.ComesAndGoes => pinned || showable && (busy || quiet < fade),
+            // Pinned holds the card up past the fade, but only over something to see: a pin (which a
+            // drag or resize also sets) must not bring up an empty screen for a headless command.
+            CornerShow.ComesAndGoes => showable && (pinned || busy || quiet < fade),
             _ => false,
         };
     }
+
+    /// <summary>Whether a workspace the card is not showing keeps its edge tab. Same rule as the card:
+    /// a running workspace with nothing to see (a command, the browser warming up) leaves no tab,
+    /// and a question for the owner counts as something to see.</summary>
+    internal static bool Docked(CornerShow show, bool running, bool hub, bool asking, bool showable) =>
+        running && show != CornerShow.Off && (!hub || asking) && (showable || asking);
 }
 
 /// <summary>Which edges of the card a resize drags.</summary>

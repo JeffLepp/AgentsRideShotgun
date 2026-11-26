@@ -99,6 +99,29 @@ public sealed partial class AgentDesktop
         }
     });
 
+    /// <summary>The top-level window of this desktop under a point, with where it is, or null.</summary>
+    internal (nint Window, string Title, WindowBox Box)? TopWindowAt(int x, int y) => Run<(nint, string, WindowBox)?>(() =>
+    {
+        nint hit = Native.WindowFromPoint(new Native.Point { X = x, Y = y });
+        if (!OwnsWindow(hit)) return null;
+        nint root = Native.GetAncestor(hit, 2); // GA_ROOT
+        if (BoxOf(root) is not { } box) return null;
+        // Read without a message, so a window that has stopped answering cannot hold this up.
+        var title = new System.Text.StringBuilder(256);
+        Native.InternalGetWindowText(root, title, title.Capacity);
+        return (root, title.ToString(), box);
+    });
+
+    /// <summary>Where a top-level window is now. Known is false only when the pump did not answer in time;
+    /// a known null box means the window is gone.</summary>
+    internal (bool Known, WindowBox? Box) WindowBoxOf(nint window) => Run(() => (true, BoxOf(window)));
+
+    static WindowBox? BoxOf(nint window) =>
+        Native.IsWindow(window) && Native.GetWindowRect(window, out Native.Rect rect)
+            ? new WindowBox(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top,
+                Native.IsZoomed(window), Native.IsIconic(window))
+            : null;
+
     static bool Message(nint target, uint message, nint parameter, nint point) =>
         Native.SendMessageTimeoutW(target, message, parameter, point, Native.SmtoAbortIfHung, 250, out _) != 0;
 

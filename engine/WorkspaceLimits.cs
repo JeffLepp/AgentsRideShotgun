@@ -25,7 +25,7 @@ public enum WorkspacePower
 /// The cap is a hard cap, so the owner's machine stays responsive with three agents building at
 /// once - which is the whole reason this exists.
 /// </summary>
-sealed class WorkspaceLimits : IDisposable
+sealed partial class WorkspaceLimits : IDisposable
 {
     readonly nint _job;
     bool _disposed;
@@ -223,8 +223,11 @@ sealed class WorkspaceLimits : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        lock (_memoryGate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
         if (_job == 0) return;
 
         // KILL_ON_JOB_CLOSE remains the final backstop, but an explicit termination lets teardown

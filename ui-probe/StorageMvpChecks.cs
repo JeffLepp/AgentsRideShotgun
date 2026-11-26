@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Deskweave.AgentWorkspaces;
@@ -110,6 +111,41 @@ static class StorageMvpChecks
         StorageCleanup capped = await store.Clean("retention", false);
         Program.Check(capped.FreedBytes == 10 * 1048576L + 700000 && File.Exists(newCache) && File.Exists(newLog),
             "Cache and log caps evict oldest files while preserving newer files below the configured limit");
+        string run = Path.Combine(Folder("fresh"), "recorder-runs", "old", "payload");
+        Put(run, 1, 20);
+        using (var large = File.OpenWrite(run)) large.SetLength(1L << 30);
+        File.SetLastWriteTimeUtc(run, DateTime.UtcNow.AddDays(-20));
+        string companion = Path.Combine(Path.GetDirectoryName(run)!, "run.json");
+        string keepRun = Path.Combine(Folder("cap"), "recorder-runs", "new", "payload");
+        string liveRun = Path.Combine(Folder("live"), "recorder-runs", "active", "payload");
+        Put(companion, 15, 20); Put(keepRun, 40); Put(liveRun, 90);
+        var runs = await store.Clean("recorder-runs");
+        Program.Check(runs.PreviewBytes == (1L << 30) + 55 && !runs.Paths.Contains(liveRun)
+            && (await store.Clean("retention")).PreviewBytes == 0, "Recorder runs can be reviewed by size and are retained by default");
+        store.Policy = store.Policy with { RecorderLimitGb = 1 };
+        await store.Clean("retention", false);
+        Program.Check(!Directory.Exists(Path.GetDirectoryName(run)) && File.Exists(keepRun) && File.Exists(liveRun),
+            "The aggregate recorder limit removes the oldest stopped run as a group and preserves active runs");
+        string profile = Path.Combine(Folder("fresh"), "chrome-profile", "Default", "Network", "Cookies");
+        Put(profile, 89);
+        var profiles = await store.Clean("browser-profiles");
+        Program.Check(profiles.Paths.Contains(profile) && !profiles.Paths.Contains(newCache) && !profiles.Paths.Contains(keepRun),
+            "Profile cleanup reviews saved browser data separately from caches and recorder runs");
+        await store.Clean("browser-profiles", false, reviewed: profiles.ReviewedFiles);
+        Program.Check(!File.Exists(profile) && File.Exists(newCache) && File.Exists(keepRun), "Confirmed profile cleanup preserves other categories");
+        Put(profile, 89);
+        Workspace("recent-manual", 0);
+        string chosen = Path.Combine(Folder("recent-manual"), "document"); Put(chosen, 123);
+        var ids = new HashSet<string> { "recent-manual", "empty-recovered", "live" };
+        var manual = await store.CleanSelected(["workspaces"], true, workspaceIds: ids);
+        Program.Check(manual.Paths.Contains(chosen) && manual.WorkspaceFolders.Contains(Folder("empty-recovered"))
+            && !manual.WorkspaceFolders.Contains(Folder("live")) && !manual.Paths.Contains(profile), "Manual selection includes recent and recovered workspaces and excludes running or unselected workspaces");
+        Put(chosen, 456);
+        await store.CleanSelected(["workspaces"], false, manual.ReviewedFiles, workspaceIds: ids, reviewedFolders: manual.WorkspaceFolders);
+        Program.Check(File.Exists(chosen) && File.Exists(Path.Combine(Folder("recent-manual"), "workspace.json"))
+            && !Directory.Exists(Folder("empty-recovered")), "Changed workspace keeps its record and files, and a reviewed empty folder is removed");
+        Workspace("ui-selection", 0);
+        using (var large = File.Create(Path.Combine(Folder("ui-selection"), "owner-file"))) large.SetLength(1L << 30);
         StoredWorkspace actual = WorkspaceStore.Create("Storage runtime guard");
         WorkspaceAccessStore.Write(actual.Id, new WorkspaceAccessPolicy { PrewarmBrowser = false });
         using (var runtime = WorkspaceRuntime.Start(actual))
@@ -161,6 +197,15 @@ static class StorageMvpChecks
             }
             finally { File.Delete(WorkspaceAccessStore.RouterTicket); }
         }
+        StorageUsage saved = store.Usage();
+        string changed = Path.Combine(data, "after-measurement");
+        Put(changed, 2048);
+        var reopened = new WorkspaceStorage(data, install, workspaces, _ => throw new InvalidOperationException("Unexpected rescan"), (_, _) => false);
+        Program.Check(reopened.Usage().MeasuredAt == saved.MeasuredAt && reopened.Usage().TotalBytes == saved.TotalBytes,
+            "A new storage instance reopens the saved summary without enumerating workspaces");
+        Program.Check(store.Usage(true).TotalBytes >= saved.TotalBytes + 2048, "Refresh measures changes since the saved report");
+        File.WriteAllText(Path.Combine(data, "storage-usage-v1.json"), "{");
+        Program.Check(store.Usage().MeasuredAt > saved.MeasuredAt, "An incomplete cache recovers with a fresh measurement");
         StorageController.SourceForTests = store;
         try
         {
@@ -170,9 +215,9 @@ static class StorageMvpChecks
                 hub.OpenStorage();
                 try
                 {
-                    for (int i = 0; i < 100 && (!hub.IsLoaded || !Desc<TextBlock>(hub).Any(t => t.Text.EndsWith("used by ARS", StringComparison.Ordinal))); i++) await Task.Delay(50);
-                    Program.Check(hub.IsLoaded && hub.DisplayMode == "settings"
-                        && Desc<TextBlock>(hub).Any(t => t.Text.EndsWith("used by ARS", StringComparison.Ordinal)),
+                    Button? HubMeasure() => Desc<Button>(hub).SingleOrDefault(b => AutomationProperties.GetAutomationId(b) == "MeasureStorage");
+                    for (int i = 0; i < 100 && (!hub.IsLoaded || HubMeasure() == null); i++) await Task.Delay(50);
+                    Program.Check(hub.IsLoaded && hub.DisplayMode == "settings" && HubMeasure() != null,
                         "The first Storage command on a never-shown hub survives saved-layout restoration");
                     hub.WindowState = WindowState.Minimized;
                     hub.OpenStorage();
@@ -181,33 +226,82 @@ static class StorageMvpChecks
                 }
                 finally { hub.Close(); }
             }
-            foreach (var (theme, card) in new[] { (ThemeChoice.Light, false), (ThemeChoice.Dark, false), (ThemeChoice.Light, true) })
+            foreach (var (theme, card) in new[] { (ThemeChoice.Light, false), (ThemeChoice.Dark, false), (ThemeChoice.Light, true), (ThemeChoice.Dark, true) })
             {
                 AppearanceManager.Apply(theme);
                 var view = new SettingsView(card);
-                var window = ProbeWindow.OffScreen(new Window { Content = view, Width = card ? 340 : 1200,
-                    Height = 800, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None });
+                var window = ProbeWindow.OffScreen(new Window { Content = view, Width = card ? 320 : 1200,
+                    Height = card ? 480 : 800, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None });
                 window.Show(); view.Show("storage");
+                string prefix = "storage-" + theme.ToString().ToLowerInvariant() + (card ? "-card" : "-wide");
                 try
                 {
                     view.UpdateLayout();
-                    for (int i = 0; i < 100 && !Desc<TextBlock>(view).Any(t => t.Text.EndsWith("used by ARS", StringComparison.Ordinal)); i++) await Task.Delay(50);
-                    view.UpdateLayout();
-                    Program.Check(Desc<TextBlock>(view).Any(t => t.Text.EndsWith("used by ARS", StringComparison.Ordinal)),
-                        "Storage renders measured totals in " + theme + (card ? " card" : " wide"));
                     await Task.Delay(300); // Capture after the existing page-transition animation.
-                    string prefix = "storage-" + theme.ToString().ToLowerInvariant() + (card ? "-card" : "-wide");
-                    Mvp.Save(Mvp.Photograph(window), Path.Combine(Program.Output, prefix + ".png"));
                     var scroller = (ScrollViewer)view.FindName("Scroller");
-                    scroller.ScrollToBottom(); await Task.Delay(100);
-                    Mvp.Save(Mvp.Photograph(window), Path.Combine(Program.Output, prefix + "-retention.png"));
-                    Desc<Button>(view).First(b => Equals(b.Content, "Preview")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    for (int i = 0; i < 100 && !Desc<Button>(view).Any(b => Equals(b.Content, "Clean up these files")); i++) await Task.Delay(50);
-                    Program.Check(Desc<TextBox>(view).Any(t => t.IsReadOnly && t.Text.Contains(newCache, StringComparison.Ordinal)),
-                        "Storage preview lists eligible file paths before confirmation in " + theme + (card ? " card" : " wide"));
-                    Desc<TextBox>(view).First(t => t.IsReadOnly && t.Text.Contains(newCache, StringComparison.Ordinal)).BringIntoView();
+                    bool Total() => Desc<TextBlock>(view).Any(t => t.IsVisible && t.Text.EndsWith("used by ARS", StringComparison.Ordinal));
+                    Button Id(string id) => Desc<Button>(view).Single(b => AutomationProperties.GetAutomationId(b) == id);
+                    bool Hint(string start) => Desc<TextBlock>(view).Any(t => t.IsVisible && t.Text.StartsWith(start, StringComparison.Ordinal));
+                    async Task Settle() { for (int i = 0; i < 200 && !Id("StorageRemove1").IsEnabled && Id("StorageRemove1").IsVisible; i++) await Task.Delay(50); view.UpdateLayout(); }
+                    var measure = Id("MeasureStorage");
+                    Program.Check(measure.IsVisible && !Total() && Desc<Expander>(view).All(e => !e.IsExpanded) && !Desc<ListBox>(view).Any(),
+                        "Storage opens to one Measure button: no totals, previews or path lists before the owner asks in " + prefix);
+                    Mvp.Save(Mvp.Photograph(window), Path.Combine(Program.Output, prefix + "-start.png"));
+                    measure.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    for (int i = 0; i < 200 && !Total(); i++) await Task.Delay(50);
+                    view.UpdateLayout();
+                    var removes = Enumerable.Range(0, SettingsView.StorageGroups.Length).Select(i => Id("StorageRemove" + i)).ToArray();
+                    Program.Check(Total() && !measure.IsVisible, "One click measures and shows the total in " + prefix);
+                    string[] missing = SettingsView.StorageGroups.Select(g => g.Label)
+                        .Where(label => !Desc<TextBlock>(view).Any(t => t.IsVisible
+                            && (t.Text == label || t.Inlines.OfType<System.Windows.Documents.Run>().Any(r => r.Text == label)))).ToArray();
+                    Program.Check(missing.Length == 0, "The measurement shows all four sections in " + prefix + (missing.Length > 0 ? "; missing " + string.Join(", ", missing) : ""));
+                    var last = removes.Last(b => b.IsVisible);
+                    Program.Check(last.TranslatePoint(new Point(0, last.ActualHeight), scroller).Y <= scroller.ViewportHeight,
+                        "Every section's Remove fits the first viewport in " + prefix);
                     await Task.Delay(100);
-                    Mvp.Save(Mvp.Photograph(window), Path.Combine(Program.Output, prefix + "-preview.png"));
+                    Mvp.Save(Mvp.Photograph(window), Path.Combine(Program.Output, prefix + ".png"));
+                    if (card && theme == ThemeChoice.Light)
+                    {
+                        removes[0].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        view.UpdateLayout();
+                        Program.Check(Equals(removes[0].Content, "Confirm") && File.Exists(profile) && Hint("Signs stopped workspaces out"),
+                            "Browser sign-ins ask once inline and delete nothing on the first click");
+                        Mvp.Save(Mvp.Photograph(window), Path.Combine(Program.Output, "storage-signins-confirm.png"));
+                    }
+                    if (!card && theme == ThemeChoice.Dark)
+                    {
+                        removes[3].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        for (int i = 0; i < 200 && !Hint("Nothing to remove"); i++) await Task.Delay(50);
+                        Program.Check(Hint("Nothing to remove") && File.Exists(Path.Combine(install, "current", "ARS.dll"))
+                            && File.Exists(Path.Combine(install, "packages", "ARSApp-0.3.4-full.nupkg")),
+                            "Removing app updates keeps the current version and rollback and says when nothing was removed");
+                        await Settle();
+                    }
+                    if (card && theme == ThemeChoice.Dark)
+                    {
+                        removes[1].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        for (int i = 0; i < 200 && !Hint("Removed "); i++) await Task.Delay(50);
+                        Program.Check(!File.Exists(newCache) && !File.Exists(newLog) && File.Exists(liveCache) && File.Exists(liveLog)
+                            && File.Exists(changed) && Hint("Removed ") && Desc<TextBlock>(view).Any(t => t.Text.Contains("stop running workspaces")),
+                            "One click removes caches, logs and temp files, keeps a running workspace's files, and says why some stayed");
+                        await Settle();
+                        removes[2].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        view.UpdateLayout();
+                        Program.Check(Equals(removes[2].Content, "Confirm") && File.Exists(keepRun), "Recordings ask once inline before deleting");
+                        removes[2].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        for (int i = 0; i < 200 && File.Exists(keepRun); i++) await Task.Delay(50);
+                        await Settle();
+                        Program.Check(!File.Exists(keepRun) && File.Exists(liveRun) && File.Exists(chosen) && Hint("Removed 40 B"),
+                            "The second click removes stopped recordings, keeps workspace files and running recordings, and reports the freed bytes");
+                        Mvp.Save(Mvp.Photograph(window), Path.Combine(Program.Output, "storage-removed.png"));
+                    }
+                    var fold = Desc<Expander>(view).Single(e => Equals(e.Header, "Automatic cleanup"));
+                    fold.IsExpanded = true;
+                    scroller.ScrollToBottom(); await Task.Delay(100);
+                    Program.Check(Desc<CheckBox>(fold).Count() == 1 && Desc<ComboBox>(fold).Count() == 1,
+                        "Automatic cleanup is one submenu with one switch and one recording limit in " + prefix);
+                    Mvp.Save(Mvp.Photograph(window), Path.Combine(Program.Output, prefix + "-automatic.png"));
                 }
                 finally { window.Close(); }
             }

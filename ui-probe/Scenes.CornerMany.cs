@@ -68,7 +68,9 @@ static class CornerManyScenes
         // apart, so being pending at once must not make one of them answer for the other.
         WorkspaceHandoffs asking = WorkspaceRuntime.Of(made[0].Id)!.Access!.Handoffs;
         WorkspaceHandoff open = asking.Request("program", "Notepad", "they asked for it");
-        WorkspaceHandoff take = asking.Request("takeover", "Notepad", "it is already running outside");
+        WorkspaceHandoff take = asking.Request("takeover", "Notepad", "it is already running outside",
+            copy: new WorkspaceCopy(Environment.ProcessId, Environment.ProcessPath!, true,
+                System.Diagnostics.Process.GetCurrentProcess().StartTime.ToFileTimeUtc()));
         Program.Check(open.Id != take.Id && open.Kind == "program" && take.Kind == "takeover",
             "Opening a program on the owner's desktop and taking their copy into the workspace stay two separate questions");
         asking.CancelPending();

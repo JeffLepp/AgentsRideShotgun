@@ -1,6 +1,10 @@
 <h1 align="center">AgentsRideShotgun (ARS)</h1>
 
-ARS gives Claude Code and Codex their own background Windows desktop, so they can test apps and browse while you keep working.
+<p align="center"><strong>A desktop for your agents. On the PC you already use.</strong></p>
+
+ARS gives Claude Code and Codex a separate background Windows desktop for working with local apps, files, and browsers. Keep your own desktop available, watch the agent's workspace, and step in when needed.
+
+Use the agents you already have with the Windows setup where your work lives. The app is free and MIT licensed; your chosen agent's usage costs still apply. [Choose the right environment for your agent's task](AGENT-WORKSPACES.md).
 
 <table>
 <tr>
@@ -8,12 +12,14 @@ ARS gives Claude Code and Codex their own background Windows desktop, so they ca
 <th width="50%">With ARS</th>
 </tr>
 <tr>
-<td><img src=".github/readme/demo-without.gif" alt="Without ARS: the agent's test windows pop up over your game and pause it" width="100%"></td>
-<td><img src=".github/readme/demo-with.gif" alt="With ARS: your game keeps running while the agent tests in a small corner window" width="100%"></td>
+<td><img src=".github/readme/demo-without.gif" alt="Illustration of agent windows interrupting the foreground desktop" width="100%"></td>
+<td><img src=".github/readme/demo-with.gif" alt="Illustration of an agent working in a separate workspace" width="100%"></td>
 </tr>
 </table>
 
-<p align="center"><b>Stop letting agents take the wheel. Give them a desktop of their own and let them ride shotgun.</b> Agents can still perform full computer use while their ARS workspace stays out of your way. Token efficient, all local, and automatic.</p>
+<p align="center">The comparison above illustrates the workspace concept. Keep the agent's GUI work in its workspace and follow its progress while you use yours.</p>
+
+ARS runs on the same computer and Windows account, sharing its files, permissions, CPU, and memory. Your AI provider may receive tool output and screenshots. See [Security](SECURITY.md) for the boundary and [task guidance](AGENT-WORKSPACES.md) for when a VM, cloud computer, browser tool, or CLI is a better fit.
 
 ---
 
@@ -88,6 +94,9 @@ Turn the setting on to keep a separate browser profile for each workspace. Chang
 **Browser sign-ins:** Shared sign-ins need your browser open and remote debugging allowed through **Connect my browser**. Otherwise, ARS uses a separate profile and you must sign in there.
 
 Double-click a working card or recent workspace to open it fullscreen; **Esc** returns to the compact strip. **Ctrl+Enter** opens a focused card fullscreen too.
+
+- **Give the workspace its own window.** Open the workspace, then choose **More → Pop out**.
+- **Open an app on your desktop.** Hover over an eligible app in the corner preview and click **Open on my desktop**, or drag its title bar out of the preview. Save your work first because ARS relaunches the app. For a browser page, ARS opens its URL on your desktop and leaves the workspace tab open.
 
 </td>
 </tr>

@@ -386,9 +386,11 @@ static class SettingsScenes
             FindButton(view, "Manage storage").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Task.Delay(350);
             Pump();
-            Program.Check(view.Category == "storage" && Descendants<Button>(view).Any(x => Equals(x.Content, "Preview")),
-                "History links to the dedicated Storage page with cleanup previews");
-            Program.Check(Descendants<CheckBox>(view).Any(x => AutomationProperties.GetName(x) == "Automatic safe cleanup"),
+            Program.Check(view.Category == "storage" && Visible(view, "Measure storage"),
+                "History links to the dedicated Storage page with on-demand measurement");
+            Descendants<Expander>(view).Single(x => Equals(x.Header, "Automatic cleanup")).IsExpanded = true;
+            SettleVisual(view);
+            Program.Check(Descendants<CheckBox>(view).Any(x => x.IsVisible && AutomationProperties.GetName(x) == "Clean up automatically"),
                 "Storage exposes the automatic safe retention policy");
             ShowSettled(view, "history");
             FindButton(view, "Delete").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

@@ -46,7 +46,11 @@ public sealed record StoredWorkspace
     /// </summary>
     public string Agents { get; init; } = string.Empty;
     public DateTimeOffset Created { get; init; } = DateTimeOffset.Now;
+    /// <summary>When an agent or the owner last used it, which Recent shows.</summary>
     public DateTimeOffset LastUsed { get; init; } = DateTimeOffset.Now;
+    /// <summary>When it last went to sleep, which can be well after <see cref="LastUsed"/> when a
+    /// program kept running in it; Recent's tooltip shows it. Null before the first sleep.</summary>
+    public DateTimeOffset? Slept { get; init; }
 }
 
 /// <summary>
@@ -96,6 +100,7 @@ public static class WorkspaceStore
     /// re-read the store would call itself.
     /// </summary>
     public static event Action? Changed;
+    internal static void NotifyRemoved() => Changed?.Invoke();
 
     public static string Root => _testRoot ?? Deskweave.Product.ProductContext.Local("agent-workspaces");
 
@@ -134,9 +139,14 @@ public static class WorkspaceStore
     /// <summary>Creates a workspace and its low integrity folder. Its id is its folder name.</summary>
     public static StoredWorkspace Create(string name)
     {
-        var workspace = new StoredWorkspace { Id = FreeId(name), Name = name.Trim() };
-        WorkspaceSandbox.EnsureFolder(AgentDesktop.NameFor(workspace.Id));
-        Save(workspace);
+        StoredWorkspace workspace;
+        lock (Records)
+        {
+            // A reader must not recover the folder before its first record is published.
+            workspace = new StoredWorkspace { Id = FreeId(name), Name = name.Trim() };
+            WorkspaceSandbox.EnsureFolder(AgentDesktop.NameFor(workspace.Id));
+            Save(workspace);
+        }
         Changed?.Invoke();
         return workspace;
     }
@@ -166,11 +176,7 @@ public static class WorkspaceStore
     }
 
     /// <summary>One stored workspace by id, or null if it is not there any more.</summary>
-    public static StoredWorkspace? Find(string id)
-    {
-        string folder = FolderOf(id);
-        return Directory.Exists(folder) ? Read(folder) : null;
-    }
+    public static StoredWorkspace? Find(string id) => Read(FolderOf(id));
 
     /// <summary>
     /// Changes part of a record without holding the rest of it. Two things write to a workspace's
@@ -201,7 +207,7 @@ public static class WorkspaceStore
         // is not two changes, and a listener that redraws for the second one redraws for nothing.
         bool wasThere = Directory.Exists(folder);
         if (!Remove(folder)) return false;
-        if (wasThere) Changed?.Invoke();
+        if (wasThere) NotifyRemoved();
         return true;
     }
 
@@ -367,6 +373,11 @@ public static class WorkspaceStore
 
     static StoredWorkspace? Read(string folder)
     {
+        lock (Records) return Directory.Exists(folder) ? ReadRecord(folder) : null;
+    }
+
+    static StoredWorkspace? ReadRecord(string folder)
+    {
         string id = Path.GetFileName(folder);
         const string prefix = "ARS-";
         if (!id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
@@ -380,7 +391,9 @@ public static class WorkspaceStore
         {
             try
             {
-                StoredWorkspace? stored = JsonSerializer.Deserialize<StoredWorkspace>(File.ReadAllText(record));
+                using var stream = new FileStream(record, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                StoredWorkspace? stored = JsonSerializer.Deserialize<StoredWorkspace>(reader.ReadToEnd());
                 // An id that disagrees with the folder it was found in is the folder's, always: the
                 // folder is what the desktop and the low integrity label are named after.
                 if (stored is not null && !string.IsNullOrWhiteSpace(stored.Name))

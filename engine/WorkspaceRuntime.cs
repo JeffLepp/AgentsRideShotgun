@@ -49,6 +49,12 @@ public sealed class WorkspaceRuntime : IDisposable
     static Timer? _sleeper;
     static int _dozeQueued;
     long _touched = Environment.TickCount64;
+    // Starting counts as a use: whatever started it (an agent's call, the owner's click) used it.
+    long _ownerUsed = Environment.TickCount64;
+    Driver _lastDriver = Driver.Nobody;
+    /// <summary>Set by the corner host around Pause every agent's own take and hand-back, so Recent
+    /// does not read a pause as the owner using every workspace.</summary>
+    internal volatile bool HeldByPause;
     readonly Lock _lastLook = new();
     int _savingLook;
 
@@ -67,6 +73,7 @@ public sealed class WorkspaceRuntime : IDisposable
     WorkspaceRuntime(StoredWorkspace workspace)
     {
         Id = workspace.Id;
+        DisplayName = WorkspaceStore.Find(Id)?.Name ?? workspace.Name;
         _computer = AgentDesktop.Create(AgentDesktop.NameFor(workspace.Id), workspace.Power, workspace.Mode);
         try
         {
@@ -77,7 +84,16 @@ public sealed class WorkspaceRuntime : IDisposable
             // The control plane owns the lease, so who is driving is one answer rather than a
             // boolean here and a different boolean wherever an agent ends up living.
             _plane = new WorkspaceControl(_computer);
-            _plane.DriverChanged += who => { _touched = Environment.TickCount64; DriverChanged?.Invoke(who); };
+            _plane.DriverChanged += who =>
+            {
+                long now = Environment.TickCount64;
+                _touched = now;
+                // The owner taking the screen, and handing it back, are both the owner using it.
+                // Pause every agent takes and hands back every workspace at once: that is not use.
+                if ((who == Driver.Owner || _lastDriver == Driver.Owner) && !HeldByPause) _ownerUsed = now;
+                _lastDriver = who;
+                DriverChanged?.Invoke(who);
+            };
             Access = new WorkspaceExternalAccess(workspace.Id, _plane);
             Access.Changed += OnAccessChanged;
             // Off the constructor: the runtime is usable the moment it is published, and the browser
@@ -100,6 +116,7 @@ public sealed class WorkspaceRuntime : IDisposable
 
     /// <summary>The workspace this runtime is for.</summary>
     public string Id { get; }
+    internal string DisplayName { get; set; }
 
     public AgentDesktop? Computer => _computer;
     public WorkspaceControl? Plane => _plane;
@@ -209,6 +226,19 @@ public sealed class WorkspaceRuntime : IDisposable
     }
 
     /// <summary>
+    /// How long since someone last used this workspace, for Recent's "15m ago": an agent's last
+    /// call, the last command an agent started, or the owner's hands on its screen. Unlike
+    /// <see cref="Quiet"/>, which keeps a workspace awake, a program left running in it (a dev
+    /// server) or an agent that never said it finished does not make it look recently used.
+    /// </summary>
+    TimeSpan UnusedFor() => UnusedFor(Environment.TickCount64, _plane?.Driving == Driver.Owner && !HeldByPause, _ownerUsed,
+        Access?.LastActive ?? 0, _plane?.Commands.LastStarted ?? 0);
+
+    internal static TimeSpan UnusedFor(long now, bool ownerDriving, long ownerUsed, long agentActive, long commandStarted) =>
+        ownerDriving ? TimeSpan.Zero
+            : TimeSpan.FromMilliseconds(Math.Max(0, now - Math.Max(ownerUsed, Math.Max(agentActive, commandStarted))));
+
+    /// <summary>
     /// Whether this workspace reads as idle right now: nobody is driving it and nothing is using it.
     /// The UI needs this to stop drawing an idle workspace the same as one mid-task - today both are
     /// one blue dot. Backed by <see cref="Quiet"/> so there is exactly one idea of "idle" in the
@@ -222,9 +252,7 @@ public sealed class WorkspaceRuntime : IDisposable
     /// the clock only checks once every <see cref="DozeInterval"/>, so there is a real, if short,
     /// window where a workspace has passed its bound and not yet been swept.
     ///
-    /// This is the ordinary idle-timeout answer only. A workspace can still sleep sooner than this
-    /// says, as the quietest one picked to make room when <see cref="WorkspaceLimits.MemoryLoad"/>
-    /// is nearly full - <see cref="MemoryLoad"/> is what explains that case to the owner.
+    /// A quiet workspace can sleep before this timeout when the PC is low on memory.
     /// </summary>
     public TimeSpan? SleepsIn
     {
@@ -237,11 +265,13 @@ public sealed class WorkspaceRuntime : IDisposable
     }
 
     /// <summary>
-    /// How much of the machine's memory is in use right now, 0-100. The same figure Doze() acts on
-    /// at 90 to sleep the quietest workspace and make room - surfaced here rather than computed a
-    /// second way, so the owner sees the one number the engine actually decides by.
+    /// Percentage of the PC's physical memory in use. The sleep policy uses this value.
     /// </summary>
     public static uint MemoryLoad => WorkspaceLimits.MemoryLoad();
+
+    /// <summary>This workspace's resident private memory, including browser processes. Call off
+    /// the UI thread. Null means sampling failed or the computer is unavailable.</summary>
+    public ulong? PrivateWorkingSetBytes() => Computer?.PrivateWorkingSetBytes();
 
     /// <summary>
     /// Puts the workspace nobody has used for longest to sleep, to make room for another one. False
@@ -283,7 +313,7 @@ public sealed class WorkspaceRuntime : IDisposable
                 runtime.KeepLookWhileRunning();
                 if (runtime.Id != WorkspacePeekHost.PinnedOn && runtime.Quiet >= SleepAfter) runtime.TrySleep();
             }
-            if (WorkspaceLimits.MemoryLoad() >= 90) SleepQuietest();
+            if (MemoryLoad >= 90) SleepQuietest();
             if (Live.Count == 0) _sleeper?.Change(Timeout.Infinite, Timeout.Infinite);
         }
     }
@@ -357,11 +387,12 @@ public sealed class WorkspaceRuntime : IDisposable
     /// </summary>
     void KeepLastLook()
     {
-        DateTimeOffset used = DateTimeOffset.Now - (Quiet ?? TimeSpan.Zero);
+        DateTimeOffset now = DateTimeOffset.Now;
+        DateTimeOffset used = now - UnusedFor();
         try
         {
             WriteLastLook(_plane?.LastFrame);
-            WorkspaceStore.Update(Id, stored => stored with { LastUsed = used });
+            WorkspaceStore.Update(Id, stored => stored with { LastUsed = used, Slept = now });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }

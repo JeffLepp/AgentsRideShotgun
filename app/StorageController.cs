@@ -28,17 +28,14 @@ internal static class StorageController
     internal static void Stop()
     { _retention?.Stop(); WorkspaceRouter.StorageCommand = null; WorkspaceRouter.StorageView = null; }
 
-    internal static Task<StorageCleanup> Clean(string category, bool dryRun) => Updates.StorageLocked(async () =>
+    internal static Task<StorageCleanup> Clean(string category, bool dryRun) => CleanSelected([category], dryRun);
+
+    internal static Task<StorageCleanup> CleanSelected(string[] categories, bool dryRun, StorageCleanup? plan = null, IReadOnlySet<string>? workspaceIds = null) => Updates.StorageLocked(async () =>
     {
         if (Updates.OtherControllerReason().Length > 0) throw new IOException("Another Windows session is using ARS; cleanup deferred.");
         if (WorkspaceRuntime.Maintenance) throw new IOException("ARS is restarting or applying an update; cleanup deferred.");
-        return await Task.Run(() => Source.Clean(category, dryRun)).ConfigureAwait(false);
-    });
-
-    internal static Task<StorageCleanup> CleanReviewed(string category, StorageCleanup plan) => Updates.StorageLocked(async () =>
-    {
-        if (Updates.OtherControllerReason().Length > 0 || WorkspaceRuntime.Maintenance) throw new IOException("ARS maintenance or another session is using storage; cleanup deferred.");
-        return await Task.Run(() => Source.Clean(category, false, reviewed: plan.ReviewedFiles)).ConfigureAwait(false);
+        return await Task.Run(() => Source.CleanSelected(categories, dryRun, plan?.ReviewedFiles,
+            workspaceIds: workspaceIds, reviewedFolders: plan?.WorkspaceFolders)).ConfigureAwait(false);
     });
 
     static async Task Retain()

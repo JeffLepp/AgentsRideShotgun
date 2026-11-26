@@ -70,7 +70,8 @@ public sealed class WorkspaceMcp : IDisposable
         new("computer", "Look and act: up to 16 actions, then one screenshot of at most 1280x720. Omit actions just to look. "
             + "x and y are pixels of computer's latest image of the same target, never of a look picture. To hit a numbered "
             + "control, give control (from marks or controls) instead of x and y. target=browser is the page viewport only. "
-            + "Keys are modifiers first, then one key; native windows accept CTRL+A only. Drag stays within one window. "
+            + "Keys are modifiers first, then one key; native windows accept CTRL+A only. Drag stays within one window: dragging a title bar or edge "
+            + "does not move or resize it (use window action=move), and there is no taskbar or tray. "
             + "Input sent is not proof it worked, so check the picture. screenshot=false saves image tokens.",
             [("target", "string", "desktop (default) or browser"), ("actions", "array", "up to 16 computer actions"),
                 ("screenshot", "boolean", "return one final image, default true"),
@@ -150,7 +151,9 @@ public sealed class WorkspaceMcp : IDisposable
     /// Claude Code keeps only the first 2,048 characters of a server's instructions.</summary>
     internal const string RouterInstructions = "ARS is a Windows screen of your own beside the user's, so your GUI work "
         + "never takes their mouse or focus. Agents in one project share its workspace; outside a project you get Scratch. "
-        + ExternalInstructions;
+        + ExternalInstructions
+        + " If ARS says it is restarting, retry the call; never switch to desktop computer-use or the user's own browser "
+        + "for workspace work, and if the owner turned ARS off, ask the user.";
 
     /// <summary>The tool list a connected agent sees, the same whichever workspace it lands in.</summary>
     internal static object[] ExternalToolSchemas => [.. ExternalTools.Select(Schema)];
@@ -292,6 +295,8 @@ public sealed class WorkspaceMcp : IDisposable
                 var content = new List<object> { new { type = "text", text = JsonSerializer.Serialize(new
                 {
                     result.Receipt.Status, result.Receipt.Next, result.Receipt.Reason, result.Receipt.Completed,
+                    // What each drag or double-click did to its window, read back, not assumed.
+                    effects = result.Receipt.Effects?.Select(effect => effect.Json(WindowNumber(effect.Window))).ToArray(),
                     target = result.Target, coordinateSpace = result.Target == "browser" ? "page viewport image pixels" : "whole workspace image pixels",
                     width = result.Width, height = result.Height, screenshot = result.Frame is not null,
                     screen = result.Target == "browser" || _control.ScreenState.Note.Length == 0
@@ -391,21 +396,46 @@ public sealed class WorkspaceMcp : IDisposable
                     return Fail(program + " requires Windows shell activation and cannot open inside this workspace."
                         + " If the user asked to use it on their desktop, start it from your own shell"
                         + " or open with where=owner to request their click. Nothing has started.");
-                int pid = _control.Open(program, args, quiet: false, out string exe);
+                int pid = _control.Open(program, args, quiet: false, out string exe, out IReadOnlyList<nint>? before);
                 if (pid == 0) return Fail("that program did not start");
                 // Wait only while this process has not exposed a window, not for a fixed cosmetic delay.
                 Started started = await WindowReady(pid, cancel).ConfigureAwait(false);
                 // Measured: Notepad opened behind a maximized browser left from an earlier
                 // session, so the next picture showed the browser. What was just opened comes first.
                 if (started == Started.Showing) Front(pid);
-                if (started == Started.Exited && _control.RunningOutside(exe) is { } elsewhere)
+                LaunchHandoff? went = started == Started.Exited
+                    ? await _control.HandedOff(pid, exe, before, cancel).ConfigureAwait(false) : null;
+                // Only the very file, running outside with nothing in here having moved, is reported as
+                // where the launch went, and only that one process is ever put to the owner for closing.
+                if (went is { Went: LaunchWent.Outside, Outside: { } elsewhere })
                     return Say($"started, pid {pid}. It handed the launch to the copy already running outside this workspace"
-                        + $" (pid {elsewhere.Id}"
-                        + (elsewhere is { SameFile: false, File.Length: > 0 } ? $", started from {elsewhere.File}" : "")
-                        + "), the way a program that allows one copy per Windows session does, and quit."
-                        + " " + AskOwnerText(program, args, why, takeOver: true)
+                        + $" (pid {elsewhere.Id}, started from {elsewhere.File}),"
+                        + " the way a program that allows one copy per Windows session does, and quit."
+                        + " " + AskOwnerText(program, args, why, takeOver: elsewhere)
                         + "\n" + WindowList());
-                return Say($"started, pid {pid}." + started switch
+                // A same-named program from another file is a fact worth one line, never a target.
+                string namesake = went?.Namesake is { } other
+                    ? $" A different program file with the same name is running outside this workspace (pid {other.Id}"
+                        + (other.File.Length > 0 ? $", {other.File}" : "") + "); it is not this file, so nothing was handed to it"
+                        + " and nothing of it will be offered for closing."
+                    : "";
+                // Windows would not name its file: neither this program nor another one, so it is said as that.
+                if (went?.Unreadable is { } unread)
+                    namesake += $" A program with the same name is running outside this workspace (pid {unread.Id}), but Windows"
+                        + " would not say which file it runs, so ARS does not treat it as where this launch went and will not"
+                        + " offer it for closing.";
+                if (went is { Went: LaunchWent.Inside, InsideId: not 0 })
+                    return Say($"started, pid {pid}. The copy already running in this workspace (pid {went.InsideId})"
+                        + " took the launch, the way a program that allows one copy per Windows session does, and this one quit."
+                        + " Nothing outside the workspace was involved; use the window it already has." + namesake
+                        + "\n" + WindowList());
+                // What was seen, and no more: no copy of this file was found running in here.
+                if (went is { Went: LaunchWent.Inside })
+                    return Say($"started, pid {pid}. It quit without a window of its own, and as it did a window in this"
+                        + " workspace appeared or came forward; no copy of this program was found running here, so which"
+                        + " program answered is not known. Nothing outside the workspace was asked or closed." + namesake
+                        + "\n" + WindowList());
+                return Say($"started, pid {pid}." + namesake + started switch
                 {
                     Started.Showing => "",
                     // Both a packaged app's launcher and a program that really did fail look like
@@ -599,16 +629,18 @@ public sealed class WorkspaceMcp : IDisposable
     /// click it, which is what keeps an agent from putting a window on their screen or closing an
     /// application of theirs. It is a route and not a refusal, so it answers as an ordinary result.
     /// </summary>
-    string AskOwnerText(string program, string? arguments, string reason, bool takeOver)
+    /// <param name="takeOver">The one copy outside that took the launch, for a takeover; null to
+    /// open the program on the owner's desktop.</param>
+    string AskOwnerText(string program, string? arguments, string reason, WorkspaceCopy? takeOver)
     {
         if (!_external.Policy.DesktopRequests)
             return "The owner set this workspace to workspace-only, so nothing in here can reach their desktop."
                 + " Ask them in your answer instead.";
         try
         {
-            WorkspaceHandoff request = _external.RequestProgram(_client, program, arguments, reason, takeOver);
-            return (takeOver
-                ? "The owner now has one click in ARS to close their copy and start it in here instead"
+            WorkspaceHandoff request = _external.RequestProgram(_client, program, arguments, reason, takeOver is not null, takeOver);
+            return (takeOver is not null
+                ? "The owner now has one click in ARS to close that copy and start it in here instead"
                 : "The owner now has one click in ARS to open it on their own desktop")
                 + $" (request {request.Id}). Nothing has opened yet; check status for their answer.";
         }
@@ -627,7 +659,7 @@ public sealed class WorkspaceMcp : IDisposable
         string trimmed = target.Trim();
         string? kind = Uri.TryCreate(trimmed, UriKind.Absolute, out Uri? link) && link.Scheme is "http" or "https" ? "url"
             : arguments is null && WorkspaceHandoffs.IsDocument(trimmed) ? "file" : null;
-        if (kind is null) return Say(AskOwnerText(target, arguments, reason, takeOver: false));
+        if (kind is null) return Say(AskOwnerText(target, arguments, reason, takeOver: null));
         if (!_external.Policy.DesktopRequests)
             return Say("The owner set this workspace to workspace-only, so nothing in here can reach their desktop."
                 + " Ask them in your answer instead.");
@@ -705,6 +737,17 @@ public sealed class WorkspaceMcp : IDisposable
         }
     }
 
+    /// <summary>The number the last listing gave a window, or null. Never lists again: that would
+    /// renumber the windows under an agent that is holding the old numbers.</summary>
+    int? WindowNumber(nint handle)
+    {
+        lock (_windows)
+        {
+            int at = _windows.IndexOf(handle);
+            return at < 0 ? null : at + 1;
+        }
+    }
+
     nint Window(JsonElement arguments, string name)
     {
         int number = Int(arguments, name);
@@ -721,6 +764,10 @@ public sealed class WorkspaceMcp : IDisposable
 
     static object Fail(string why) =>
         new { content = new object[] { new { type = "text", text = why } }, isError = true };
+
+    /// <summary>A call that ran out of time inside ARS. It is never replayed for the agent: it may have partly happened.</summary>
+    internal const string TimedOut = "This call timed out inside ARS before it finished, so it may have partly happened. "
+        + "Check with status or a look, then retry it if needed.";
 
     static object Did(bool went, string yes, string no) => went ? Say(yes) : Fail(no);
 
@@ -789,6 +836,10 @@ public sealed class WorkspaceMcp : IDisposable
         { return Error(id, -32602, "Invalid tool parameters."); }
         catch (ObjectDisposedException)
         { return Ok(id, Fail("The workspace closed while this was running. Call status before trying again.")); }
+        // A time limit inside a tool (a page that never loads, say) is not the caller's own cancel:
+        // it fails this one call and leaves the connection, and every later call, as it was.
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        { return Ok(id, Fail(TimedOut)); }
         catch (Exception ex) when (ex is not OperationCanceledException)
         { return Ok(id, Fail(ex.GetType().Name + ": " + ex.Message)); }
     }

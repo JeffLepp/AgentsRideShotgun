@@ -146,12 +146,9 @@
             <TextBlock x:Name="HeaderError" Grid.Column="3" FontSize="12" Foreground="{DynamicResource DangerInkBrush}"
                        VerticalAlignment="Center" HorizontalAlignment="Right" Margin="10,0,10,0"
                        TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
-            <!-- One honest line for what running costs: WorkspaceRuntime.MemoryLoad
-                 as-is, no chart and no metric this page invents itself. Only while this workspace's
-                 own computer is running, same as the Sleep control beside it. -->
-            <TextBlock x:Name="MemoryText" Grid.Column="4" FontSize="12" Foreground="{DynamicResource FaintInkBrush}"
-                       VerticalAlignment="Center" HorizontalAlignment="Right" Margin="10,0,10,0"
-                       TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
+            <TextBlock x:Name="MemoryText" Grid.Column="4" FontSize="12" Foreground="{DynamicResource MutedInkBrush}"
+                       Margin="10,0,10,0" VerticalAlignment="Center" Visibility="Collapsed"
+                       ToolTip="Private RAM used by apps and browser processes running inside this workspace."/>
             <!-- Sleeps the workspace right now, in one click. Wording carries the
                  whole explanation since a one-click action has no confirmation dialog to say it in;
                  never the word "asleep" itself (it is reserved for the stack, and the UI probe

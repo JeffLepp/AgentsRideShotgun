@@ -130,13 +130,26 @@ internal sealed class WorkspacePipeServer : IDisposable
             await WorkspacePipeProtocol.Write(pipe, "workspace-pipe/1", 256, handshake.Token).ConfigureAwait(false);
         }
 
-        var queued = new Queue<string>();
+        // A queued frame is either a request still to run, or (Request null) one already answered:
+        // refused because too many were waiting. Only its short reply is kept, never the request.
+        var queued = new Queue<(string? Request, string? Answer)>();
+        int waiting = 0;                                                 // queued frames that will run
         var dropped = new HashSet<string>(StringComparer.Ordinal);     // cancelled before they started
         Task<string?> next = WorkspacePipeProtocol.Read(pipe, WorkspacePipeProtocol.MaxRequestBytes, connection.Token);
         while (true)
         {
             string? request;
-            if (queued.Count > 0) request = queued.Dequeue();
+            if (queued.Count > 0)
+            {
+                (request, string? answer) = queued.Dequeue();
+                if (request is null)
+                {
+                    await WorkspacePipeProtocol.Write(pipe, answer, WorkspacePipeProtocol.MaxResponseBytes, connection.Token)
+                        .ConfigureAwait(false);
+                    continue;
+                }
+                waiting--;
+            }
             else
             {
                 request = await next.ConfigureAwait(false);
@@ -163,20 +176,32 @@ internal sealed class WorkspacePipeServer : IDisposable
                 {
                     string? pending = await next.ConfigureAwait(false);
                     if (pending is null) { connection.Cancel(); return; }
-                    if (queued.Count >= 16) throw new InvalidDataException("Too many queued workspace requests.");
+                    // Only a client that ignores every reply gets this far; it is not an agent session.
+                    if (queued.Count >= MaxAnswered) throw new InvalidDataException("Too many queued workspace requests.");
                     if (CancelledId(pending) is { } cancelled)
                     {
                         if (cancelled == RequestId(request)) call.Cancel();
-                        else if (queued.Any(waiting => RequestId(waiting) == cancelled)) dropped.Add(cancelled);
+                        else if (queued.Any(frame => frame.Request is { } queuedRequest && RequestId(queuedRequest) == cancelled))
+                            dropped.Add(cancelled);
                     }
-                    // Still queued, cancellation included: every frame gets its one reply, in order.
-                    queued.Enqueue(pending);
+                    // Still queued, cancellation and refusal included: every frame gets its one reply, in
+                    // order. Past the bound a request is answered with an error instead of ending the
+                    // connection, which would have failed every call before it too.
+                    if (waiting >= MaxWaiting) queued.Enqueue((null, Refuse(pending, Busy)));
+                    else { queued.Enqueue((pending, null)); waiting++; }
                     next = WorkspacePipeProtocol.Read(pipe, WorkspacePipeProtocol.MaxRequestBytes, connection.Token);
                 }
                 string? reply;
                 try { reply = await response.ConfigureAwait(false); }
-                catch (OperationCanceledException) when (call.IsCancellationRequested && !connection.IsCancellationRequested)
-                { reply = null; }
+                // Anything else the call throws, a time limit inside a tool included, is that call's
+                // failure: it is answered, and the connection and the calls queued behind it carry on.
+                // The connection's own end still ends it.
+                catch (Exception error) when (!connection.IsCancellationRequested)
+                {
+                    reply = call.IsCancellationRequested ? null
+                        : Refuse(request, error is OperationCanceledException ? WorkspaceMcp.TimedOut
+                            : "ARS hit an unexpected error on this call (" + error.GetType().Name + "). Check with status, then retry it if needed.");
+                }
                 // A cancelled request gets no answer (MCP), even when the tool caught the cancellation
                 // and returned something; the empty frame only keeps the bridge's replies in order.
                 if (call.IsCancellationRequested && !connection.IsCancellationRequested) reply = null;
@@ -189,7 +214,7 @@ internal sealed class WorkspacePipeServer : IDisposable
                 {
                     connection.Cancel();
                     try { await response.ConfigureAwait(false); }
-                    catch (OperationCanceledException) { }
+                    catch (Exception) { }   // the connection is ending; its reply has nowhere to go
                 }
             }
         }
@@ -201,6 +226,32 @@ internal sealed class WorkspacePipeServer : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException
             or ObjectDisposedException or InvalidDataException or System.Text.DecoderFallbackException) { }
         finally { connection.Cancel(); peer?.Closed(); }
+    }
+
+    /// <summary>Requests that may wait behind the running one; more are answered with <see cref="Busy"/>.</summary>
+    internal const int MaxWaiting = 16;
+    const int MaxAnswered = 1024;
+    internal const string Busy = "ARS is still working through earlier calls from this session. Retry this call in a few seconds.";
+
+    /// <summary>
+    /// The one reply to a request ARS will not run: an isError result for a tool call, so the agent
+    /// reads it as that tool's answer, a JSON-RPC error for anything else, nothing for a notification.
+    /// </summary>
+    internal static string? Refuse(string frame, string text)
+    {
+        string method = "";
+        try
+        {
+            using var json = JsonDocument.Parse(frame);
+            if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("method", out JsonElement m)
+                && m.ValueKind == JsonValueKind.String) method = m.GetString() ?? "";
+        }
+        catch (JsonException) { }
+        if (RequestId(frame) is not { } id) return null;
+        string encoded = System.Text.Json.JsonEncodedText.Encode(text).ToString();
+        return method == "tools/call"
+            ? "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + encoded + "\"}],\"isError\":true}}"
+            : "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32000,\"message\":\"" + encoded + "\"}}";
     }
 
     /// <summary>A JSON-RPC request's id as written, or null for a notification or anything else.</summary>

@@ -169,7 +169,7 @@
                                            Height="{Binding Converter={StaticResource WeekBarHeight}}"/>
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <TextBlock Grid.Column="3" Text="{Binding Age}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="3" Text="{Binding Age}" ToolTip="{Binding AgeTip}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
                         <Path Grid.Column="4" Data="M2,4 L5,7 L8,4" Stroke="{DynamicResource MutedInkBrush}" StrokeThickness="1" Width="10" Height="10" Margin="8,0,0,0" RenderTransformOrigin="0.5,0.5">
                             <Path.Style><Style TargetType="Path"><Style.Triggers><DataTrigger Binding="{Binding Expanded}" Value="True"><Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="180"/></Setter.Value></Setter></DataTrigger></Style.Triggers></Style></Path.Style>
                         </Path>
@@ -220,7 +220,7 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <Ellipse Width="7" Height="7" Fill="{DynamicResource AsleepBrush}" Margin="0,0,9,0" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" Foreground="{DynamicResource InkBrush}" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Grid.Column="2" Text="{Binding Age}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="2" Text="{Binding Age}" ToolTip="{Binding AgeTip}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
                 </Grid>
             </RadioButton>
         </DataTemplate>
@@ -278,7 +278,7 @@
             <Grid Grid.Row="1" ClipToBounds="True">
                 <Grid x:Name="StackRoot">
                     <Grid.RenderTransform><TranslateTransform/></Grid.RenderTransform>
-                    <ScrollViewer x:Name="StackScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ScrollViewer x:Name="StackScroll" Style="{StaticResource OverlayScrollViewer}">
                         <StackPanel Margin="16,6,16,16">
                             <!-- Today: what the agents got done today, from the
                                  workspaces' own action logs. -->

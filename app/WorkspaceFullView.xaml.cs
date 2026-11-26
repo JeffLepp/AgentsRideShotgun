@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -29,6 +30,9 @@ public partial class WorkspaceFullView : UserControl, IDisposable
     bool _renaming;
     bool _disposed;
     bool _capturingScreen;
+    bool _readingMemory;
+    int _memoryGeneration;
+    WorkspaceRuntime? _memoryRuntime;
     /// <summary>A live frame has been on screen for this workspace, so the stored one is past.</summary>
     bool _liveShown;
     /// <summary>The screen the picture on show came from. Input goes only to that screen, so a
@@ -135,14 +139,54 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         // The Sleep control and the one honest memory line both only mean
         // something while this workspace actually has a computer running.
         SleepButton.Visibility = runtime is not null ? Visibility.Visible : Visibility.Collapsed;
-        MemoryText.Visibility = runtime is not null && HeaderError.Visibility != Visibility.Visible
-            ? Visibility.Visible : Visibility.Collapsed;
-        if (runtime is not null) MemoryText.Text = "Memory " + WorkspaceRuntime.MemoryLoad + "% in use";
+        RefreshMemory(runtime);
         BrowserStatusText.Text = runtime?.Plane?.BrowserStatus ?? "";
         BrowserStatusText.Visibility = BrowserStatusText.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateDriverSubscription(runtime);
         UpdateControlToast(runtime);
         SizeScreen();
+    }
+
+    void RefreshMemory(WorkspaceRuntime? runtime)
+    {
+        if (!ReferenceEquals(runtime, _memoryRuntime))
+        {
+            _memoryRuntime = runtime;
+            _memoryGeneration++;
+            MemoryText.Text = ""; // Never show a prior workspace's sample or an invented zero.
+        }
+        bool show = runtime is not null && HeaderError.Visibility != Visibility.Visible;
+        MemoryText.Visibility = show && MemoryText.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (runtime is not null && !_readingMemory) _ = ReadMemoryAsync(runtime, _memoryGeneration);
+    }
+
+    async Task ReadMemoryAsync(WorkspaceRuntime runtime, int generation)
+    {
+        _readingMemory = true;
+        try
+        {
+            ulong? bytes = await Task.Run(runtime.PrivateWorkingSetBytes);
+            // A pending sample must not revive a sleeping, switched, unloaded or disposed page.
+            if (_disposed || generation != _memoryGeneration || !IsVisible
+                || !ReferenceEquals(WorkspaceRuntime.Of(_id ?? ""), runtime)) return;
+            ApplyMemorySample(bytes);
+        }
+        finally { _readingMemory = false; }
+    }
+
+    internal void ApplyMemorySample(ulong? bytes)
+    {
+        MemoryText.Text = bytes is { } measured ? FormatWorkspaceMemory(measured) : "";
+        MemoryText.Visibility = bytes.HasValue && HeaderError.Visibility != Visibility.Visible
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    internal static string FormatWorkspaceMemory(ulong bytes)
+    {
+        const ulong megabyte = 1024 * 1024, gigabyte = 1024 * megabyte;
+        return "Workspace RAM " + (bytes < gigabyte
+            ? Math.Min(1023, Math.Round(bytes / (double)megabyte)).ToString("0", CultureInfo.CurrentCulture) + " MB"
+            : (bytes / (double)gigabyte).ToString("0.0", CultureInfo.CurrentCulture) + " GB");
     }
 
     /// <summary>Keeps "You have control" listening to whichever WorkspaceRuntime instance actually
@@ -221,8 +265,8 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         // a power change, or the owner's hand arriving or leaving, reaches this screen at once.
         bool handsOn = HandsOn;
         if (_screenTimer is { } beat) beat.Interval = handsOn ? HubPreview.HandsOnInterval() : HubPreview.Interval();
-        // Only the picture speeds up. The pills and the memory line read the store and the system,
-        // and keep the glance pace however fast frames are coming.
+        // Only the picture speeds up. The pills read the store, memory samples the workspace jobs
+        // off-thread, and both keep the glance pace however fast frames are coming.
         if (!handsOn || Environment.TickCount64 - _livedAt >= HubPreview.Interval().TotalMilliseconds)
         {
             _livedAt = Environment.TickCount64;
@@ -447,6 +491,7 @@ public partial class WorkspaceFullView : UserControl, IDisposable
         if (_id is not { } id || name.Length == 0) { Reload(); return; }
         if (WorkspaceStore.Update(id, w => w with { Name = name }) is { } updated)
         {
+            if (WorkspaceRuntime.Of(id) is { } runtime) runtime.DisplayName = updated.Name;
             NameText.Text = updated.Name;
             Renamed?.Invoke(id, updated.Name);
         }
@@ -504,6 +549,10 @@ public partial class WorkspaceFullView : UserControl, IDisposable
 
     void StopLive()
     {
+        _memoryGeneration++;
+        _memoryRuntime = null;
+        MemoryText.Text = "";
+        MemoryText.Visibility = Visibility.Collapsed;
         _pendingScreenMenu = null;
         if (LastScreenMenu is { } menu) menu.IsOpen = false;
         if (LastMoreMenu is { } more) more.IsOpen = false;

@@ -199,23 +199,26 @@ internal static class RouterStartup
             _process = Process.Start(start) ?? throw new IOException("Fixture bridge did not start.");
             _errors = _process.StandardError.ReadToEndAsync();
         }
-        internal JsonElement Request(string method, object parameters)
+        internal JsonElement Request(string method, object parameters, TimeSpan? patience = null)
         {
             _process.StandardInput.WriteLine(JsonSerializer.Serialize(new { jsonrpc = "2.0", id = ++_id, method, @params = parameters }));
             _process.StandardInput.Flush();
-            using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            using var bound = new CancellationTokenSource(patience ?? TimeSpan.FromSeconds(4));
             string line = _process.StandardOutput.ReadLineAsync(bound.Token).AsTask().GetAwaiter().GetResult()
                 ?? throw new IOException("Fixture bridge closed before its response.");
             using var json = JsonDocument.Parse(line);
             return json.RootElement.Clone();
         }
+        /// <summary>The router refused this bridge: it stays with its client, and its tool calls say ARS
+        /// isn't answering instead of reaching a workspace.</summary>
         internal bool WaitForRefusal()
         {
-            if (!_process.WaitForExit(5000)) return false;
-            string errors = _errors.WaitAsync(TimeSpan.FromSeconds(1)).GetAwaiter().GetResult();
-            string stdout = _process.StandardOutput.ReadToEnd();
-            return _process.ExitCode == 1 && stdout.Length == 0
-                && errors.StartsWith("ARS isn't answering.", StringComparison.Ordinal);
+            JsonElement call;
+            try { call = Request("tools/call", new { name = "status", arguments = new { } }, TimeSpan.FromSeconds(10)); }
+            catch (Exception error) when (error is IOException or OperationCanceledException or JsonException) { return false; }
+            return !_process.HasExited && call.TryGetProperty("result", out JsonElement result)
+                && result.TryGetProperty("isError", out JsonElement failed) && failed.GetBoolean()
+                && result.GetProperty("content")[0].GetProperty("text").GetString() == BridgeTexts.Stuck;
         }
         public void Dispose()
         {

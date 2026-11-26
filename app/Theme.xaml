@@ -345,6 +345,32 @@
         </Style.Triggers>
     </Style>
 
+    <!-- A vertical scroller whose bar floats over the content's right gutter instead of taking a
+         column. Showing or hiding the bar then never changes the content's width. That matters where
+         content takes its height from its width (the card screens): a bar that took width shortened
+         every screen, the list fit again, the bar hid, and the list flickered at the overflow edge.
+         Use it only where the content keeps a right margin of at least the bar's 10 DIP.
+         ponytail: the wide sidebar (8 DIP gutter) and the workspace page's activity list keep the stock
+         bar that takes width. Nothing in them sizes from width, so they cannot flicker, but rows there
+         still shift by 10 DIP when the bar comes and goes. -->
+    <Style x:Key="OverlayScrollViewer" TargetType="ScrollViewer">
+        <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="ScrollViewer">
+                <Grid Background="{TemplateBinding Background}">
+                    <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Margin="{TemplateBinding Padding}"
+                                            CanContentScroll="{TemplateBinding CanContentScroll}"/>
+                    <ScrollBar x:Name="PART_VerticalScrollBar" Orientation="Vertical" HorizontalAlignment="Right" Cursor="Arrow"
+                               Minimum="0" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}"
+                               Value="{Binding VerticalOffset, Mode=OneWay, RelativeSource={RelativeSource TemplatedParent}}"
+                               Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"
+                               AutomationProperties.AutomationId="VerticalScrollBar"/>
+                </Grid>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+
     <Style TargetType="CheckBox"><Setter Property="Foreground" Value="{DynamicResource InkBrush}"/><Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/></Style>
     <Style TargetType="RadioButton"><Setter Property="Foreground" Value="{DynamicResource InkBrush}"/><Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/></Style>
     <Style TargetType="Expander"><Setter Property="Foreground" Value="{DynamicResource InkBrush}"/></Style>

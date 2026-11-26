@@ -14,5 +14,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\WorkspacePipeProtocol.cs" Link="WorkspacePipeProtocol.cs" />
+    <!-- The router's initialize and tools/list results, answered while ARS is away. Regenerate with
+         the engine probe's bridge-offline-json mode (see engine/LIFECYCLE.md) after changing the tools or
+         RouterInstructions; the engine probe fails while this copy differs from the router's replies. -->
+    <EmbeddedResource Include="offline.json" LogicalName="offline.json" />
   </ItemGroup>
 </Project>

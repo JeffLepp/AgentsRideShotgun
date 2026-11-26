@@ -292,77 +292,407 @@ internal static class OpenRouteProbe
     // --- one copy per session --------------------------------------------------------------
 
     /// <summary>
-    /// Most Windows applications allow one copy per logon session, so a second launch hands its
-    /// command line to the copy already running and quits. Without a route, the owner has to close
-    /// their own copy to let an agent test it; the answer must be a button they can press, not a
-    /// negotiation.
-    ///
-    /// The fixture is the real shape of it: one copy already running somewhere the workspace does not
-    /// own, with a window that closing actually closes, and a second launch that exits at once.
+    /// A launch that quits at once without a window went somewhere. It is reported as handed to a copy
+    /// outside the workspace only when that copy is the very same file, outside every ARS workspace,
+    /// and nothing in the workspace answered it. A same-named program from another file, a copy whose
+    /// file cannot be read, a copy already in the workspace and a copy in another agent's workspace
+    /// never put anything up for closing. A plain desktop of the probe's own, which no workspace
+    /// owns, stands in for the owner's: its processes belong to no running workspace.
     /// </summary>
     static void AlreadyRunningOutside(Action<bool, string> check)
     {
         (WorkspaceRuntime testing, string id) = NewWorkspace("OpenTakeover");
-        (WorkspaceRuntime elsewhere, _) = NewWorkspace("OpenOwnersCopy", desktopRequests: false);
-        string name = "one-copy-" + Guid.NewGuid().ToString("N")[..6];
-        string his = Path.Combine(elsewhere.Computer!.Folder!, name + ".exe");
-        string mine = Path.Combine(testing.Computer!.Folder!, name + ".exe");
+        (WorkspaceRuntime elsewhere, _) = NewWorkspace("OpenOtherAgent", desktopRequests: false);
+        AgentDesktop owner = AgentDesktop.Create("ARS-probeowner" + Guid.NewGuid().ToString("N")[..6]);
+        var made = new List<string>();
         try
         {
-            // Their copy keeps a window open, the way an application they are using does. The workspace's
-            // own launch is a program of the same name from another folder that exits at once with no
-            // window, which is what Windows leaves behind when the launch was handed to the copy
-            // already up. Two ordinary Windows programs stand in for theirs, because a copied and
-            // renamed one does not always find its own resources on every machine.
-            File.Copy(Path.Combine(Environment.SystemDirectory, "rundll32.exe"), mine);
-            int copy = 0;
-            foreach ((string source, string? arguments) in new (string, string?)[]
-            {
-                ("notepad.exe", null),
-                ("rundll32.exe", "shell32.dll,Control_RunDLL main.cpl"),
-            })
-            {
-                copy = Standing(elsewhere, his, Path.Combine(Environment.SystemDirectory, source), arguments);
-                if (copy != 0) break;
-            }
-            if (copy == 0)
-            {
-                check(true, "The already-running-outside route not measured this run: no fixture application would draw a window on this PC");
-                return;
-            }
-
             using var client = new Program.Client(id);
             client.Request("initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "Open route probe", version = "1" } });
-            string said = Program.Client.Text(client.Tool("open", new { program = mine }));
-            check(said.Contains("already running outside this workspace", StringComparison.Ordinal)
-                && said.Contains("one click", StringComparison.Ordinal),
-                "A launch handed to a copy already running outside answers with the owner's one click, not with a dead end for the agent to argue about");
-
-            WorkspaceHandoff pending = testing.Access!.Handoffs.All.Single(r => r.State == "pending" && r.Kind == "takeover");
-            // The owner's click comes from a window on the desktop their copy is on. Standing there is
-            // what lets a close reach that window at all - EnumWindows only sees its own desktop -
-            // and in the product that desktop is their own, where both the app and ARS's window are.
-            WorkspaceHandoff decided = OnDesktop(elsewhere.Computer.Name,
-                () => testing.Access.Handoffs.Decide(pending.Id, approve: true));
-            check(decided.State == "opened",
-                "One click closes the copy they had open and starts the program in the workspace instead: " + decided.Detail);
-            check(Process.GetProcessesByName(name).Length == 0,
-                "Their copy really is gone afterwards, so the next launch in the workspace is no longer handed to it");
+            NamesakeIsNotTheCopy(check, testing, owner, client);
+            nint unrelated = CopyInHereTookIt(check, testing, owner, client, made);
+            AnotherWorkspaceIsNotTheOwner(check, testing, elsewhere, client, made);
+            SameFileOutside(check, testing, owner, client, made, unrelated);
+            TrayOnlyCopy(check, testing, owner, client, made);
         }
         finally
         {
+            WorkspaceControl.FileForTests = null;
+            owner.Dispose();
             elsewhere.Dispose();
             testing.Dispose();
+            foreach (string file in made) Remove(file);
         }
+    }
+
+    static int PendingTakeovers(WorkspaceRuntime runtime) =>
+        runtime.Access!.Handoffs.All.Count(r => r.State == "pending" && r.Kind == "takeover");
+
+    static string Open(Program.Client client, string program, string? arguments = null) =>
+        Program.Client.Text(arguments is null ? client.Tool("open", new { program })
+            : client.Tool("open", new { program, arguments }));
+
+    /// <summary>
+    /// The field case's other half: the owner has their own install of a program, from another
+    /// folder, under the same file name. A launch in the workspace that quits without a window was
+    /// reported as handed to it and their copy was offered for closing, though it was never the same
+    /// file. A name is not a program: nothing may be filed or closed on the strength of one.
+    /// </summary>
+    static void NamesakeIsNotTheCopy(Action<bool, string> check, WorkspaceRuntime testing, AgentDesktop owner,
+        Program.Client client)
+    {
+        string name = "one-copy-" + Guid.NewGuid().ToString("N")[..6];
+        string his = Path.Combine(testing.Computer!.Folder!, "owner-" + name, name + ".exe");
+        string mine = Path.Combine(testing.Computer.Folder!, name + ".exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(his)!);
+        // The workspace's own launch is rundll32 under that name, which exits at once with no window.
+        File.Copy(Path.Combine(Environment.SystemDirectory, "rundll32.exe"), mine);
+        int copy = Namesake(owner, his);
+        if (copy == 0)
+        {
+            check(true, "A same-named copy from another file not measured this run: no fixture application would draw a window on this PC");
+            return;
+        }
+        string said = Open(client, mine);
+        check(!said.Contains("handed the launch", StringComparison.Ordinal)
+            && !said.Contains("one click", StringComparison.Ordinal) && PendingTakeovers(testing) == 0 && Alive(copy),
+            "A launch that quits while only a same-named program from another file runs outside is not reported as handed to it, files no request, and leaves that program running");
+        check(said.Contains("not this file", StringComparison.Ordinal),
+            "The agent is told the same-named program outside is a different file, as a fact and not as a route: " + said.Split('\n')[0]);
+
+        // The same program, when Windows will not say which file it runs - as for an elevated copy,
+        // whose memory cannot be read: never called another file, never a target.
+        WorkspaceControl.FileForTests = pid => pid == copy ? "" : null;
+        try
+        {
+            string unread = Open(client, mine);
+            check(!unread.Contains("not this file", StringComparison.Ordinal)
+                && unread.Contains("would not say which file", StringComparison.Ordinal)
+                && !unread.Contains("one click", StringComparison.Ordinal) && PendingTakeovers(testing) == 0 && Alive(copy),
+                "A same-named program whose file cannot be read is neither called a different file nor offered for closing");
+        }
+        finally { WorkspaceControl.FileForTests = null; }
+    }
+
+    /// <summary>
+    /// The field case: a one-copy application already running in the workspace, a second launch
+    /// that signals it - it restores its own window in here - and quits, and the owner's own copy of
+    /// the same name running on their desktop. The launch went nowhere outside, so nothing is asked of
+    /// the owner and nothing of theirs is put up for closing. Returns that window, for later use as
+    /// an unrelated window in the workspace, or zero.
+    /// </summary>
+    static nint CopyInHereTookIt(Action<bool, string> check, WorkspaceRuntime testing, AgentDesktop owner,
+        Program.Client client, List<string> made)
+    {
+        string key = Guid.NewGuid().ToString("N")[..8];
+        string name = "one-copy-" + key;
+        if (OwnCopy(name) is not { } app)
+        {
+            check(true, "A one-copy app inside the workspace not measured this run: the probe's folder is not writable");
+            return 0;
+        }
+        made.Add(app);
+        string receipt = Path.Combine(testing.Computer!.Folder!, name + ".txt");
+        string fixture = $"--one-copy-fixture {key} \"{receipt}\"";
+        int inHere = Pid(Open(client, app, fixture)) ?? 0;
+        check(inHere != 0 && Until(() => Showing(testing.Computer, inHere), 20),
+            "The one-copy fixture's first copy opens its window in the workspace");
+        nint window = WindowOf(testing.Computer, inHere);
+        check(testing.Computer.Arrange(window, WindowArrangement.Minimize) && Until(() => !Showing(testing.Computer, inHere), 5),
+            "The workspace's copy is minimized, so the second launch has to restore it, as the field app did");
+        string elsewhere = Path.Combine(testing.Computer.Folder!, "owner-" + name, name + ".exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(elsewhere)!);
+        int theirs = Namesake(owner, elsewhere);
+
+        string said = Open(client, app, fixture);
+        check(Until(() => Raised(receipt) > 0, 5) && Showing(testing.Computer, inHere),
+            "The second launch really was taken by the copy in the workspace, which restored its window there");
+        check(said.Contains("already running in this workspace", StringComparison.Ordinal)
+            && !said.Contains("handed the launch", StringComparison.Ordinal)
+            && !said.Contains("one click", StringComparison.Ordinal) && PendingTakeovers(testing) == 0,
+            "A launch taken by the copy already in the workspace is reported as handled in there and files no request"
+            + (theirs == 0 ? " (no same-named copy outside could be started this run)" : ", though a same-named program runs outside"));
+        check(Alive(inHere) && (theirs == 0 || Alive(theirs)),
+            "Nothing was closed: the workspace's copy and the same-named program outside are both still running");
+        return window;
+    }
+
+    /// <summary>
+    /// Another agent's workspace is not the owner's desktop. A copy of the same file running in
+    /// another ARS workspace is that agent's program; a launch it takes is never put to the owner as
+    /// "close your copy", which would close another agent's work.
+    /// </summary>
+    static void AnotherWorkspaceIsNotTheOwner(Action<bool, string> check, WorkspaceRuntime testing,
+        WorkspaceRuntime elsewhere, Program.Client client, List<string> made)
+    {
+        string key = Guid.NewGuid().ToString("N")[..8];
+        string name = "one-copy-" + key;
+        if (OwnCopy(name) is not { } app)
+        {
+            check(true, "A copy in another workspace not measured this run: the probe's folder is not writable");
+            return;
+        }
+        made.Add(app);
+        string receipt = Path.Combine(elsewhere.Computer!.Folder!, name + ".txt");
+        string fixture = $"--one-copy-fixture {key} \"{receipt}\"";
+        int theirs = elsewhere.Computer.Launch(app, fixture);
+        check(theirs != 0 && Until(() => Showing(elsewhere.Computer, theirs), 20),
+            "Another workspace has a copy of the same one-copy fixture file up on its own desktop");
+        string said = Open(client, app, fixture);
+        check(Until(() => Raised(receipt) > 0, 5), "The launch really was taken by the copy in the other workspace");
+        check(!said.Contains("handed the launch", StringComparison.Ordinal)
+            && !said.Contains("one click", StringComparison.Ordinal) && PendingTakeovers(testing) == 0 && Alive(theirs),
+            "A same-file copy in another ARS workspace is never reported as the owner's copy, files no request and keeps running");
+    }
+
+    /// <summary>
+    /// Most Windows applications allow one copy per logon session, so a second launch hands its
+    /// command line to the copy already running and quits. Without a route, the owner has to close
+    /// their own copy to let an agent test it; the answer must be a button they can press, not a
+    /// negotiation. The copy outside is the very same file here, the only case that is reported as a
+    /// handoff, and approving closes that one process: a same-named program from another file stays.
+    /// </summary>
+    static void SameFileOutside(Action<bool, string> check, WorkspaceRuntime testing, AgentDesktop owner,
+        Program.Client client, List<string> made, nint unrelated)
+    {
+        string key = Guid.NewGuid().ToString("N")[..8];
+        string name = "one-copy-" + key;
+        if (OwnCopy(name) is not { } app)
+        {
+            check(true, "The already-running-outside route not measured this run: the probe's folder is not writable");
+            return;
+        }
+        made.Add(app);
+        string receipt = Path.Combine(testing.Computer!.Folder!, "owner-" + name + ".txt");
+        string fixture = $"--one-copy-fixture {key} \"{receipt}\"";
+        int theirs = owner.Launch(app, fixture);
+        check(theirs != 0 && Until(() => Showing(owner, theirs), 20),
+            "The owner's copy of the one-copy fixture is up with its window on a desktop no workspace owns");
+        string decoyAt = Path.Combine(testing.Computer.Folder!, "owner-" + name, name + ".exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(decoyAt)!);
+        int namesake = Namesake(owner, decoyAt);
+
+        // Something unrelated in the workspace comes forward while the launch is being handed out.
+        // That is all the agent may be told: no copy of this program runs in here.
+        if (unrelated != 0 && testing.Computer.Arrange(unrelated, WindowArrangement.Minimize))
+        {
+            int raisedBefore = Raised(receipt);
+            using var restoring = Task.Run(() =>
+            {
+                if (Until(() => Raised(receipt) > raisedBefore, 10))
+                    testing.Computer.Arrange(unrelated, WindowArrangement.Restore);
+            });
+            string moved = Open(client, app, fixture);
+            restoring.Wait(TimeSpan.FromSeconds(15));
+            check(!moved.Contains("already running in this workspace", StringComparison.Ordinal)
+                && moved.Contains("no copy of this program was found running here", StringComparison.Ordinal)
+                && !moved.Contains("one click", StringComparison.Ordinal) && PendingTakeovers(testing) == 0 && Alive(theirs),
+                "When an unrelated window in the workspace comes forward during the handoff, the agent is told what was seen - no copy of the program runs here - and nothing is asked of the owner: "
+                + moved.Split('\n')[0]);
+        }
+        else check(true, "An unrelated window coming forward during a handoff not measured this run: no workspace window to move");
+
+        int raisedAtOpen = Raised(receipt);
+        string said = Open(client, app, fixture);
+        check(said.Contains("already running outside this workspace", StringComparison.Ordinal)
+            && said.Contains("one click", StringComparison.Ordinal) && said.Contains("pid " + theirs, StringComparison.Ordinal),
+            "A launch handed to the same program file already running outside every workspace answers with the owner's one click, naming that copy");
+        check(Raised(receipt) > raisedAtOpen, "The launch really did go to the copy outside, which raised its own window there");
+
+        WorkspaceHandoff pending = testing.Access!.Handoffs.All.Single(r => r.State == "pending" && r.Kind == "takeover");
+        long started;
+        using (Process process = Process.GetProcessById(theirs)) started = process.StartTime.ToFileTimeUtc();
+        check(pending.CopyId == theirs && string.Equals(pending.CopyFile, app, StringComparison.OrdinalIgnoreCase)
+            && pending.CopyCreated == started,
+            "The request carries exactly the process id, file and start time of the copy it would close");
+
+        // An id that has since gone to another process, and a copy whose file Windows will not name,
+        // are refused with what was found - never closed, never reported as closed.
+        string? reused = testing.Plane!.TakeOver(app, fixture, theirs, app, started + 1);
+        check(reused is not null && reused.Contains("no longer running", StringComparison.Ordinal) && Alive(theirs),
+            "A takeover whose start time no longer matches that process id closes nothing and says so: " + reused);
+        WorkspaceControl.FileForTests = pid => pid == theirs ? "" : null;
+        string? unread;
+        try { unread = OnDesktop(owner.Name, () => testing.Plane.TakeOver(app, fixture, theirs, app, started)); }
+        finally { WorkspaceControl.FileForTests = null; }
+        check(unread is not null && unread.Contains("would not say which program", StringComparison.Ordinal) && Alive(theirs),
+            "A takeover of a copy whose file cannot be read closes nothing and does not report success: " + unread);
+
+        // The owner's click comes from a window on the desktop their copy is on. Standing there is
+        // what lets a close reach that window at all - EnumWindows only sees its own desktop -
+        // and in the product that desktop is their own, where both the app and ARS's window are.
+        WorkspaceHandoff decided = OnDesktop(owner.Name, () => testing.Access.Handoffs.Decide(pending.Id, approve: true));
+        check(decided.State == "opened" && Until(() => !Alive(theirs), 5),
+            "One click closes the copy they had open and starts the program in the workspace instead: " + decided.Detail);
+        check(namesake == 0 ? true : Alive(namesake), namesake == 0
+            ? "Closing only the named process not measured against a same-named program this run: none would start"
+            : "Approving closes only the process the request named: a same-named program from another file is still running");
+        check(Until(() => testing.Computer.Windows().Any(w =>
+            {
+                Native.GetWindowThreadProcessId(w.Handle, out int pid);
+                try { using Process process = Process.GetProcessById(pid); return process.ProcessName == name; }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return false; }
+            }), 20),
+            "The program then runs in the workspace, so the next launch in here is no longer handed outside");
+    }
+
+    /// <summary>
+    /// A tray application - Slack, Teams, Discord - keeps only hidden windows while it runs. Its copy
+    /// still takes the launch, so it still has to be found, by its file, as the owner's.
+    /// </summary>
+    static void TrayOnlyCopy(Action<bool, string> check, WorkspaceRuntime testing, AgentDesktop owner,
+        Program.Client client, List<string> made)
+    {
+        string key = Guid.NewGuid().ToString("N")[..8];
+        string name = "one-copy-" + key;
+        if (OwnCopy(name) is not { } app)
+        {
+            check(true, "A tray-only copy outside not measured this run: the probe's folder is not writable");
+            return;
+        }
+        made.Add(app);
+        string receipt = Path.Combine(testing.Computer!.Folder!, "tray-" + name + ".txt");
+        string fixture = $"--one-copy-fixture {key} \"{receipt}\" tray";
+        int theirs = owner.Launch(app, fixture);
+        check(theirs != 0 && Until(() => Read(receipt).Contains("up ", StringComparison.Ordinal), 20) && !Showing(owner, theirs),
+            "The owner's tray-only copy is running with no visible window");
+        string said = Open(client, app, fixture);
+        check(Until(() => Raised(receipt) > 0, 5)
+            && said.Contains("already running outside this workspace", StringComparison.Ordinal)
+            && said.Contains("pid " + theirs, StringComparison.Ordinal),
+            "A launch handed to a tray-only copy of the same file outside is still reported as handed to it, naming that copy");
+        WorkspaceHandoff pending = testing.Access!.Handoffs.All.Single(r => r.State == "pending" && r.Kind == "takeover");
+        check(pending.CopyId == theirs, "The request names that tray-only process");
+        testing.Access.Handoffs.Decide(pending.Id, approve: false);
+    }
+
+    /// <summary>
+    /// A one-copy-per-session application in miniature, run from the probe's own exe copied under a
+    /// name of its own. The first copy holds a session-wide name and shows a window - or, as "tray",
+    /// keeps only a hidden one; a later launch signals it and quits at once with no window, and the
+    /// first then restores and raises its window wherever it is - which is what the field app (a
+    /// Tauri one) does.
+    /// </summary>
+    internal static int OneCopy(string key, string receipt, bool tray = false)
+    {
+        string name = @"Local\ARS.Probe.OneCopy." + key;
+        using var only = new Mutex(true, name, out bool first);
+        if (!first)
+        {
+            try { using var wake = EventWaitHandle.OpenExisting(name + ".raise"); wake.Set(); }
+            catch (WaitHandleCannotBeOpenedException) { }
+            return 0;
+        }
+        var raise = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".raise");
+        var app = new System.Windows.Application
+        {
+            ShutdownMode = tray ? System.Windows.ShutdownMode.OnExplicitShutdown : System.Windows.ShutdownMode.OnMainWindowClose,
+        };
+        var window = new System.Windows.Window
+        {
+            Title = "One-copy fixture " + key, Width = 420, Height = 300, Left = 200, Top = 160,
+            WindowStartupLocation = System.Windows.WindowStartupLocation.Manual, ShowActivated = false,
+        };
+        window.Loaded += (_, _) => Note(receipt, "up " + Environment.ProcessId);
+        new Thread(() =>
+        {
+            try
+            {
+                while (raise.WaitOne())
+                    window.Dispatcher.BeginInvoke(() =>
+                    {
+                        if (!tray)
+                        {
+                            nint handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                            Native.ShowWindow(handle, Native.SwRestore);
+                            Native.SetWindowPos(handle, 0, 0, 0, 0, 0, Native.SwpNoMove | Native.SwpNoSize | Native.SwpNoActivate);
+                        }
+                        Note(receipt, "raised");
+                    });
+            }
+            catch (ObjectDisposedException) { }
+        }) { IsBackground = true }.Start();
+        if (!tray) return app.Run(window);
+        // A tray application's only windows are hidden ones.
+        new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle();
+        app.Startup += (_, _) => Note(receipt, "up " + Environment.ProcessId);
+        return app.Run();
+    }
+
+    static int Raised(string receipt) =>
+        Read(receipt).Split('\n').Count(line => line.Trim() == "raised");
+
+    static void Note(string file, string line)
+    {
+        try { File.AppendAllText(file, line + Environment.NewLine); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    static string Read(string file)
+    {
+        try { return File.ReadAllText(file); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return ""; }
+    }
+
+    /// <summary>The probe's own exe under a new name beside it, so its process name and file are its
+    /// own: the apphost finds the probe's assembly next to itself whatever it is called.</summary>
+    static string? OwnCopy(string name)
+    {
+        string at = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath!)!, name + ".exe");
+        try { File.Copy(Environment.ProcessPath!, at, true); return at; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    static void Remove(string file)
+    {
+        for (int tries = 0; tries < 20 && File.Exists(file); tries++)
+        {
+            try { File.Delete(file); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Thread.Sleep(100); }
+        }
+    }
+
+    /// <summary>A program of that file name, from another file, up with a window on that desktop.
+    /// Two ordinary Windows programs stand in, because a copied and renamed one does not always find
+    /// its own resources on every machine. Zero when neither drew a window.</summary>
+    static int Namesake(AgentDesktop desktop, string at)
+    {
+        foreach ((string source, string? arguments) in new (string, string?)[]
+        {
+            ("notepad.exe", null),
+            ("rundll32.exe", "shell32.dll,Control_RunDLL main.cpl"),
+        })
+        {
+            int copy = Standing(desktop, at, Path.Combine(Environment.SystemDirectory, source), arguments);
+            if (copy != 0) return copy;
+        }
+        return 0;
+    }
+
+    static bool Alive(int pid)
+    {
+        try { using Process process = Process.GetProcessById(pid); return !process.HasExited; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return false; }
+    }
+
+    static bool Until(Func<bool> done, int seconds)
+    {
+        var clock = Stopwatch.StartNew();
+        while (clock.Elapsed < TimeSpan.FromSeconds(seconds))
+        {
+            if (done()) return true;
+            Thread.Sleep(100);
+        }
+        return done();
     }
 
     /// <summary>
     /// Puts a copy of <paramref name="source"/> at <paramref name="at"/> and starts it on that
-    /// workspace, standing in for the copy the owner already has open. Its process id once it has a
+    /// desktop, standing in for a program the owner already has open. Its process id once it has a
     /// window of its own, or zero when it never drew one. The language resources go with it: a
     /// Windows program renamed away from its own .mui may not come up at all.
     /// </summary>
-    static int Standing(WorkspaceRuntime runtime, string at, string source, string? arguments)
+    static int Standing(AgentDesktop desktop, string at, string source, string? arguments)
     {
         try
         {
@@ -379,10 +709,10 @@ internal static class OpenRouteProbe
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
 
-        int pid = runtime.Computer!.Launch(at, arguments);
+        int pid = desktop.Launch(at, arguments);
         var waited = Stopwatch.StartNew();
-        while (pid != 0 && !Showing(runtime, pid) && waited.Elapsed < TimeSpan.FromSeconds(8)) Thread.Sleep(100);
-        if (pid != 0 && Showing(runtime, pid)) return pid;
+        while (pid != 0 && !Showing(desktop, pid) && waited.Elapsed < TimeSpan.FromSeconds(8)) Thread.Sleep(100);
+        if (pid != 0 && Showing(desktop, pid)) return pid;
         try { if (pid != 0) using (Process started = Process.GetProcessById(pid)) started.Kill(); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException
             or System.ComponentModel.Win32Exception) { }
@@ -396,10 +726,15 @@ internal static class OpenRouteProbe
             ? pid : null;
 
     /// <summary>That process has a window of its own up on that workspace's screen.</summary>
-    static bool Showing(WorkspaceRuntime runtime, int pid) => runtime.Computer!.Windows().Any(window =>
-        { Native.GetWindowThreadProcessId(window.Handle, out int owner); return owner == pid; });
+    static bool Showing(WorkspaceRuntime runtime, int pid) => Showing(runtime.Computer!, pid);
 
-    /// <summary>Runs one piece of work on a thread attached to the named workspace desktop.</summary>
+    /// <summary>That process has a window of its own up on that desktop.</summary>
+    static bool Showing(AgentDesktop desktop, int pid) => WindowOf(desktop, pid) != 0;
+
+    static nint WindowOf(AgentDesktop desktop, int pid) => desktop.Windows().FirstOrDefault(window =>
+        { Native.GetWindowThreadProcessId(window.Handle, out int owner); return owner == pid; })?.Handle ?? 0;
+
+    /// <summary>Runs one piece of work on a thread attached to the named desktop.</summary>
     static T OnDesktop<T>(string desktop, Func<T> work)
     {
         T answer = default!;

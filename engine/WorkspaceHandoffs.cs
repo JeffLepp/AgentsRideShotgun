@@ -5,9 +5,12 @@ using System.Security.Cryptography;
 namespace Deskweave.AgentWorkspaces;
 
 /// <summary>A program request carries its own arguments, fixed when it is made: the owner is shown
-/// exactly this and approving runs exactly this, so nothing can be swapped in before their click.</summary>
+/// exactly this and approving runs exactly this, so nothing can be swapped in before their click.
+/// A takeover also carries the one process it is about - its id and the file it was running - and
+/// approving it closes that process and nothing else, never everything sharing its name.</summary>
 internal sealed record WorkspaceHandoff(string Id, string Kind, string Target, string Reason,
-    string State, string Detail, DateTimeOffset Created, string? Sha256 = null, string? Arguments = null);
+    string State, string Detail, DateTimeOffset Created, string? Sha256 = null, string? Arguments = null,
+    int CopyId = 0, string? CopyFile = null, long CopyCreated = 0);
 
 /// <summary>Requests are data, never permission. Only an owner UI action calls Decide.</summary>
 internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
@@ -28,8 +31,13 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
     /// </summary>
     internal Func<WorkspaceHandoff, string?>? Perform { get; set; }
 
-    internal WorkspaceHandoff Request(string kind, string target, string reason, string? arguments = null)
+    /// <param name="copy">For a takeover, and only for one: the copy outside the workspace to close.</param>
+    internal WorkspaceHandoff Request(string kind, string target, string reason, string? arguments = null,
+        WorkspaceCopy? copy = null)
     {
+        if ((kind == "takeover") != (copy is not null)
+            || copy is not null && (copy.Id <= 0 || copy.Created == 0 || !copy.SameFile || copy.File.Length is < 1 or > 2048 || copy.File.Any(char.IsControl)))
+            throw new ArgumentException("A takeover names exactly the one copy of the program it would close.");
         if (target.Length is < 1 or > 2048 || target.Any(char.IsControl)
             || reason.Length is < 1 or > 500 || reason.Any(char.IsControl))
             throw new ArgumentException("Provide a target and a short, single-line reason.");
@@ -65,14 +73,18 @@ internal sealed class WorkspaceHandoffs(string id, string workspaceFolder)
             // and "close your copy of Notepad and start it in here" name the same program and ask
             // opposite things, and answering one must never be taken for answering the other. The
             // arguments are too: the same program with a different command line is a different ask.
+            // So is the copy a takeover would close.
+            int copyId = copy?.Id ?? 0;
             var existing = _requests.FirstOrDefault(r =>
-                r.State == "pending" && r.Kind == kind && r.Target == target && r.Sha256 == hash && r.Arguments == arguments);
+                r.State == "pending" && r.Kind == kind && r.Target == target && r.Sha256 == hash && r.Arguments == arguments
+                && r.CopyId == copyId && r.CopyFile == copy?.File && r.CopyCreated == (copy?.Created ?? 0));
             if (existing is not null) return existing;
             if (_requests.Count(r => r.State == "pending") >= 8)
                 throw new InvalidOperationException("Eight desktop requests are already waiting. Wait for the owner.");
             if (_requests.Count >= 40) _requests.RemoveAll(r => r.State != "pending");
             request = new(Guid.NewGuid().ToString("N"), kind, target, reason, "pending",
-                "Waiting for the owner's click in ARS. Nothing has opened on the main desktop.", DateTimeOffset.UtcNow, hash, arguments);
+                "Waiting for the owner's click in ARS. Nothing has opened on the main desktop.", DateTimeOffset.UtcNow, hash, arguments,
+                copyId, copy?.File, copy?.Created ?? 0);
             _requests.Add(request);
         }
         Changed?.Invoke();

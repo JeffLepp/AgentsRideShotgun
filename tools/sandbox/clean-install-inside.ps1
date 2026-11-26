@@ -251,7 +251,12 @@ public static class InstallerProviderFixture {
     Check ($un.WaitForExit(120000)) 'Uninstall finishes within two minutes'
     $report.uninstallExitCode = $un.ExitCode
     Check ($un.ExitCode -eq 0) 'Uninstall returns success'
-    Check ($session.WaitForExit(10000) -and $session.ExitCode -eq 0) 'Uninstall ends a connected immutable bridge without leaving an orphan'
+    Check (-not $session.HasExited) 'The immutable bridge keeps its agent connection through uninstall'
+    $afterUninstall = Ask 'tools/call' @{ name = 'status'; arguments = @{} } 30
+    Check ($afterUninstall.result.isError -and
+        ($afterUninstall.result.content[0].text -like '*owner turned ARS off*')) 'The connected bridge reports that ARS was turned off'
+    $session.StandardInput.Close()
+    Check ($session.WaitForExit(10000) -and $session.ExitCode -eq 0) 'The bridge exits cleanly once its agent disconnects'
     $session.Dispose(); $session = $null
     Start-Sleep -Seconds 3
     Check (-not (Test-Path $app)) 'Uninstall removes the app'

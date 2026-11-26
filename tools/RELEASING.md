@@ -51,9 +51,16 @@ gh release list --repo JeffLepp/AgentsRideShotgun --limit 5
        -OutputDirectory "artifacts/release-checks/$version/install"
    ```
 
-   Run the source regression matrix with `tools/check-release.ps1
-   -OutputDirectory <fresh-absolute-artifacts-folder>`; `-Browser` selects a
-   clean fixture Chromium executable. Reports verify the isolated process exit
+   Run the source regression matrix from the repository root. This invocation
+   applies the script policy only to the release-check process.
+
+   ```powershell
+   $checks = Join-Path $PWD ('artifacts/release-checks/source-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\check-release.ps1 -OutputDirectory $checks
+   ```
+
+   The optional `-Browser` parameter selects a clean fixture Chromium executable.
+   Reports verify the isolated process exit
    and the completed gate result independently. This does not certify a signed
    package.
 

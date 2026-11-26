@@ -277,7 +277,10 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     /// has open into this workspace, which is the only way a one-copy-per-session application can be
     /// driven in here. Both are one click for them and neither happens until they click.
     /// </summary>
-    internal WorkspaceHandoff RequestProgram(Guid client, string program, string? arguments, string reason, bool takeOver)
+    /// <param name="copy">For a takeover: the one copy outside the workspace that took the launch,
+    /// which is all approving it may close.</param>
+    internal WorkspaceHandoff RequestProgram(Guid client, string program, string? arguments, string reason, bool takeOver,
+        WorkspaceCopy? copy = null)
     {
         lock (_gate)
             if (!MayUse(client) || !Policy.DesktopRequests)
@@ -285,7 +288,7 @@ internal sealed class WorkspaceExternalAccess : IDisposable
         // The plain program name for both kinds: the corner window asks a takeover its own way
         // round now, so what it does no longer has to be spelled out inside the name. The
         // arguments travel on the request itself, so the owner's card shows exactly what runs.
-        return Handoffs.Request(takeOver ? "takeover" : "program", program, reason, arguments);
+        return Handoffs.Request(takeOver ? "takeover" : "program", program, reason, arguments, takeOver ? copy : null);
     }
 
     /// <summary>The owner clicked. Only Decide reaches this, and only for a request they approved.
@@ -293,7 +296,8 @@ internal sealed class WorkspaceExternalAccess : IDisposable
     string? Carry(WorkspaceHandoff request)
     {
         (string Program, string? Arguments) what = (request.Target, request.Arguments);
-        if (request.Kind == "takeover") return _control.TakeOver(what.Program, what.Arguments);
+        if (request.Kind == "takeover")
+            return _control.TakeOver(what.Program, what.Arguments, request.CopyId, request.CopyFile, request.CopyCreated);
         try
         {
             // ShellExecute, exactly as if the owner had typed it into Start: their shell resolves the

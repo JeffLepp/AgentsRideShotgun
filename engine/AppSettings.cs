@@ -67,6 +67,9 @@ public sealed record AppSettings
     // Corner window
     public CornerShow CornerShow { get; init; } = CornerShow.ComesAndGoes;
     public bool CornerPinned { get; init; }
+    /// <summary>Dragging a file from the desktop or Explorer toward the hidden corner window opens
+    /// it (WorkspacePeekDropWatch). On by default; off means nothing watches the pointer at all.</summary>
+    public bool CornerDragOpens { get; init; } = true;
     /// <summary>Where the owner left it and how wide they grew it, in DIPs. Null until they move or
     /// resizes it.</summary>
     public double? CornerLeft { get; init; }

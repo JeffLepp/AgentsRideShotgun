@@ -37,6 +37,10 @@ internal sealed class HubEntry(string id) : INotifyPropertyChanged
     /// <summary>Asleep only, the wide sidebar's wording: "2h ago", "Yesterday", "Monday".</summary>
     string _sidebarAge = "";
     public string SidebarAge { get => _sidebarAge; set => Set(ref _sidebarAge, value); }
+    /// <summary>Asleep only, the age's tooltip: "Last used 15m ago · went to sleep 1m ago".</summary>
+    // Null rather than empty: an empty string would still pop up a blank tooltip.
+    string? _ageTip;
+    public string? AgeTip { get => _ageTip; set => Set(ref _ageTip, value); }
     BitmapSource? _preview;
     public BitmapSource? Preview { get => _preview; set => Set(ref _preview, value); }
     // Only a frame captured from this exact runtime may accept input. A last picture may remain
@@ -95,6 +99,21 @@ internal static class HubFormat
         if (lastUsed.Date == now.Date.AddDays(-1)) return "Yesterday";
         if (since < TimeSpan.FromDays(7)) return lastUsed.ToString("dddd");
         return lastUsed.ToString("MMM d");
+    }
+
+    /// <summary>The age's tooltip. Says when it went to sleep only when that is a different
+    /// minute from its last use: a program left running can keep a workspace up long after.</summary>
+    internal static string AgeTip(DateTimeOffset lastUsed, DateTimeOffset? slept, DateTimeOffset now)
+    {
+        string used = "Last used " + Lower(SidebarAge(lastUsed, now));
+        if (slept is not { } at || at - lastUsed < TimeSpan.FromMinutes(1)) return used;
+        return used + " · went to sleep " + Lower(SidebarAge(at, now));
+        static string Lower(string text) => text switch
+        {
+            "Just now" => "just now", "Yesterday" => "yesterday",
+            _ when text.Length > 0 && char.IsDigit(text[0]) => text,
+            _ => "on " + text,
+        };
     }
 
     /// <summary>What an idle running workspace says about when it sleeps, from
@@ -264,6 +283,7 @@ internal sealed class HubViewModel : IDisposable
             Compose(entry);
             entry.Age = isWorking ? "" : HubFormat.StackAge(workspace.LastUsed, now);
             entry.SidebarAge = isWorking ? "" : HubFormat.SidebarAge(workspace.LastUsed, now);
+            entry.AgeTip = isWorking ? null : HubFormat.AgeTip(workspace.LastUsed, workspace.Slept, now);
             // A workspace with no computer running shows the last look it had rather than an empty
             // rectangle, and a running one shows it until its own live frame arrives.
             HubLastLook.Fill(entry, isWorking);

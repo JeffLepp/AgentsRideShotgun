@@ -28,6 +28,26 @@ watchdog. A watchdog failure also writes `timeout.txt`; absence of a completed r
 not a pass. Fixture processes have their own five-minute ceiling as an additional cleanup
 backstop. Normal teardown verifies that the workspace jobs terminate observed descendants.
 
+The default full run also runs `WorkspaceMemoryProbe`: empty workspaces return zero;
+disposed workspaces and failed job/process reads return null. Live application and browser
+jobs sum to within 25% + 4 MiB of fixture processes'
+independent private resident page counts (`QueryWorkingSet` on their own pseudo-handles).
+The fixtures touch 32 MiB and leave another 128 MiB committed but untouched, distinguishing
+private working set from private commit. The native fallback is checked directly too.
+These assertions are compiled by a build; they are only verified by a completed probe run.
+
+Production memory sampling enumerates each job with `JobObjectBasicProcessIdList` and opens
+processes with only `PROCESS_QUERY_LIMITED_INFORMATION`, rechecking job membership against
+PID reuse. `GetProcessMemoryInfo` / `PROCESS_MEMORY_COUNTERS_EX2.PrivateWorkingSetSize` is
+preferred; EX2 requires Win10/11 22H2 with September 2023 updates. Windows 10 1809+ falls
+back to `NtQueryInformationProcess(ProcessVmCounters)` / `VM_COUNTERS_EX2.PrivateWorkingSetSize`
+(native layout: [phnt](https://github.com/winsiderss/systeminformer/blob/master/phnt/include/ntpsapi.h)).
+Microsoft's [hcsshim job sampler](https://github.com/microsoft/hcsshim/blob/main/internal/jobobject/jobobject.go)
+uses the same native counter with query-limited process handles.
+It does not substitute private commit. Exited/inaccessible processes contribute zero; a job
+that keeps outgrowing eight bounded enumeration retries is retried on the next sample.
+Sampling happens on a worker at the workspace page's existing glance cadence, not each frame.
+
 The output directory retains browser screenshots and a path to its fixture for inspection.
 Workspace/access/result stores use a short `f-{id}` sibling beneath the same artifacts
 directory to keep Chromium's nested profile paths short. The probe creates no user
@@ -59,7 +79,9 @@ For lifecycle/update work, see [the lifecycle policy](../engine/LIFECYCLE.md).
 Use `--isolate-suite EXE MODE OUTPUT` to keep the suite's controller windows on
 another ARS desktop as well as its fixture apps. A private SDK installation needs
 `DOTNET_ROOT` set to that SDK root before launching probe apphosts. No existing
-live controller is used. Browser fixtures can select an installed clean Chromium
+live controller is used. In Windows PowerShell, use `Start-Process -Wait -PassThru`
+for either probe executable so you can read its exit code before opening its report.
+Browser fixtures can select an installed clean Chromium
 with the process-scoped `DESKWEAVE_WORKSPACE_BROWSER` override; Edge's first-run
 sign-in dialogs can otherwise obscure the native pixel oracle. This does not
 alter the owner's browser or its profile.

@@ -75,6 +75,7 @@ internal static class HubLastLook
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
+            image.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
             // OnLoad above: the whole picture is read here and the file closed with it, so a
             // workspace writing a newer frame over it is never blocked by the hub holding it open.
             image.UriSource = new Uri(path);

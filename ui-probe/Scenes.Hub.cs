@@ -1,4 +1,6 @@
 using System.IO;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -24,6 +26,127 @@ static class HubScenes
         new HubEntry("api") { Name = "api", Age = "yesterday", SidebarAge = "Yesterday", Preview = scene.Site("term") },
         new HubEntry("scratch") { Name = "Scratch", Age = "Mon", SidebarAge = "Monday", Preview = scene.Site("term") },
     ];
+
+    /// <summary>Spec (owner, 2026-11-20, field report on 0.3.10: an agent stopped 15 minutes ago read
+    /// "1m" under Recent): Recent's time is the last time an agent or the owner used the workspace,
+    /// and when it went to sleep, if later, is in the tooltip.</summary>
+    static void RecentTimeChecks()
+    {
+        const long now = 10_000_000, min = 60_000;
+        Program.Check(WorkspaceRuntime.UnusedFor(now, false, now - 20 * min, now - 15 * min, now - 16 * min) == TimeSpan.FromMinutes(15),
+            "Recent counts from the agent's last call, not from when the workspace went to sleep");
+        Program.Check(WorkspaceRuntime.UnusedFor(now, false, now - 20 * min, now - 15 * min, now - 3 * min) == TimeSpan.FromMinutes(3),
+            "...or from the last command an agent started, if later");
+        Program.Check(WorkspaceRuntime.UnusedFor(now, false, now - 2 * min, now - 15 * min, 0) == TimeSpan.FromMinutes(2),
+            "...or from the owner's last hands on its screen, if later");
+        Program.Check(WorkspaceRuntime.UnusedFor(now, true, now - 20 * min, now - 15 * min, 0) == TimeSpan.Zero,
+            "A workspace the owner has in hand as it stops was used just now");
+        Program.Check(WorkspaceRuntime.UnusedFor(now, false, now + min, 0, 0) == TimeSpan.Zero,
+            "Recent's age never goes negative");
+
+        var at = new DateTimeOffset(2026, 11, 20, 15, 0, 0, TimeSpan.Zero);
+        Program.Check(HubFormat.AgeTip(at.AddMinutes(-15), at.AddMinutes(-1), at) == "Last used 15m ago · went to sleep 1m ago",
+            "The tooltip says when it was last used and, when later, when it went to sleep");
+        Program.Check(HubFormat.AgeTip(at.AddMinutes(-15), at.AddMinutes(-15).AddSeconds(20), at) == "Last used 15m ago"
+            && HubFormat.AgeTip(at.AddMinutes(-15), null, at) == "Last used 15m ago",
+            "...and only the last use when it slept in the same minute, or has no sleep on record");
+        Program.Check(HubFormat.AgeTip(at.AddDays(-3), at.AddDays(-3), at) == "Last used on " + at.AddDays(-3).ToString("dddd"),
+            "An older last use reads as a day");
+    }
+
+    /// <summary>Expected behavior: the stack's scroll bar shows exactly when the cards overflow, and
+    /// showing or hiding it never resizes a card. Card screens take their height from their width,
+    /// so a bar that took width shortened every screen, the list fit again, the bar hid, and the
+    /// stack flickered between the two near the overflow edge. Sweeps the window height across that
+    /// edge and holds each height long enough for a flicker to show.</summary>
+    static async Task ScrollBarNeverReflows()
+    {
+        var window = new MainWindow { ShowActivated = false, Left = TestScreen.Work.Left + 20, Top = TestScreen.Work.Top + 20 };
+        try
+        {
+            window.Show();
+            await Task.Delay(200);
+            // Three cards: their screens put the overflow edge well above the window's minimum height.
+            window.Hub.LoadFixture([.. Enumerable.Range(0, 3).Select(i => new HubEntry("edge-" + i) { Name = "edge-" + i, Working = true })], []);
+            window.ShowStack();
+            window.Width = 340;
+            window.Height = 1600;
+            ScrollViewer scroll = window.StackScroll;
+            // The screens size themselves from their width after they load; measure only once the
+            // list's height has stopped changing.
+            double settled = -1;
+            for (int pass = 0; pass < 40 && Math.Abs(scroll.ExtentHeight - settled) > 0.5; pass++)
+            {
+                settled = scroll.ExtentHeight;
+                await Task.Delay(100);
+                window.UpdateLayout();
+            }
+            Program.Check(scroll.ComputedVerticalScrollBarVisibility != Visibility.Visible,
+                $"Three working cards in a tall stack show no scroll bar [extent {scroll.ExtentHeight:0.#}, viewport {scroll.ViewportHeight:0.#}]");
+            // A card with no picture yet still gets its full screen height when it loads, not only
+            // after something first changes its width (which used to be the scroll bar appearing).
+            bool sizedAtLoad = Descendants<Border>(window.StackWorkingList).Where(b => b.Tag is "0.625").ToList() is { Count: 3 } loaded
+                && loaded.All(b => b.ActualWidth > 0 && Math.Abs(b.ActualHeight - Math.Round(b.ActualWidth * 0.625)) <= 1);
+            if (!sizedAtLoad)
+            {
+                // Measure the flicker anyway (checked below): give the screens their height the
+                // only way the old code did, a width change, then settle again.
+                window.Width = 341; window.UpdateLayout(); window.Width = 340;
+                for (int pass = 0; pass < 40 && Math.Abs(scroll.ExtentHeight - settled) > 0.5; pass++)
+                {
+                    settled = scroll.ExtentHeight;
+                    await Task.Delay(100);
+                    window.UpdateLayout();
+                }
+            }
+            double chrome = window.ActualHeight - scroll.ViewportHeight;
+            double fitHeight = chrome + scroll.ExtentHeight;
+            Program.Check(Math.Round(fitHeight) - 24 >= window.MinHeight,
+                $"The stack's overflow edge ({fitHeight:0.#}) sits above the window's minimum height ({window.MinHeight:0.#}), so a height sweep can cross it");
+
+            var visibility = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(
+                ScrollViewer.ComputedVerticalScrollBarVisibilityProperty, typeof(ScrollViewer));
+            int flips = 0;
+            EventHandler onFlip = (_, _) => flips++;
+            var widths = new HashSet<double>();
+            bool sawBar = false, sawNoBar = false, flickered = false, mismatched = false;
+            for (double height = Math.Round(fitHeight) - 24; height <= Math.Round(fitHeight) + 24; height += 2)
+            {
+                window.Height = height;
+                window.UpdateLayout();
+                await Task.Delay(60);
+                int before = flips;
+                visibility.AddValueChanged(scroll, onFlip);
+                await Task.Delay(250);
+                visibility.RemoveValueChanged(scroll, onFlip);
+                window.UpdateLayout();
+                if (flips != before) flickered = true;
+                bool bar = scroll.ComputedVerticalScrollBarVisibility == Visibility.Visible;
+                if (bar != scroll.ExtentHeight > scroll.ViewportHeight + 0.5) mismatched = true;
+                (bar ? ref sawBar : ref sawNoBar) = true;
+                foreach (var screen in Descendants<Border>(window.StackWorkingList).Where(b => b.Tag is "0.625"))
+                    widths.Add(Math.Round(screen.ActualWidth, 1));
+            }
+            Program.Check(sawBar && sawNoBar, "The height sweep crosses the stack's overflow edge (bar both shown and hidden)"
+                + (sawBar && sawNoBar ? "" : $" [fit {fitHeight:0.#}, chrome {chrome:0.#}, last window {window.ActualHeight:0.#}, viewport {scroll.ViewportHeight:0.#}, extent {scroll.ExtentHeight:0.#}, min {window.MinHeight:0.#}, max {window.MaxHeight:0.#}]"));
+            Program.Check(!flickered, "At every height near the overflow edge the stack's scroll bar holds still instead of flickering");
+            Program.Check(!mismatched, "...and it shows exactly when the cards overflow the stack");
+            Program.Check(widths.Count == 1, "Showing or hiding the stack's scroll bar never resizes a card's screen (widths seen: "
+                + string.Join(", ", widths) + ")");
+            Program.Check(sizedAtLoad, "A working card with no picture yet gets its full screen height (0.625 x width) when it loads");
+        }
+        finally { window.Dispose(); window.Close(); }
+    }
+
+    static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) yield return match;
+            foreach (var nested in Descendants<T>(child)) yield return nested;
+        }
+    }
 
     [Scene("hub")]
     static async Task<FrameworkElement> Hub(SceneContext scene)
@@ -109,7 +232,8 @@ static class HubScenes
         window.ShowWide("shop");
         window.Width = 1200;
         window.Height = 826;
-        window.OpenWorkspaceView!.LoadFixture("shop", @"C:\code\shop",
+        WorkspaceFullView view = window.OpenWorkspaceView!;
+        view.LoadFixture("shop", @"C:\code\shop",
             [("Claude Code", true), ("Codex waiting", false)],
             scene.Site("shop"),
             [
@@ -124,6 +248,7 @@ static class HubScenes
                 ("hero.png", "You · 10:39"),
                 ("test-notes.md", "Claude · 10:31"),
             ]);
+        view.ApplyMemorySample(620UL * 1024 * 1024);
         await scene.Settle();
         return window;
     }
@@ -304,19 +429,12 @@ static class HubScenes
                 "Deleting from a pop-out closes its window");
 
             // --- store/attention events off the UI thread; dispose vs a queued refresh
-            Exception? crossThreadFailure = null;
-            StoredWorkspace? bgWorkspace = null;
-            await Task.Run(() =>
-            {
-                try { bgWorkspace = WorkspaceStore.Create("bg-thread-test"); }
-                catch (Exception ex) { crossThreadFailure = ex; }
-            });
+            StoredWorkspace bgWorkspace = await Task.Run(() => WorkspaceStore.Create("bg-thread-test"));
             await Task.Delay(300);
-            Program.Check(crossThreadFailure is null,
-                "A workspace-store change raised off the UI thread does not throw mutating the hub's collections");
-            Program.Check(bgWorkspace is not null && window.Hub.Asleep.Any(e => e.Id == bgWorkspace.Id),
-                "...and still reaches the hub's Asleep list once dispatched to the UI thread");
-            if (bgWorkspace is not null) WorkspaceStore.Delete(bgWorkspace.Id);
+            Program.Check(window.Hub.Asleep.Any(e => e.Id == bgWorkspace.Id && e.Name == bgWorkspace.Name)
+                && WorkspaceStore.Find(bgWorkspace.Id)?.Name == bgWorkspace.Name,
+                "A workspace created off the UI thread keeps its name on disk and in Recent");
+            WorkspaceStore.Delete(bgWorkspace.Id);
 
             var raceModel = new HubViewModel();
             bool raceThrew = false;
@@ -369,7 +487,15 @@ static class HubScenes
                 "Closing Find restores every workspace and clears the empty-result message");
 
             ScrollViewer stackScroll = previewWindow.StackScroll;
-            previewWindow.UpdateLayout();
+            // Closing Find re-creates the cards, and each screen takes its height when it loads, after
+            // layout. Scroll to the bottom only once the list has stopped growing.
+            double stackExtent = -1;
+            for (int pass = 0; pass < 40 && Math.Abs(stackScroll.ExtentHeight - stackExtent) > 0.5; pass++)
+            {
+                stackExtent = stackScroll.ExtentHeight;
+                await Task.Delay(100);
+                previewWindow.UpdateLayout();
+            }
             Program.Check(stackScroll.ScrollableHeight > 0, "The fixture has enough working cards to make the stack scroll");
             stackScroll.ScrollToVerticalOffset(stackScroll.ScrollableHeight);
             previewWindow.UpdateLayout();
@@ -396,6 +522,9 @@ static class HubScenes
                 "...one second plugged in, two and a half on battery");
         }
         finally { previewWindow.Dispose(); previewWindow.Close(); }
+
+        await ScrollBarNeverReflows();
+        RecentTimeChecks();
 
         // Recent keeps the last eight; an older one is still one search away.
         var longWindow = new MainWindow { ShowActivated = false, Left = SceneContext.OffScreen.X, Top = SceneContext.OffScreen.Y };
@@ -459,12 +588,49 @@ static class HubScenes
             window.ShowWide(idling.Id);
             await Task.Delay(300);
             WorkspaceFullView idleView = window.OpenWorkspaceView!;
+            string memoryPattern = @"^Workspace RAM (\d+ MB|\d+"
+                + Regex.Escape(CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator) + @"\d GB)$";
             Program.Check(idleView.SleepButton.Visibility == Visibility.Visible,
                 "The workspace page offers a Sleep control while its computer is running");
-            Program.Check(idleView.MemoryText.Visibility == Visibility.Visible && idleView.MemoryText.Text.StartsWith("Memory ")
-                && idleView.MemoryText.Text.EndsWith("% in use")
-                && uint.TryParse(idleView.MemoryText.Text["Memory ".Length..^"% in use".Length], out uint shownLoad) && shownLoad <= 100,
-                "The page shows one honest line for what running costs, from WorkspaceRuntime.MemoryLoad");
+            for (DateTime until = DateTime.UtcNow.AddSeconds(8);
+                idleView.MemoryText.Visibility != Visibility.Visible && DateTime.UtcNow < until;)
+            {
+                idleView.RefreshLive();
+                await Task.Delay(50);
+            }
+            Program.Check(idleView.MemoryText.Visibility == Visibility.Visible
+                && Regex.IsMatch(idleView.MemoryText.Text, memoryPattern),
+                "The running page shows this workspace's memory as whole MB or one-decimal GB");
+            Program.Check(idleView.FindName("PcMemoryText") is null
+                && !VisibleWords(window).Contains("% in use", StringComparison.Ordinal),
+                "The workspace page shows no PC-wide memory metric");
+            idleView.ApplyMemorySample(null);
+            Program.Check(idleView.MemoryText.Visibility == Visibility.Collapsed && idleView.MemoryText.Text == "",
+                "A failed workspace sample clears the previous measurement and hides the memory line");
+            idleView.ApplyMemorySample(0);
+            Program.Check(idleView.MemoryText.Visibility == Visibility.Visible
+                && idleView.MemoryText.Text == "Workspace RAM 0 MB",
+                "A real zero-byte workspace sample shows 0 MB and restores the memory line");
+            CultureInfo originalCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                const ulong mb = 1024 * 1024;
+                foreach (var (culture, oneGb, fractionalGb) in new[]
+                {
+                    ("en-US", "Workspace RAM 1.0 GB", "Workspace RAM 1.4 GB"),
+                    ("de-DE", "Workspace RAM 1,0 GB", "Workspace RAM 1,4 GB"),
+                })
+                {
+                    CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(culture);
+                    Program.Check(WorkspaceFullView.FormatWorkspaceMemory(0) == "Workspace RAM 0 MB"
+                        && WorkspaceFullView.FormatWorkspaceMemory(620 * mb) == "Workspace RAM 620 MB"
+                        && WorkspaceFullView.FormatWorkspaceMemory(1024 * mb - 1) == "Workspace RAM 1023 MB"
+                        && WorkspaceFullView.FormatWorkspaceMemory(1024 * mb) == oneGb
+                        && WorkspaceFullView.FormatWorkspaceMemory(1434 * mb) == fractionalGb,
+                        $"Memory units switch at 1024 MB and use the {culture} decimal separator");
+                }
+            }
+            finally { CultureInfo.CurrentCulture = originalCulture; }
             // Checked here, with the Sleep control and the memory line both actually on screen: once
             // it sleeps they collapse, and VisibleWords skips whatever is not visible.
             Program.Check(!VisibleWords(window).Contains("asleep", StringComparison.OrdinalIgnoreCase),
@@ -473,6 +639,7 @@ static class HubScenes
             await ScreenMenuChecks(idleView, idlingRuntime);
 
             BitmapSource? beforeSleep = (BitmapSource?)idleView.ScreenPicture.Source;
+            idleView.RefreshLive();
             idleView.SleepButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Task.Delay(300);
             Program.Check(WorkspaceRuntime.Of(idling.Id) is null, "The Sleep control stops the workspace in one click");
@@ -480,6 +647,8 @@ static class HubScenes
                 "...and the hub moves it from Working to Recent");
             Program.Check(idleView.SleepButton.Visibility == Visibility.Collapsed,
                 "...and the now-sleeping page hides its own Sleep control");
+            Program.Check(idleView.MemoryText.Visibility == Visibility.Collapsed,
+                "A sleeping workspace hides the memory line even when a sample is pending");
             Program.Check(!idleView.ScreenRightDown(new Point(5, 5)) && !idleView.ScreenInput!.Press(new Point(5, 5), true),
                 "A sleeping screen neither opens the desktop menu nor forwards right-clicks");
 

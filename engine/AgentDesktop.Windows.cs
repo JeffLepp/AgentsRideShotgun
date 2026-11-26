@@ -47,6 +47,33 @@ public sealed partial class AgentDesktop
         return moved ? WindowsOnPump() : windows;
     }
 
+    /// <summary>
+    /// The windows a person could see on this desktop, front first: shown, not minimized, and as
+    /// large as <see cref="WindowsOnPump"/> counts. Read without sending any window a message, so it
+    /// costs nothing to take before every launch. Comparing two of these says whether something in
+    /// the workspace appeared, was restored or came forward in between. Null when the pump stalled.
+    /// </summary>
+    internal IReadOnlyList<nint>? Stacking() => Run<IReadOnlyList<nint>>(() =>
+    {
+        var order = new List<nint>();
+        Native.EnumDesktopWindows(_desktop, (handle, _) =>
+        {
+            if (Native.IsWindowVisible(handle) && !Native.IsIconic(handle) && Native.GetWindowRect(handle, out Native.Rect rect)
+                && rect.Right - rect.Left >= 64 && rect.Bottom - rect.Top >= 64)
+                order.Add(handle);
+            return true;
+        }, 0);
+        return order;
+    });
+
+    /// <summary>Every top-level window on this desktop, hidden ones included. Null when the pump stalled.</summary>
+    internal HashSet<nint>? AllWindows() => Run(() =>
+    {
+        var all = new HashSet<nint>();
+        Native.EnumDesktopWindows(_desktop, (handle, _) => { all.Add(handle); return true; }, 0);
+        return all;
+    });
+
     /// <summary>The strip along the bottom of the screen that <see cref="WorkspaceTaskbar"/> covers in
     /// Full desktop: 48 at a 1440-wide screen, as in the mockups. Nothing in Simple.</summary>
     internal static int TaskbarBand => AppSettingsStore.Current.AgentScreen == AgentScreenLook.Full

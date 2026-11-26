@@ -9,12 +9,37 @@ namespace Deskweave.AgentWorkspaces;
 public enum Driver { Nobody, Owner, Agent }
 
 /// <summary>
-/// A copy of a program running outside a workspace, which is why a launch inside it quit at once.
+/// A copy of a program running outside a workspace.
 /// </summary>
 /// <param name="Id">Its process id.</param>
 /// <param name="File">The executable it was started from, or empty when Windows would not say.</param>
-/// <param name="SameFile">It is the very file the workspace tried to start, not another install of it.</param>
-public sealed record WorkspaceCopy(int Id, string File, bool SameFile);
+/// <param name="SameFile">It is the very file the workspace tried to start, not another install of it.
+/// Only such a copy is ever reported as having taken a launch, or offered to the owner for closing.</param>
+/// <param name="Created">When the process started, as a FILETIME, or zero when Windows would not say.
+/// With the id it names one process for good: a later process given the same id does not match.</param>
+public sealed record WorkspaceCopy(int Id, string File, bool SameFile, long Created = 0);
+
+/// <summary>Where a launch that quit without a window of its own went.</summary>
+internal enum LaunchWent
+{
+    /// <summary>Nothing shows where. It may have failed, or handed its work to Windows.</summary>
+    Unknown,
+    /// <summary>Something in this workspace answered it: a copy of the same file running here
+    /// (<see cref="LaunchHandoff.InsideId"/> set), or, with no such copy found, a window here that
+    /// appeared, was restored or came forward as it quit.</summary>
+    Inside,
+    /// <summary>The same file is running outside this workspace, and nothing in here moved.</summary>
+    Outside,
+}
+
+/// <param name="InsideId">The workspace's own copy of the same file, or zero when none was found.</param>
+/// <param name="Outside">The copy outside that took it, when <paramref name="Went"/> is Outside.</param>
+/// <param name="Namesake">A program of the same name from another file, running outside. Never a target:
+/// told to the agent as a fact, never offered to the owner for closing.</param>
+/// <param name="Unreadable">A process of the same name outside every workspace whose file Windows
+/// would not tell. Neither the same program nor another one; never a target.</param>
+internal sealed record LaunchHandoff(LaunchWent Went, int InsideId, WorkspaceCopy? Outside, WorkspaceCopy? Namesake,
+    WorkspaceCopy? Unreadable = null);
 
 /// <summary>
 /// Whether the picture of a workspace is the one on its screen right now. A workspace holding an
@@ -680,9 +705,19 @@ public sealed partial class WorkspaceControl : IDisposable
     /// <param name="group">A command's own nested job, from <see cref="WorkspaceCommands"/>.</param>
     /// <param name="windowless">No console window for a console program, as for a command from run.</param>
     internal int Open(string exe, string? arguments, bool quiet, out string started, WorkspaceProcessGroup? group,
-        bool windowless = false)
+        bool windowless = false) => Open(exe, arguments, quiet, out started, out _, group, windowless);
+
+    /// <param name="before">
+    /// The workspace's visible windows, front first, just before the launch; null for a quiet launch
+    /// or when the desktop did not answer. <see cref="HandedOff"/> compares against it: a launch that
+    /// quit after bringing a window in here forward went to the copy in here, not to one outside.
+    /// </param>
+    /// <inheritdoc cref="Open(string, string?, bool, out string, WorkspaceProcessGroup?, bool)"/>
+    internal int Open(string exe, string? arguments, bool quiet, out string started, out IReadOnlyList<nint>? before,
+        WorkspaceProcessGroup? group = null, bool windowless = false)
     {
         started = exe;
+        before = null;
         if (_requiredLease.Value is { } expected && (expected == 0 || Ticket != expected)) return 0;
         // "notepad" or "chrome" is what a person types into Start; CreateProcess wants the file.
         (exe, arguments) = WorkspacePrograms.Resolve(exe, arguments);
@@ -692,6 +727,10 @@ public sealed partial class WorkspaceControl : IDisposable
             _evidence.Note("open", Path.GetFileName(exe), "refused: Windows shell activation requires the owner's desktop");
             return 0;
         }
+        // Taken before the process exists: a one-copy program signals the copy already running within
+        // milliseconds of starting, so any later picture could already include what it caused.
+        IReadOnlyList<nint>? stacking = quiet ? null : _desktop.Stacking();
+        before = stacking;
         int pid = _desktop.Launch(exe, arguments, _requiredLease.Value ?? 0, group, windowless: windowless);
         Task<Started>? opening = !quiet && pid != 0
             ? Task.Run(() => WindowReady(pid, CancellationToken.None, 10000, TimeSpan.FromMilliseconds(250))) : null;
@@ -700,20 +739,24 @@ public sealed partial class WorkspaceControl : IDisposable
         {
             string detail = Path.GetFileName(exe) + (arguments is null ? "" : " " + arguments);
             Note("open", detail, pid == 0 ? "REFUSED" : "pid " + pid);
-            if (opening is not null) _ = Task.Run(() => WatchOpen(opening, exe, detail));
+            string file = exe;
+            if (opening is not null) _ = Task.Run(() => WatchOpen(opening, pid, file, stacking, detail));
         }
         return pid;
     }
 
-    async Task WatchOpen(Task<Started> opening, string exe, string detail)
+    /// <summary>The activity log's warning, under the same rule as the agent's answer: only a launch
+    /// that really went to the same program outside the workspace is written down as having done so.</summary>
+    async Task WatchOpen(Task<Started> opening, int pid, string exe, IReadOnlyList<nint>? before, string detail)
     {
         try
         {
-            if (await opening.ConfigureAwait(false) == Started.Exited && !_disposed && RunningOutside(exe) is not null)
+            if (await opening.ConfigureAwait(false) == Started.Exited && !_disposed
+                && (await HandedOff(pid, exe, before, CancellationToken.None).ConfigureAwait(false)).Went == LaunchWent.Outside)
                 Note("open", detail, "failed: already running on your desktop, so it opened there");
         }
         catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException
-            or System.ComponentModel.Win32Exception) { }
+            or System.ComponentModel.Win32Exception or OperationCanceledException) { }
     }
 
     internal enum Started { Showing, Starting, Exited }
@@ -738,7 +781,7 @@ public sealed partial class WorkspaceControl : IDisposable
     }
 
     /// <summary>
-    /// The process id of a copy of this program already running outside this workspace, or null.
+    /// Where a launch that quit at once, without a window of its own, went.
     ///
     /// Windows applications are routinely one-per-logon-session, and a workspace desktop is inside
     /// the owner's session: a second launch hands its command line to the copy already running and
@@ -746,94 +789,285 @@ public sealed partial class WorkspaceControl : IDisposable
     /// started and crashed, and an agent told only "it exited" goes looking for a bug in the
     /// application. Measured: asked to open a large WPF app while the owner's was running, the
     /// agent spent its whole mission on that theory and reported the app as broken.
+    ///
+    /// The copy that took it can just as well be one already running in this workspace. Seen in the
+    /// field: a one-copy app running in a workspace was signalled by a second launch and restored its
+    /// own window in here, while the owner's own copy, installed in another folder under the same file
+    /// name, was reported as having taken it and offered to them for closing. So "outside" is said
+    /// only when both hold: nothing in this workspace appeared, was restored or came forward, and the
+    /// very same file is running outside it, with a window on another desktop and none on this one.
+    /// A program of the same name from another file is never the answer, only a fact to mention.
+    ///
+    /// Waits, up to a second, only when there is an outside copy that could be the answer, because a
+    /// signalled copy in here shows its window just after the launch that signalled it has gone.
     /// </summary>
-    /// <summary>
-    /// The owner's one click when a copy of the program they are testing is already running on their own
-    /// desktop: their copy is asked to close, and the program then starts in this workspace, which is
-    /// the only way a one-copy-per-session application can be driven in here at all. Nothing closes
-    /// until they click - this runs from the approval, never from the agent's call. Null when the
-    /// workspace has it; one sentence when it does not.
-    /// </summary>
-    public string? TakeOver(string program, string? arguments)
+    /// <param name="launched">The launch itself, which may linger in the process list after exiting.</param>
+    /// <param name="before">From <see cref="Open(string, string?, bool, out string, out IReadOnlyList{nint}?, WorkspaceProcessGroup?, bool)"/>.</param>
+    internal async Task<LaunchHandoff> HandedOff(int launched, string exe, IReadOnlyList<nint>? before,
+        CancellationToken cancel)
     {
-        (string exe, string? args) = WorkspacePrograms.Resolve(program, arguments);
-        if (RunningOutside(exe) is not null && !CloseOutside(exe))
-            return "The copy of " + Path.GetFileNameWithoutExtension(exe) + " on the owner's desktop would not close;"
-                + " it is probably asking about unsaved work. Close it there and ask again.";
-        int pid = Open(exe, args);
-        return pid == 0 ? "Windows would not start " + program + " in the workspace." : null;
+        Copies found = Survey(exe, launched);
+        LaunchHandoff Result(LaunchWent went, int inside = 0, WorkspaceCopy? outside = null) =>
+            new(went, inside, outside, found.Namesake, found.Unreadable);
+        if (found.InsideId != 0) return Result(LaunchWent.Inside, found.InsideId);
+        // Without a picture from before the launch, nothing here can be shown not to have moved.
+        if (found.Outside is not { } candidate || before is null) return Result(LaunchWent.Unknown);
+        long until = Environment.TickCount64 + HandoffSettleMilliseconds;
+        while (true)
+        {
+            if (_disposed || _desktop.Stacking() is not { } now) return Result(LaunchWent.Unknown);
+            // Something in here answered. No copy of this file runs here (InsideId stays zero), so the
+            // agent is told what was seen, not that a copy of the program took it.
+            if (Moved(before, now)) return Result(LaunchWent.Inside);
+            if (Environment.TickCount64 >= until) break;
+            await Task.Delay(100, cancel).ConfigureAwait(false);
+        }
+        // Asked again after the wait: the copy named has to still be there and still be that process.
+        WorkspaceCopy? outside = Survey(exe, launched) is { InsideId: 0, Outside: { } still }
+            && still.Id == candidate.Id && still.Created == candidate.Created ? still : null;
+        return Result(outside is null ? LaunchWent.Unknown : LaunchWent.Outside, 0, outside);
     }
 
-    /// <summary>Asks every copy outside this workspace to close and waits for it, the way clicking
-    /// its X does. Never kills: an application holding unsaved work is the owner's to decide about.</summary>
-    bool CloseOutside(string exe)
+    const int HandoffSettleMilliseconds = 1000;
+
+    /// <summary>Something in the workspace answered between the two pictures: a window appeared, was
+    /// shown or restored, or the windows on both are no longer in the same front-to-back order.</summary>
+    static bool Moved(IReadOnlyList<nint> before, IReadOnlyList<nint> after)
     {
+        var was = new HashSet<nint>(before);
+        if (after.Any(window => !was.Contains(window))) return true;
+        var still = new HashSet<nint>(after);
+        return !before.Where(still.Contains).SequenceEqual(after);
+    }
+
+    /// <param name="Unreadable">A process of this name outside every workspace whose file Windows would
+    /// not tell: neither the same program nor another one, so never a target and never called a namesake.</param>
+    readonly record struct Copies(int InsideId, WorkspaceCopy? Outside, WorkspaceCopy? Namesake, WorkspaceCopy? Unreadable);
+
+    /// <summary>
+    /// The running processes with this program's file name, sorted by what they are to this
+    /// workspace: its own copy of the same file; the same file outside every ARS workspace with no
+    /// window on any workspace's desktop; another file that merely shares the name; or one whose file
+    /// cannot be read. A process of another workspace is another agent's, and is none of these.
+    /// Among outside copies of the same file, one showing a window is preferred, then one with any
+    /// window (a tray application keeps only hidden ones), then any.
+    /// </summary>
+    Copies Survey(string exe, int launched)
+    {
+        string file = FullFile(exe), name;
+        try { name = Path.GetFileNameWithoutExtension(file); }
+        catch (ArgumentException) { return default; }
+        if (name.Length == 0) return default;
         Process[] running;
-        try { running = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)); }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { return false; }
+        try { running = Process.GetProcessesByName(name); }
+        catch (InvalidOperationException) { return default; }
+        int inside = 0, rank = -1;
+        WorkspaceCopy? outside = null, namesake = null, unreadable = null;
+        HashSet<nint>? workspaces = null;
+        bool unknownWindows = false;
         try
         {
             foreach (Process other in running)
             {
-                if (_desktop.OwnsProcess(other.Id)) continue;
-                try { other.CloseMainWindow(); }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                if (other.Id == launched) continue;
+                Identity identity = IdentityOf(other.Id);
+                if (identity.Gone) continue;
+                bool same = identity.File.Length > 0 && SameFile(identity.File, file);
+                if (_desktop.OwnsProcess(other.Id))
+                {
+                    if (same && inside == 0) inside = other.Id;
+                    continue;
+                }
+                if (OwnedByAnotherWorkspace(other.Id)) continue;
+                if (identity.File.Length == 0 || identity.Created == 0)
+                {
+                    unreadable ??= new WorkspaceCopy(other.Id, "", false, identity.Created);
+                    continue;
+                }
+                if (!same)
+                {
+                    namesake ??= new WorkspaceCopy(other.Id, identity.File, false, identity.Created);
+                    continue;
+                }
+                if (workspaces is null && !unknownWindows)
+                {
+                    workspaces = WorkspaceWindows();
+                    unknownWindows = workspaces is null;
+                }
+                if (workspaces is null) continue;
+                (bool shown, bool any, bool inWorkspace) = WindowsOf(other, workspaces);
+                if (inWorkspace) continue;
+                int score = shown ? 2 : any ? 1 : 0;
+                if (score > rank)
+                {
+                    rank = score;
+                    outside = new WorkspaceCopy(other.Id, identity.File, true, identity.Created);
+                }
             }
         }
         finally { foreach (Process other in running) other.Dispose(); }
-        // This runs on the owner's click, so it is deliberately short: an application that has
-        // nothing to ask about is gone in a few hundred milliseconds, and one that is still up
-        // after three seconds is showing them a dialog, which is theirs to answer, not ours to wait on.
-        for (int waited = 0; waited < 3000; waited += 100)
+        return new(inside, outside, namesake, unreadable);
+    }
+
+    /// <summary>Owned by the job of some other running workspace - another agent's program, never the
+    /// owner's. A workspace that cannot answer counts as owning it, so nothing of it is offered.</summary>
+    bool OwnedByAnotherWorkspace(int processId)
+    {
+        foreach (WorkspaceRuntime runtime in WorkspaceRuntime.Running)
         {
-            if (RunningOutside(exe) is null) return true;
-            Thread.Sleep(100);
+            if (runtime.Computer is not { } desktop || ReferenceEquals(desktop, _desktop)) continue;
+            try { if (desktop.OwnsProcess(processId)) return true; }
+            catch (ObjectDisposedException) { }
         }
         return false;
     }
 
-    public WorkspaceCopy? RunningOutside(string exe)
+    /// <summary>Every top-level window on this workspace's desktop and on every other running
+    /// workspace's, hidden ones included. Null when one of those desktops did not answer.</summary>
+    HashSet<nint>? WorkspaceWindows()
     {
-        string name;
-        try { name = Path.GetFileNameWithoutExtension(exe); }
-        catch (ArgumentException) { return null; }
-        if (name.Length == 0) return null;
-
-        Process[] running;
-        try { running = Process.GetProcessesByName(name); }
-        catch (InvalidOperationException) { return null; }
-        try
+        var all = new HashSet<nint>();
+        var desktops = new List<AgentDesktop> { _desktop };
+        foreach (WorkspaceRuntime runtime in WorkspaceRuntime.Running)
+            if (runtime.Computer is { } desktop && !desktops.Contains(desktop)) desktops.Add(desktop);
+        foreach (AgentDesktop desktop in desktops)
         {
-            WorkspaceCopy? elsewhere = null;
-            foreach (Process other in running)
-            {
-                if (_desktop.OwnsProcess(other.Id)) continue;
-                string file = FileOf(other);
-                // The handoff is keyed on a name the program claims for the whole logon session, not
-                // on where it was installed, so a copy running from another folder takes the launch
-                // just the same. The same file is the certain answer and is taken first; a different
-                // one is still reported, with its path, because the owner has to be told which copy
-                // they are actually looking at.
-                if (file.Length > 0 && file.Equals(exe, StringComparison.OrdinalIgnoreCase))
-                    return new WorkspaceCopy(other.Id, file, true);
-                elsewhere ??= new WorkspaceCopy(other.Id, file, false);
-            }
-            return elsewhere;
+            HashSet<nint>? some;
+            try { some = desktop.AllWindows(); }
+            catch (ObjectDisposedException) { continue; }   // gone, and its windows with it
+            if (some is null) return null;
+            all.UnionWith(some);
         }
-        finally
-        {
-            foreach (Process other in running) other.Dispose();
-        }
+        return all;
     }
 
-    static string FileOf(Process process)
+    /// <summary>Whether a process has a visible top-level window anywhere, any top-level window at all,
+    /// and whether any of its windows, hidden ones too, is in <paramref name="workspaces"/>. By thread,
+    /// so it sees every desktop.</summary>
+    static (bool Shown, bool Any, bool InWorkspace) WindowsOf(Process process, HashSet<nint> workspaces)
     {
-        try { return process.MainModule?.FileName ?? string.Empty; }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception
-            or InvalidOperationException or NotSupportedException)
+        bool shown = false, any = false, inWorkspace = false;
+        try
         {
-            return string.Empty;
+            foreach (ProcessThread thread in process.Threads)
+                using (thread)
+                    Native.EnumThreadWindows(thread.Id, (window, _) =>
+                    {
+                        any = true;
+                        if (workspaces.Contains(window)) inWorkspace = true;
+                        else if (Native.IsWindowVisible(window)) shown = true;
+                        return true;
+                    }, 0);
         }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Unreadable is never a target: report it as in a workspace so nothing is offered for closing.
+            return (shown, any, true);
+        }
+        return (shown, any, inWorkspace);
+    }
+
+    static string FullFile(string exe)
+    {
+        try { return Path.GetFullPath(exe); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return exe; }
+    }
+
+    static bool SameFile(string one, string other) =>
+        string.Equals(FullFile(one), FullFile(other), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The owner's one click when the program they are testing is already running on their own
+    /// desktop and took the workspace's launch: that copy - the one process the request names, never
+    /// everything sharing its name - is asked to close, and the program then starts in this workspace,
+    /// which is the only way a one-copy-per-session application can be driven in here at all. Nothing
+    /// closes until they click - this runs from the approval, never from the agent's call. Null when
+    /// the workspace has it; one sentence when it does not.
+    /// </summary>
+    /// <param name="copyId">The process the request was made about.</param>
+    /// <param name="copyFile">The file that process was running when the request was made.</param>
+    /// <param name="copyCreated">When that process started, as a FILETIME, so a reused id never matches.</param>
+    public string? TakeOver(string program, string? arguments, int copyId, string? copyFile, long copyCreated)
+    {
+        (string exe, string? args) = WorkspacePrograms.Resolve(program, arguments);
+        if (copyId <= 0 || copyCreated == 0 || copyFile is null || !SameFile(copyFile, exe))
+            return "This request does not name the copy of " + program + " to close, so nothing was closed. Ask again.";
+        if (CloseCopy(copyId, copyFile, copyCreated) is { } refused) return refused;
+        int pid = Open(exe, args);
+        return pid == 0 ? "Windows would not start " + program + " in the workspace." : null;
+    }
+
+    /// <summary>Asks one copy to close and waits for it, the way clicking its X does, after checking
+    /// it is still the very process the request named - same file, same start time - outside every
+    /// workspace, with no window on any workspace's desktop. Never kills: an application holding
+    /// unsaved work is the owner's to decide about. Null only when it is gone; anything that cannot be
+    /// confirmed is refused with what was found, never reported as closed.</summary>
+    string? CloseCopy(int id, string file, long created)
+    {
+        string named = Path.GetFileNameWithoutExtension(file) + " (pid " + id + ")";
+        // Held open for the whole close, so the id cannot be handed to another process meanwhile.
+        nint hold = Native.OpenProcess(Native.ProcessQueryLimitedInformation, false, id);
+        if (hold == 0)
+            return System.Runtime.InteropServices.Marshal.GetLastWin32Error() == Native.ErrorInvalidParameter ? null
+                : "Windows would not let ARS look at the copy of " + named + ", so nothing was closed. Close it yourself and ask again.";
+        try
+        {
+            Identity now = IdentityOf(hold, id);
+            if (now.File.Length == 0 || now.Created == 0)
+                return "Windows would not say which program " + named + " is running, so nothing was closed."
+                    + " Close it yourself and ask again.";
+            if (now.Created != created || !SameFile(now.File, file))
+                return "The copy of " + named + " the request was about is no longer running - that process id now"
+                    + " belongs to another program - so nothing was closed. Ask again.";
+            if (_desktop.OwnsProcess(id) || OwnedByAnotherWorkspace(id))
+                return "The copy of " + named + " belongs to an ARS workspace, not to the owner, so nothing was closed.";
+            if (WorkspaceWindows() is not { } workspaces)
+                return "A workspace did not answer, so ARS could not check where " + named + " has its windows; nothing was closed. Ask again.";
+            using Process process = Process.GetProcessById(id);
+            if (WindowsOf(process, workspaces).InWorkspace)
+                return "The copy of " + named + " has a window in an ARS workspace now, so nothing was closed. Ask again.";
+            if (process.HasExited) return null;
+            process.CloseMainWindow();
+            // This runs on the owner's click, so it is deliberately short: an application that has
+            // nothing to ask about is gone in a few hundred milliseconds, and one that is still up
+            // after three seconds is showing them a dialog, which is theirs to answer, not ours to wait on.
+            if (process.WaitForExit(3000)) return null;
+        }
+        catch (ArgumentException) { return null; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        finally { Native.CloseHandle(hold); }
+        return "The copy of " + named + " on the owner's desktop would not close;"
+            + " it may be asking about unsaved work, running elevated, or living in the tray. Close it there and ask again.";
+    }
+
+    /// <param name="Gone">There is no such process any more.</param>
+    /// <param name="File">Its executable, or empty when Windows would not say.</param>
+    /// <param name="Created">When it started, as a FILETIME; zero when Windows would not say.</param>
+    readonly record struct Identity(bool Gone, string File, long Created);
+
+    /// <summary>A probe's stand-in for Windows refusing to name a process's file: an empty string for
+    /// that process id, as an elevated or protected process can answer. Null leaves Windows' answer.</summary>
+    internal static Func<int, string?>? FileForTests { get; set; }
+
+    /// <summary>A process's file and start time under query-limited access - all an elevated copy of
+    /// the owner's grants - rather than through its main module, which needs to read its memory.</summary>
+    static Identity IdentityOf(int id)
+    {
+        nint handle = Native.OpenProcess(Native.ProcessQueryLimitedInformation, false, id);
+        if (handle == 0)
+            return new(System.Runtime.InteropServices.Marshal.GetLastWin32Error() == Native.ErrorInvalidParameter, "", 0);
+        try { return IdentityOf(handle, id); }
+        finally { Native.CloseHandle(handle); }
+    }
+
+    static Identity IdentityOf(nint handle, int id)
+    {
+        var path = new System.Text.StringBuilder(1024);
+        int size = path.Capacity;
+        string file = Native.QueryFullProcessImageNameW(handle, 0, path, ref size) ? path.ToString(0, size) : "";
+        if (FileForTests?.Invoke(id) is { } forced) file = forced;
+        long created = Native.GetProcessTimes(handle, out long started, out _, out _, out _) ? started : 0;
+        return new(false, file, created);
     }
 
     /// <summary>

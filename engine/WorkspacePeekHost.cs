@@ -22,7 +22,9 @@ internal static class WorkspacePeekHost
     static WorkspacePeekHotkey? _pauseKey;
     static DispatcherTimer? _beat;
     static DispatcherTimer? _presentationWatch;
-    static WorkspacePeekDropHook? _dropHook;
+    static WorkspacePeekDropWatch? _dropHook;
+    /// <summary>True while the drag-to-corner watch runs; the probe reads it.</summary>
+    internal static bool DropWatchArmed => _dropHook is not null;
 
     // Every running workspace this module is watching, so it knows which one most recently did
     // something even when neither is the one on screen right now.
@@ -101,7 +103,10 @@ internal static class WorkspacePeekHost
         _pausedAll = false;
         foreach (WorkspaceRuntime runtime in WorkspaceRuntime.Running)
             if (_pausedByUs.Contains(runtime.Id) && runtime.Plane is { Driving: Driver.Owner } plane)
+            {
                 plane.Release();
+                runtime.HeldByPause = false;
+            }
         foreach (string id in _followed.Keys.ToArray()) Unfollow(id);
         _recent.Clear();
         _pausedByUs.Clear();
@@ -205,6 +210,7 @@ internal static class WorkspacePeekHost
         _followed[runtime.Id] = follow;
         if (_pausedAll && runtime.Plane is { Driving: not Driver.Owner } plane)
         {
+            runtime.HeldByPause = true;
             plane.OwnerTakes();
             _pausedByUs.Add(runtime.Id);
         }
@@ -218,6 +224,10 @@ internal static class WorkspacePeekHost
     /// Finds out, off the UI thread, whether a workspace's screen has a window to show, and reconsiders
     /// the corner when that changes. A desktop that does not answer in time keeps its last answer.
     /// </summary>
+    // ponytail: the answer is refreshed only while a workspace is busy (or an agent takes it). A
+    // workspace whose last window closes while idle keeps a stale "shows" answer, so a pinned card,
+    // its tab, or the hub preview can still show an empty screen until the next activity. Upgrade:
+    // also re-check the front workspace at a slower pace while it is idle.
     static void CheckShowable(WorkspaceRuntime runtime)
     {
         string id = runtime.Id;
@@ -263,6 +273,7 @@ internal static class WorkspacePeekHost
         if (_pausedAll && who != Driver.Owner && follow.Runtime.Plane is { } plane)
         {
             _pausedByUs.Add(id);
+            follow.Runtime.HeldByPause = true;
             plane.OwnerTakes();
         }
     }
@@ -288,6 +299,16 @@ internal static class WorkspacePeekHost
         _frontId = id;
     }
 
+    /// <summary>Whether a workspace has something the owner would see, as last checked: a window on
+    /// its screen or a question for them. Unknown counts as nothing.</summary>
+    static bool Shows(WorkspaceRuntime r) => ShowEmptyForTests
+        || _showable.TryGetValue(r.Id, out bool shows) && shows
+        || r.Access?.Handoffs.All.Any(request => request.State == "pending") == true;
+
+    /// <summary>The corner's last answer for whether a workspace has anything on screen; null when
+    /// it has not been checked. The hub uses it to keep a card's last real look over an empty screen.</summary>
+    internal static bool? ShowsSomething(string id) => _showable.TryGetValue(id, out bool shows) ? shows : null;
+
     static bool Busy(WorkspaceRuntime r) => r.Access?.HasDriver == true
         || r.Plane?.Driving == Driver.Owner
         || r.Access?.Handoffs.All.Any(request => request.State == "pending") == true;
@@ -300,7 +321,10 @@ internal static class WorkspacePeekHost
         List<WorkspaceRuntime> ordered = _recent
             .Select(id => _followed.TryGetValue(id, out Follow? f) ? f.Runtime : null)
             .Where(r => r is not null).Select(r => r!).ToList();
+        // A workspace with something to see leads over one doing headless work: otherwise an agent's
+        // command in one workspace would take the card (and its tab) away from a page open in another.
         WorkspaceRuntime? front = all.FirstOrDefault(r => r.Id == _chosenId)
+            ?? ordered.FirstOrDefault(r => Busy(r) && Shows(r)) ?? ordered.FirstOrDefault(Shows)
             ?? ordered.FirstOrDefault(Busy) ?? ordered.FirstOrDefault();
         // Never replace the screen under the owner's pointer or mid-drag when another agent acts.
         // The owner's own pick from the tabs is not another agent acting, so it always wins.
@@ -326,8 +350,8 @@ internal static class WorkspacePeekHost
         bool asking = front?.Access?.Handoffs.All.Any(request => request.State == "pending") == true;
         // Work that would never have put a window on the owner's desktop (a command, the browser
         // warming up) does not bring the corner up either. Unknown yet counts as nothing to show.
-        bool showable = asking || ShowEmptyForTests
-            || front is not null && _showable.TryGetValue(front.Id, out bool shows) && shows;
+        // The owner's own pick from the tabs counts as something to see: it stays until they leave it.
+        bool showable = asking || front is not null && (front.Id == _chosenId || Shows(front));
         bool wanted = WorkspacePeekPolicy.Wanted(_settings.CornerShow, front is not null,
             ModuleEntry.HubShowing && !asking, _dismissed, _summoned, _settings.CornerPinned, held, busy, quiet, fade,
             presentation, _summoned && _explicitSummon, showable);
@@ -349,12 +373,12 @@ internal static class WorkspacePeekHost
         if (front is null || !wanted)
         {
             _window?.HandBackInput();
-            bool dock = front is not null && _settings.CornerShow != CornerShow.Off
-                && (!ModuleEntry.HubShowing || asking);
+            bool dock = WorkspacePeekPolicy.Docked(_settings.CornerShow, front is not null,
+                ModuleEntry.HubShowing, asking, showable);
             if (dock && _window is { } tucked)
             {
                 Layout(tucked, front!, all);
-                tucked.Dock(WorkspaceName(front!));
+                tucked.Dock(front!.DisplayName);
             }
             else _window?.Leave();
             StopBeat();
@@ -374,7 +398,7 @@ internal static class WorkspacePeekHost
         window.SetPinned(_settings.CornerPinned);
 
         (string message, PeekTone tone) = Status(front);
-        window.Describe(WorkspaceName(front), message, tone);
+        window.Describe(front.DisplayName, message, tone);
         window.SetActive(front.Access?.HasDriver == true);
 
         UpdateResultChip(window, front);
@@ -393,7 +417,7 @@ internal static class WorkspacePeekHost
         if (grown) _lastGrownWidth = card.Width;
         if (!window.Manipulating && !window.Sliding)
         {
-            window.SetTabs([.. all.Select(r => new PeekTab(r.Id, WorkspaceName(r), Status(r).Tone, r.Id == front.Id))]);
+            window.SetTabs([.. all.Select(r => new PeekTab(r.Id, r.DisplayName, Status(r).Tone, r.Id == front.Id))]);
             window.Configure(card, grown, !grown && _lastGrownWidth is not null);
             // Saved positions describe the front card, not the union with the tab strip above it -
             // so the box that has to fit on the monitor is the one the strip is part of, or a card
@@ -479,7 +503,7 @@ internal static class WorkspacePeekHost
         if (_frontId is not { } id || !_followed.TryGetValue(id, out Follow? f) || f.Runtime.Plane is not { } plane) return;
         string folder = plane.Folder;
         if (folder.Length == 0) return;
-        string name = WorkspaceName(f.Runtime);
+        string name = f.Runtime.DisplayName;
         List<string> failed = await Task.Run(() => CopyInto(folder, paths));
         if (failed.Count > 0) CopyFailed(name, failed);
     }
@@ -609,7 +633,9 @@ internal static class WorkspacePeekHost
     /// own sentence rather than a target worded to survive somebody else's.</summary>
     static string Question(WorkspaceHandoff request) => request.Kind switch
     {
-        "takeover" => "Close your copy of " + request.Target + " and start it in the workspace?",
+        // The one process approving closes, so the owner can tell which of their copies it is.
+        "takeover" => "Close your copy of " + request.Target + " and start it in the workspace?"
+            + (request.CopyFile is { } copy ? "\n" + copy + " (pid " + request.CopyId + ")" : ""),
         "file" => "Open " + Path.GetFileName(request.Target) + " on your desktop?",
         // A program runs with whatever command line came with it, so they see all of it, and why.
         "program" => "Open this on your desktop?\n" + CommandLine(request) + "\nWhy: " + request.Reason,
@@ -633,8 +659,6 @@ internal static class WorkspacePeekHost
             return (AgentName(r) + " wants you", PeekTone.Attention);
         return (AgentName(r), r.Access?.HasDriver == true ? PeekTone.Working : PeekTone.Quiet);
     }
-
-    static string WorkspaceName(WorkspaceRuntime r) => WorkspaceStore.Find(r.Id)?.Name ?? "Workspace";
 
     /// <summary>What an external agent calls itself, as the app always shows it.</summary>
     static string AgentName(WorkspaceRuntime r) =>
@@ -755,14 +779,15 @@ internal static class WorkspacePeekHost
     static void StartDropHookIfIdle()
     {
         // The hub hides the corner, so a drag toward it would summon nothing: no global hook then.
-        if (ModuleEntry.HubShowing) { StopDropHook(); return; }
+        // The hub hides the corner, so a drag toward it would summon nothing: no watch then. Nor when
+        // the owner turned drag-to-open off in Settings.
+        // Corner Off, or nothing running, stops one already watching too: it polls only while needed.
+        if (ModuleEntry.HubShowing || !_settings.CornerDragOpens || _settings.CornerShow == CornerShow.Off
+            || Pick().Front is null) { StopDropHook(); return; }
         if (_dropHook is not null || !_started || _owner is not { } owner) return;
-        if (_settings.CornerShow == CornerShow.Off) return;
         if (_window is { Watching: true }) return;
-        if (Pick().Front is null) return;
-        // The hook runs on this thread inside the mouse's own delivery, which Windows cuts off if it
-        // takes long. Building and showing the window happens after it returns, never inside it.
-        _dropHook = new WorkspacePeekDropHook(TargetScreenRect, () => owner.BeginInvoke(Summon));
+        // The watch runs on its own thread: building and showing the window is posted here.
+        _dropHook = new WorkspacePeekDropWatch(TargetScreenRect, () => owner.BeginInvoke(Summon));
     }
 
     static void StopDropHook()
@@ -890,6 +915,7 @@ internal static class WorkspacePeekHost
             foreach (WorkspaceRuntime r in WorkspaceRuntime.Running)
             {
                 if (r.Plane is not { } plane || plane.Driving == Driver.Owner) continue;
+                r.HeldByPause = true;
                 plane.OwnerTakes();
                 _pausedByUs.Add(r.Id);
             }
@@ -897,7 +923,11 @@ internal static class WorkspacePeekHost
         else
         {
             foreach (WorkspaceRuntime r in WorkspaceRuntime.Running)
-                if (_pausedByUs.Contains(r.Id) && r.Plane is { Driving: Driver.Owner } plane) plane.Release();
+                if (_pausedByUs.Contains(r.Id) && r.Plane is { Driving: Driver.Owner } plane)
+                {
+                    plane.Release();
+                    r.HeldByPause = false;
+                }
             _pausedByUs.Clear();
         }
         ModuleEntry.AllPaused = _pausedAll;

@@ -148,6 +148,12 @@ public sealed class WorkspaceCommands : IDisposable
         get { lock (_gate) return (_jobs.Any(job => job.Ended is null), _lastActive); }
     }
 
+    /// <summary>When an agent last started a command, on the Environment.TickCount64 clock, or 0.
+    /// Unlike <see cref="Activity"/>, a command ending on its own (a dev server dying long after the
+    /// agent left) is not someone using the workspace, so Recent does not count it.</summary>
+    internal long LastStarted { get { lock (_gate) return _lastStarted; } }
+    long _lastStarted;
+
     public CommandJob? Find(string id)
     {
         if (id.Trim().Length == 0) return null;
@@ -233,7 +239,7 @@ public sealed class WorkspaceCommands : IDisposable
         lock (_gate)
         {
             _jobs.Add(job);
-            _lastActive = Environment.TickCount64;
+            _lastActive = _lastStarted = Environment.TickCount64;
             Reap();
         }
         _control.Evidence.Note("run", job.Id + " " + Short(command), "started, pid " + pid

@@ -91,6 +91,11 @@ static class Updates
     {
         if (WorkspaceRuntime.AnyRunning)
             return "Deferred: save work, close workspace apps, then stop each running workspace. ARS will retry automatically.";
+        return MaintenanceProcessReason();
+    }
+
+    internal static string MaintenanceProcessReason()
+    {
         string other = OtherControllerReason();
         if (other.Length > 0) return other;
         // Legacy clients can still run from current/. Do not let the updater terminate their MCP transport.

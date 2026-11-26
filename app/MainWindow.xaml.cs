@@ -510,9 +510,20 @@ public partial class MainWindow : Window, IDisposable
                 if (!ShouldCapture(entry)) continue;
                 WorkspaceControl? plane = WorkspaceRuntime.Of(entry.Id)?.Plane;
                 if (plane is null) continue;
+                // A desktop with nothing on it (a headless command, the warm browser) would replace
+                // the card's last real look with an empty screen. Keep the last look. The corner's
+                // cached answer, so this costs nothing per tick.
+                // ponytail: only the collapsed card keeps its last look. Opening the card (WorkspaceInlineView)
+                // or the workspace page still shows the live empty screen; both are opened by the owner, so
+                // that is honest, but a "last look" label there would be clearer. Not covered by a probe:
+                // the hub fixture has no real workspace plane.
+                if (WorkspacePeekHost.ShowsSomething(entry.Id) == false) continue;
                 BitmapSource? frame = await Task.Run(() =>
                 {
-                    try { BitmapSource? shot = plane.Frame(); if (shot is not null && !shot.IsFrozen) shot.Freeze(); return shot; }
+                    try
+                    {
+                        BitmapSource? shot = plane.Frame(); if (shot is not null && !shot.IsFrozen) shot.Freeze(); return shot;
+                    }
                     catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or System.ComponentModel.Win32Exception) { return null; }
                 });
                 if (_disposed || generation != _previewGeneration) break;
@@ -577,7 +588,11 @@ public partial class MainWindow : Window, IDisposable
             if (border.ActualWidth > 0 && border.ActualHeight > 0)
                 border.Clip = new RectangleGeometry(new Rect(0, 0, border.ActualWidth, border.ActualHeight), radius, radius);
         }
-        border.SizeChanged += (_, args) => { if (args.WidthChanged) border.Height = Math.Round(border.ActualWidth * ratio); Reclip(); };
+        void Fit() { if (border.ActualWidth > 0) border.Height = Math.Round(border.ActualWidth * ratio); }
+        border.SizeChanged += (_, args) => { if (args.WidthChanged) Fit(); Reclip(); };
+        // Sized now, not only on the next width change: a card with no picture yet would otherwise
+        // stay collapsed until something (it used to be the scroll bar appearing) changed its width.
+        Fit();
         Reclip();
     }
 

@@ -9,6 +9,11 @@ one. Hosted startup skips Velopack, updater, Windows startup registration and
 automatic provider-configuration maintenance. Hosted Settings identifies Windows
 startup as managed by HiveMind and cannot write the ARS Run key.
 
+To review a newer standalone build, save workspace work and use **Quit ARS** in
+the tray before running the standalone installer. Open ARS from its normal
+shortcut before opening Computer Workspaces in HiveMind. HiveMind attaches to
+that controller when it is already running.
+
 Authenticated owner clients use `deskweave/owner` protocol 1 for snapshot, show,
 private frame and external-client admission. Admission is checked against the
 canonical controller's actual workspace jobs; relays supply the kernel pipe peer
@@ -72,18 +77,40 @@ sign them out before maintenance; ARS does not bypass an unknown live controller
 
 ## Bridge lifetime and replacement
 
-Each bridge watches its immediate MCP parent's actual process handle (including
-creation time to reject PID reuse), stdin EOF, and the canonical owner-quit mark.
-The parent handle requests only synchronization and limited process information.
-If that handle cannot be opened, a diagnostic is written to stderr and stdin EOF
-still ends the bridge. Uninstall writes the quit mark and checks connection
-ownership without materializing another bridge payload.
-Stdin reads continue during startup and pipe backpressure; at most 16 requests
-are buffered. Disconnect permits a 250 ms drain, then ends the process even if
-the controller is blocked. Parent death exits immediately. A normal owner Quit
-ends existing router/per-workspace bridges even when their stdin remains open.
-After explicit Quit, reconnect MCP after opening ARS again. The old behavior of
-keeping an empty bridge resident until ARS reopens is intentionally removed.
+A bridge lives exactly as long as its MCP client. It ends only on stdin EOF, a
+failed client stream, or the death of its immediate MCP parent (watched through the
+parent's actual process handle, including creation time to reject PID reuse). The
+parent handle requests only synchronization and limited process information. If
+that handle cannot be opened, a diagnostic is written to stderr and stdin EOF
+still ends the bridge. Disconnect permits a 250 ms drain, then ends the process
+even if the controller is blocked. Parent death exits immediately.
+
+Nothing on the ARS side ends a bridge: not owner Quit, restart, update or crash,
+not a pipe error, not ARS being unreachable when the bridge starts. An oversized
+request (over 1 MB), a request past the 16-request backlog, or an unexpected
+failure while forwarding is answered for that one request id (an `isError` tool
+result for `tools/call`, a JSON-RPC error otherwise). While ARS cannot be reached
+the bridge answers `initialize` and `tools/list` from its built-in copy of the
+router's replies (`engine/Bridge/offline.json`), sends
+`notifications/tools/list_changed` once the real list is back, and answers each
+tool call with `isError` text:
+
+- No quit mark (restarting, crashed, updating, not yet started): "ARS is
+  restarting. Retry this call in a few seconds." A tool call may start the
+  canonical install in the tray (`ARS.exe --background`) as before; the next call
+  reconnects and the router wakes a stopped or slept workspace on its first call.
+- Owner quit mark present: "The owner turned ARS off, so it will not come back on
+  its own. Ask the user before doing this work another way." The bridge never
+  starts ARS then, but stays connected; when the owner opens ARS again (which
+  clears the mark) the next call reaches it without an MCP refresh.
+
+No text invites the agent to do workspace work with its own tools. Uninstall
+writes the quit mark and checks connection ownership without materializing
+another bridge payload; bridges still attached keep their sessions until their
+clients exit and answer with the turned-off text.
+On the ARS side, a timeout or other failure inside one tool that is not the
+caller's own cancel fails that call only; the pipe connection stays up, and a
+request past 16 waiting on one connection is refused in order instead of closing it.
 
 Product-managed MCP configurations now point to an immutable, content-addressed
 self-contained bridge under `%LOCALAPPDATA%/ARS/bridge-hosts/`. The app verifies
@@ -127,8 +154,12 @@ Workspace/profile data lives separately and is not part of the payload archive.
 ## Verification boundary
 
 `Deskweave.Probe --bridge-lifetime OUTPUT` tests EOF during a live connection and
-a stalled handshake, parent death with stdin held by a different process, normal
-quit, detached-host source locks, maintenance admission, and ticket reconnection.
+a stalled handshake, parent death with stdin held by a different process, a bridge
+surviving owner quit and reconnecting when ARS reopens, restart/closed-at-startup
+answers, oversized and backlogged requests, the offline copy matching the router,
+detached-host source locks, maintenance admission, and ticket reconnection.
+After changing the tools or `RouterInstructions`, regenerate the bridge's copy with
+`Deskweave.Probe --bridge-offline-json ABSOLUTE_PATH/engine/Bridge/offline.json`.
 The existing engine router tests also run. The Minecraft preview contract suite
 remains `--minecraft-preview-checks OUTPUT` (13 checks).
 

@@ -54,28 +54,57 @@ public sealed partial class WorkspaceControl
                     return Rejected($"Control {action.Control} is not known. Number the controls again with controls or marks.");
             }
             string? missed = null;
-            ComputerReceipt receipt = await WorkspaceComputer.Execute(request.Actions, ownsLease, async action =>
+            var effects = new List<WindowEffect>();
+            bool lastMeasured = false;
+            ComputerReceipt receipt = await WorkspaceComputer.Execute(request.Actions, ownsLease, async (action, index) =>
             {
+                lastMeasured = false;
                 if (!ownsLease() || input.IsCancellationRequested) return false;
                 if (action.Control > 0)
                 {
-                    bool hit = AtControl(action, ticket, ref missed);
+                    bool hit = AtControl(action, ticket, ref missed, out var aimed, out int aimedY);
+                    if (aimed is { } before)
+                    {
+                        effects.Add(await Effect(index, action.Type, before, aimedY, input.Token).ConfigureAwait(false));
+                        lastMeasured = true;
+                    }
                     if (hit) PresentBrowser(false);
                     return hit;
                 }
                 // Back into the coordinates the desktop and the browser use, immediately before the
                 // action goes out - never in the receipt, which stays in the model's own space.
                 ComputerAction placed = WorkspaceMarks.ToSource(action, scale);
+                // A drag or a double-click can move, resize or maximize the window it lands on - or,
+                // on a title bar, fail to, which is the case an agent most needs told. Where the
+                // window was is read before the input goes out, and compared once it has settled.
+                (int X, int Y)? start = browser is not null ? null : placed.Type switch
+                {
+                    "drag" => (placed.Path![0].X, placed.Path[0].Y),
+                    "double_click" => (placed.X, placed.Y),
+                    _ => null,
+                };
+                var window = start is { } point ? _desktop.TopWindowAt(point.X, point.Y) : null;
                 // Pin the browser instance for the whole group. Never redirect queued input to a replacement.
                 bool sent = browser is not null
                     ? ReferenceEquals(browser, _browser) && await browser.ComputerInput(placed, input.Token).ConfigureAwait(false)
                     : _desktop.ComputerInput(placed, ticket);
+                if (window is { } aimedAt)
+                {
+                    effects.Add(await Effect(index, action.Type, aimedAt, start!.Value.Y, input.Token).ConfigureAwait(false));
+                    lastMeasured = true;
+                }
                 if (sent) PresentBrowser(browser?.UsesOwnerSession == true);
                 _evidence.Note("computer." + action.Type, request.Target, sent ? "input delivered; verify outcome" : "not confirmed; do not replay");
                 return sent;
             }, input.Token).ConfigureAwait(false);
             if (missed is not null && receipt.Status == "interrupted")
                 receipt = receipt with { Reason = missed + " " + receipt.Reason };
+            if (effects.Count > 0)
+                receipt = receipt with
+                {
+                    Reason = receipt.Reason + " " + string.Join(" ", effects.Select(effect => effect.Sentence())),
+                    Effects = effects,
+                };
 
             BitmapSource? frame = null;
             if (request.Screenshot && ownsLease() && !input.IsCancellationRequested)
@@ -83,9 +112,10 @@ public sealed partial class WorkspaceControl
                 PresentBrowser(browser?.UsesOwnerSession == true);
                 // An app is often busy for a beat right after it is clicked. Waiting that beat out
                 // here is free; a picture of its last frame costs the agent another look.
+                // A drag or double-click that was just measured has already had its beat in Effect.
                 if (browser is null)
-                    await Settle(0, input.Token, afterInput: receipt.Completed.Any(done => done is not ("wait" or "screenshot")))
-                        .ConfigureAwait(false);
+                    await Settle(0, input.Token, afterInput: !lastMeasured
+                        && receipt.Completed.Any(done => done is not ("wait" or "screenshot"))).ConfigureAwait(false);
                 // One evidence frame and one model image per group. Screenshots are optional for text-only work.
                 try
                 {
@@ -124,9 +154,14 @@ public sealed partial class WorkspaceControl
     /// than the control the number names. Anything the tree cannot press, and every other kind of
     /// pointer action, goes to the control's centre the ordinary way.
     /// </summary>
-    bool AtControl(ComputerAction action, long ticket, ref string? missed)
+    /// <param name="aimed">For a double-click, the top-level window under the control before it went out,
+    /// so the caller can say what it did to that window; <paramref name="aimedY"/> is where it was aimed.</param>
+    bool AtControl(ComputerAction action, long ticket, ref string? missed,
+        out (nint Window, string Title, WindowBox Box)? aimed, out int aimedY)
     {
+        aimed = null;
         (int x, int y, bool wpf, string? why) = _tree.Where(action.Control);
+        aimedY = y;
         if (why is not null)
         {
             missed = why;
@@ -148,9 +183,47 @@ public sealed partial class WorkspaceControl
                 return false;
             }
         }
+        if (action.Type == "double_click") aimed = _desktop.TopWindowAt(x, y);
         bool sent = _desktop.ComputerInput(action with { X = x, Y = y }, ticket);
         _evidence.Note("computer." + action.Type, $"control {action.Control} at ({x},{y})",
             sent ? "input delivered; verify outcome" : "not confirmed; do not replay");
         return sent;
+    }
+
+    /// <summary>
+    /// How long a drag or double-click's window is watched for a change. Input goes out by
+    /// SendMessage, so whatever the app does inside its handler (a maximize, a move) is already done
+    /// when the action returns; this covers an app that posts the change to itself instead. It ends
+    /// as soon as the window changes, so it costs the full wait only when nothing happened - and that
+    /// wait stands in for the screenshot's own input beat (<see cref="InputBeatMilliseconds"/>).
+    /// </summary>
+    const int EffectWatchMilliseconds = 150, EffectPollMilliseconds = 25;
+
+    /// <summary>What one drag or double-click did to the top-level window it landed on.</summary>
+    async Task<WindowEffect> Effect(int index, string type, (nint Window, string Title, WindowBox Box) before,
+        int startY, CancellationToken cancel)
+    {
+        (bool known, WindowBox? after) = _desktop.WindowBoxOf(before.Window);
+        try
+        {
+            long until = Environment.TickCount64 + EffectWatchMilliseconds;
+            while (known && after == before.Box && Environment.TickCount64 < until)
+            {
+                await Task.Delay(EffectPollMilliseconds, cancel).ConfigureAwait(false);
+                (known, after) = _desktop.WindowBoxOf(before.Window);
+            }
+            // Changed: one more beat, so a maximize or a move that lands in steps is reported where it ends.
+            if (known && after is not null && after != before.Box)
+            {
+                await Task.Delay(EffectPollMilliseconds * 2, cancel).ConfigureAwait(false);
+                (bool again, WindowBox? settled) = _desktop.WindowBoxOf(before.Window);
+                if (again) after = settled;
+            }
+        }
+        catch (OperationCanceledException) { }
+        // The top strip, where a title bar - native or drawn by the app - usually is.
+        bool nearTop = startY - before.Box.Y < Math.Min(80, Math.Max(1, before.Box.Height / 4));
+        return new WindowEffect(index, type, before.Window, before.Title, before.Box,
+            known ? after : null, Closed: known && after is null, NearTop: nearTop);
     }
 }

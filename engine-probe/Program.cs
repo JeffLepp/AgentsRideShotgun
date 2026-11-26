@@ -24,11 +24,15 @@ internal static class Program
 
     static int RunMain(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--memory-fixture") return WorkspaceMemoryProbe.Fixture(args[1]);
         if (args.Length == 2 && args[0] == "--browser-capture-diagnostic") return BrowserCaptureDiagnostic.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--storage-snapshot") return StorageSnapshot.Run(Path.GetFullPath(args[1]));
         if (args.Length == 4 && args[0] == "--isolate-suite")
             return IsolatedSuite.Run(Path.GetFullPath(args[1]), args[2], Path.GetFullPath(args[3]));
         if (args.Length == 3 && args[0] == "--bridge-parent") return BridgeLifetime.Parent(args[1], args[2]);
+        // Writes the bridge's offline initialize/tools/list copy (engine/Bridge/offline.json). No desktop, no router.
+        if (args.Length == 2 && args[0] == "--bridge-offline-json")
+        { File.WriteAllText(Path.GetFullPath(args[1]), WorkspaceRouter.OfflineCopy()); return 0; }
         if (args.Length == 2 && args[0] == "--bridge-lifetime") return BridgeLifetime.Run(Path.GetFullPath(args[1]));
         if (args.Length == 3 && args[0] == "--router-owned-client")
             return RouterStartup.OwnedClient(args[1], args[2]);
@@ -62,6 +66,8 @@ internal static class Program
         if (args.Length > 0 && args[0] == "mcp") return FirstRunConnections.Cli(args);
         if (args.Length == 3 && args[0] == "--render-mode-child") return RenderModeProbe.Child(args[1], args[2]);
         if (args.Length == 3 && args[0] == "--popout-fixture") return PopOutProbe.Fixture(args[1], args[2]);
+        if (args.Length is 3 or 4 && args[0] == "--one-copy-fixture")
+            return OpenRouteProbe.OneCopy(args[1], args[2], tray: args.Length == 4 && args[3] == "tray");
         // One probe at a time on this PC (see ui-probe); child modes above never wait for it.
         if (args.Length == 2 && args[0] == "--minecraft-live-preview" && Path.IsPathFullyQualified(args[1]))
             return MinecraftLivePreview.Run(Path.GetFullPath(args[1]));
@@ -121,6 +127,8 @@ internal static class Program
             return ToolHangs.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--quiet-work" && Path.IsPathFullyQualified(args[1]))
             return QuietWork.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--window-effect" && Path.IsPathFullyQualified(args[1]))
+            return WindowEffectProbe.Run(Path.GetFullPath(args[1]));
         if (args.Length != 1 || !Path.IsPathFullyQualified(args[0])) return 2;
         return Run(Path.GetFullPath(args[0]));
     }
@@ -290,11 +298,13 @@ internal static class Program
             ProjectRouting.Run(Check, output);
             RenderModeProbe.Run(Check, output);
             HandleInheritance.Run(Check, output);
+            WorkspaceMemoryProbe.Run(Check, output);
             SleepGate.Run(Check, output);
             PrewarmProbe.Run(Check);
             OpenRouteProbe.Run(Check);
             PopOutProbe.Run(Check, Path.Combine(fixture, "popout"));
             QuietWork.Run(Check);
+            WindowEffectProbe.Run(Check, output);
             BridgeQuit.Run(Check, fixture);
         }
         catch (Exception ex) { failure = ex.ToString(); }

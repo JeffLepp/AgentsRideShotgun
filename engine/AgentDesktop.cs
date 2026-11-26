@@ -173,6 +173,22 @@ public sealed partial class AgentDesktop : IDisposable
     internal bool OwnsProcess(int processId) => _limits?.Owns(processId) == true
         || _browserLimits?.Owns(processId) == true;
 
+    /// <summary>Sum of resident private memory in this workspace's application and browser jobs.
+    /// Null if sampling fails; exited processes are skipped. Call off the UI thread.</summary>
+    public ulong? PrivateWorkingSetBytes()
+    {
+        WorkspaceLimits? applications, browser;
+        lock (_lifecycle)
+        {
+            if (_disposed) return null;
+            applications = _limits;
+            browser = _browserLimits;
+        }
+        HashSet<int> seen = [];
+        return (applications is null ? 0UL : applications.PrivateWorkingSetBytes(seen))
+            + (browser is null ? 0UL : browser.PrivateWorkingSetBytes(seen));
+    }
+
     /// <summary>
     /// Binds to the desktop this process is already running on. This is how a tool launched into a
     /// workspace sees and drives that workspace: it is already there, so it opens nothing new.

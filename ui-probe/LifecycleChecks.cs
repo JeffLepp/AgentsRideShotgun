@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Windows;
@@ -88,6 +89,27 @@ static class LifecycleChecks
         using (var running = new Mutex(false, name)) besideRunning = Deskweave.Program.ApplyUpdateOnStart([], name);
         Program.Check(ownerStart && !bridgeStart && !besideRunning,
             "Updates apply on the owner's start only, not on a background start or beside a running ARS");
+        var legacyStart = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "Bridge", "ARS.WorkspaceBridge.exe"))
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+        };
+        legacyStart.ArgumentList.Add("--workspace");
+        legacyStart.ArgumentList.Add(Path.Combine(Program.Output, "offline-legacy-bridge.json"));
+        using (Process legacy = Process.Start(legacyStart) ?? throw new IOException("Could not start the legacy bridge fixture."))
+        {
+            try
+            {
+                Program.Check(!Deskweave.Program.ApplyUpdateOnStart([], name) && Updates.DeferredReason().Contains("legacy bridge"),
+                    "Startup and the tray both defer updates while a bridge runs from the installed payload");
+            }
+            finally
+            {
+                legacy.StandardInput.Close();
+                if (!legacy.WaitForExit(10000)) legacy.Kill();
+            }
+        }
 
         // No windows or real restart: exercise the production request/defer/retry transaction.
         int scheduled = 0, shutdown = 0;
