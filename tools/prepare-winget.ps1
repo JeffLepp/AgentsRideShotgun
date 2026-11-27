@@ -48,15 +48,15 @@ if (Test-Path -LiteralPath $manifestDir) { throw "Manifest already exists: $mani
 [IO.Directory]::CreateDirectory($manifestDir) | Out-Null
 
 $versionManifest = @'
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.28.0.schema.json
 PackageIdentifier: JeffLepp.AgentsRideShotgun
 PackageVersion: __VERSION__
 DefaultLocale: en-US
 ManifestType: version
-ManifestVersion: 1.12.0
+ManifestVersion: 1.28.0
 '@
 $installerManifest = @'
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.28.0.schema.json
 PackageIdentifier: JeffLepp.AgentsRideShotgun
 PackageVersion: __VERSION__
 InstallerType: exe
@@ -72,10 +72,10 @@ Installers:
     InstallerSha256: __HASH__
     ProductCode: ARSApp
 ManifestType: installer
-ManifestVersion: 1.12.0
+ManifestVersion: 1.28.0
 '@
 $localeManifest = @'
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.28.0.schema.json
 PackageIdentifier: JeffLepp.AgentsRideShotgun
 PackageVersion: __VERSION__
 PackageLocale: en-US
@@ -105,7 +105,7 @@ Tags:
   - virtual-desktop
 ReleaseNotesUrl: __PACKAGE_URL__/releases/tag/__TAG__
 ManifestType: defaultLocale
-ManifestVersion: 1.12.0
+ManifestVersion: 1.28.0
 '@
 $versionManifest = $versionManifest.Replace('__VERSION__', $Version)
 $installerManifest = $installerManifest.Replace('__VERSION__', $Version).Replace('__URL__', $installerUrl).Replace('__HASH__', $hash).Replace('__DATE__', [DateTime]::UtcNow.ToString('yyyy-MM-dd'))
