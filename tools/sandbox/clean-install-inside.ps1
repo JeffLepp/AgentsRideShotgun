@@ -258,8 +258,10 @@ public static class InstallerProviderFixture {
     $session.StandardInput.Close()
     Check ($session.WaitForExit(10000) -and $session.ExitCode -eq 0) 'The bridge exits cleanly once its agent disconnects'
     $session.Dispose(); $session = $null
-    Start-Sleep -Seconds 3
-    Check (-not (Test-Path $app)) 'Uninstall removes the app'
+    $installRoot = Split-Path -Parent $update
+    # Velopack schedules removal of Update.exe and the install directory after it exits.
+    # Reinstall only after that cleanup can no longer remove the new files.
+    Check (WaitFor { -not (Test-Path -LiteralPath $installRoot) } 45) 'Uninstall removes the app and its installation directory'
     Check (-not (Test-Path $uninstallKey)) 'Uninstall removes the Apps & features entry'
     $left = @(Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*.lnk' | Where-Object { $_.Name -clike 'ARS*' })
     Check ($left.Count -eq 0) 'Uninstall removes the Start menu shortcut'
@@ -275,9 +277,10 @@ public static class InstallerProviderFixture {
 
     # --- reinstall, then Settings > Uninstall ARS --------------------------------------------
     # The same steps the Settings row takes: quit, delete both data folders, run Update.exe.
-    $setup = Start-Process -FilePath $installer -ArgumentList '--silent' -PassThru -WindowStyle Hidden
+    $setup = Start-Process -FilePath $installer -ArgumentList ('--silent --log "' + (Join-Path $results 'reinstall.log') + '"') -PassThru -WindowStyle Hidden
     $null = $setup.Handle
     Check ($setup.WaitForExit(300000) -and $setup.ExitCode -eq 0) 'Reinstalling over kept data succeeds'
+    Check ((Test-Path -LiteralPath $app) -and (Test-Path -LiteralPath $update)) 'Reinstall restores the app and its uninstaller'
     $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30
     if (-not $started) { Start-Process $app -WindowStyle Hidden; $started = WaitFor { @(Get-Process ARS -ErrorAction SilentlyContinue).Count -gt 0 } 30 }
     Check $started 'ARS starts after the reinstall'
@@ -289,7 +292,7 @@ public static class InstallerProviderFixture {
     $un = Start-Process -FilePath $update -ArgumentList 'uninstall', '--silent' -PassThru -WindowStyle Hidden
     $null = $un.Handle
     Check ($un.WaitForExit(120000) -and $un.ExitCode -eq 0) 'Full uninstall returns success'
-    Start-Sleep -Seconds 5
+    Check (WaitFor { -not (Test-Path -LiteralPath $installRoot) } 45) 'Full uninstall removes the installation directory'
     $leftovers = @(
         @($local, $env:APPDATA, $env:TEMP, "$env:APPDATA\Microsoft\Windows\Start Menu\Programs", "$env:USERPROFILE\Desktop") |
             Where-Object { Test-Path $_ } |
@@ -303,7 +306,10 @@ public static class InstallerProviderFixture {
     Check ($null -eq (Get-Content -Raw -LiteralPath $providerConfig | ConvertFrom-Json).mcpServers.ars) 'Full uninstall disconnects the agent'
     Check (@(Get-Process ARS, ARS.WorkspaceBridge -ErrorAction SilentlyContinue).Count -eq 0) 'No ARS process is left running'
 }
-catch { $failure = $_.ToString() }
+catch {
+    $failure = $_.ToString()
+    $report.failureLocation = $_.ScriptStackTrace
+}
 finally {
     if ($null -ne $session) {
         try { if (-not $session.HasExited) { $session.Kill(); $session.WaitForExit(10000) | Out-Null } } catch { }
